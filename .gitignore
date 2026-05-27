@@ -1,0 +1,57 @@
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# ── Environments ──────────────────────────────────────────────
+.env
+.env.local
+.env.production
+.venv/
+venv/
+env/
+ENV/
+
+# ── Testing ───────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+*.test.db
+
+# ── Secrets — NEVER commit these ──────────────────────────────
+*.pem
+*.key
+*.crt
+secrets/
+
+# ── Docker ────────────────────────────────────────────────────
+# Keep docker-compose.yml but ignore overrides
+docker-compose.override.yml
+
+# ── IDE ───────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Logs ──────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Alembic ───────────────────────────────────────────────────
+# Keep versions directory but not SQLite test DBs
+*.db
+alembic/versions/*.pyc
+
+# ── Streamlit ─────────────────────────────────────────────────
+.streamlit/secrets.toml

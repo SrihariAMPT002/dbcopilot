@@ -1,0 +1,10 @@
+# =============================================================
+# DB Copilot — Streamlit Frontend Requirements
+# Kept intentionally minimal — UI only calls the API via HTTP
+# =============================================================
+
+streamlit==1.35.0
+requests==2.32.2
+python-dotenv==1.0.1
+networkx==3.3
+pyvis==0.3.2

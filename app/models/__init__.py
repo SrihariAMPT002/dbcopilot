@@ -1,0 +1,33 @@
+from app.models.metadata import (
+    Base,
+    ConnectedDatabase,
+    DatabaseSchema,
+    DatabaseTable,
+    DatabaseColumn,
+    DatabaseRelationship,
+    SchemaEmbedding,
+    SchemaRelationshipGraph,
+    SyncLog,
+    DatabaseType,
+    ConnectionStatus,
+    EmbeddingStatus,
+    SyncStatus,
+    TableType,
+)
+
+__all__ = [
+    "Base",
+    "ConnectedDatabase",
+    "DatabaseSchema",
+    "DatabaseTable",
+    "DatabaseColumn",
+    "DatabaseRelationship",
+    "SchemaEmbedding",
+    "SchemaRelationshipGraph",
+    "SyncLog",
+    "DatabaseType",
+    "ConnectionStatus",
+    "EmbeddingStatus",
+    "SyncStatus",
+    "TableType",
+]

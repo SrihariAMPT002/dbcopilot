@@ -1,0 +1,59 @@
+# =============================================================
+# DB Copilot — FastAPI Backend Requirements
+# =============================================================
+
+# ── Web Framework ─────────────────────────────────────────────
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9
+
+# ── Configuration ─────────────────────────────────────────────
+pydantic==2.7.1
+pydantic-settings==2.2.1
+
+# ── Internal Metadata DB (async PostgreSQL) ───────────────────
+sqlalchemy[asyncio]==2.0.30
+asyncpg==0.29.0           # async PostgreSQL driver (internal DB)
+psycopg2-binary==2.9.9    # sync fallback (Alembic migrations)
+
+# ── External DB Connectors ────────────────────────────────────
+# PostgreSQL (external sources — uses asyncpg above)
+
+# MySQL / MariaDB
+aiomysql==0.2.0
+PyMySQL==1.1.0
+
+# SQL Server (requires ODBC Driver 17 on host)
+aioodbc==0.5.0
+pyodbc==5.1.0
+
+# MongoDB
+motor==3.4.0
+pymongo==4.7.1
+
+# ── Security / Encryption ─────────────────────────────────────
+cryptography==42.0.7
+
+# ── HTTP client (for health checks / future integrations) ─────
+httpx==0.27.0
+
+# ── Utilities ─────────────────────────────────────────────────
+python-dotenv==1.0.1
+tenacity==8.3.0           # retry logic for DB connections
+networkx==3.3
+
+# ── Migrations (Alembic — run manually for schema changes) ────
+alembic==1.13.1
+
+# =============================================================
+# FUTURE AI DEPENDENCIES — install when AI layer is activated
+# =============================================================
+openai==1.30.1
+# langchain==0.2.0
+# langgraph==0.1.0
+# langchain-openai==0.1.8
+qdrant-client==1.9.1
+# tiktoken==0.7.0
+# celery[redis]==5.4.0
+# redis==5.0.4
+langsmith

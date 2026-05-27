@@ -1,0 +1,148 @@
+# =============================================================
+# DB Copilot - Docker Compose
+# MVP services: postgres + fastapi + streamlit + qdrant
+# Future services: redis + celery-worker (commented out)
+# =============================================================
+
+version: "3.9"
+
+networks:
+  dbcopilot-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  qdrant_data:
+    driver: local
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: dbcopilot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dbcopilot_meta}
+      POSTGRES_USER: ${POSTGRES_USER:-dbcopilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dbcopilot_secret}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - dbcopilot-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dbcopilot} -d ${POSTGRES_DB:-dbcopilot_meta}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  fastapi:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: dbcopilot-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - POSTGRES_HOST=postgres
+    ports:
+      - "${API_PORT:-8000}:8000"
+    networks:
+      - dbcopilot-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    volumes:
+      - ./app:/app/app:ro
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./alembic:/app/alembic:ro
+    command: >
+      sh -c "alembic upgrade head && 
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app"
+
+  streamlit:
+    build:
+      context: . 
+      dockerfile: Dockerfile.streamlit
+    container_name: dbcopilot-streamlit
+    restart: unless-stopped
+    environment:
+      API_BASE_URL: ${API_BASE_URL:-http://fastapi:8000/api/v1}
+      STREAMLIT_PORT: ${STREAMLIT_PORT:-8501}
+    ports:
+      - "${STREAMLIT_PORT:-8501}:8501"
+    networks:
+      - dbcopilot-net
+    depends_on:
+      fastapi:
+        condition: service_healthy
+    volumes:
+      - ./ui:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: dbcopilot-qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    networks:
+      - dbcopilot-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Future services - uncomment when AI layer is activated
+
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: dbcopilot-redis
+  #   restart: unless-stopped
+  #   command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+  #   volumes:
+  #     - redis_data:/data
+  #   ports:
+  #     - "6379:6379"
+  #   networks:
+  #     - dbcopilot-net
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+  # celery-worker:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.api
+  #   container_name: dbcopilot-worker
+  #   restart: unless-stopped
+  #   env_file: .env
+  #   command: celery -A app.workflows.celery_app worker --loglevel=info --concurrency=2
+  #   networks:
+  #     - dbcopilot-net
+  #   depends_on:
+  #     - postgres
+  #     - redis
