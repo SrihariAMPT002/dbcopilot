@@ -10,6 +10,7 @@ import streamlit as st
 
 from components.api_client import (
     delete_connection,
+    generate_ai_context,
     generate_embeddings,
     get_connection,
     get_connections,
@@ -211,7 +212,7 @@ for conn in connections:
     if conn.get("last_error"):
         st.warning(f"Last error: {conn['last_error']}")
 
-    action_cols = st.columns([1, 1, 1, 1, 1])
+    action_cols = st.columns([1, 1, 1, 1, 1, 1])
 
     with action_cols[0]:
         if st.button("Resync", key=f"sync_{db_id}", use_container_width=True):
@@ -238,6 +239,17 @@ for conn in connections:
                 st.error(refreshed.get("error", "Refresh failed"))
 
     with action_cols[2]:
+        if st.button("Generate AI Context", key=f"aictx_{db_id}", type="primary", use_container_width=True):
+            with st.spinner("Queuing AI context pipeline..."):
+                ok_ctx, ctx_payload = generate_ai_context(db_id, triggered_by="streamlit-connected-sources")
+            if ok_ctx:
+                st.success(ctx_payload.get("message", "AI context pipeline queued."))
+                st.caption(f"Parent job: {ctx_payload.get('parent_job_id')}")
+                st.rerun()
+            else:
+                st.error(ctx_payload.get("error", "Failed to queue AI context pipeline"))
+
+    with action_cols[3]:
         if st.button("Regenerate Semantics", key=f"sem_{db_id}", use_container_width=True):
             with st.spinner("Regenerating semantic enrichment..."):
                 ok_sem, sem_result = regenerate_semantics(db_id)
@@ -247,7 +259,7 @@ for conn in connections:
             else:
                 st.error(sem_result.get("error", "Semantic regeneration failed"))
 
-    with action_cols[3]:
+    with action_cols[4]:
         if st.button("Regen Embeddings", key=f"emb_{db_id}", use_container_width=True):
             with st.spinner("Regenerating embeddings..."):
                 ok_emb, emb_result = generate_embeddings(db_id)
@@ -257,7 +269,7 @@ for conn in connections:
             else:
                 st.error(emb_result.get("error", "Embedding regeneration failed"))
 
-    with action_cols[4]:
+    with action_cols[5]:
         if st.button("Disconnect", key=f"del_{db_id}", use_container_width=True):
             st.session_state[f"confirm_delete_{db_id}"] = True
 

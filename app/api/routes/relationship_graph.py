@@ -51,9 +51,14 @@ def _map_paths(items):
 
 
 @router.get(
-    "/relationship-graph/{db_id}",
+    "/relationships/graph/{db_id}",
     response_model=RelationshipGraphResponse,
     summary="Get the persisted relationship graph for a database",
+)
+@router.get(
+    "/relationship-graph/{db_id}",
+    response_model=RelationshipGraphResponse,
+    include_in_schema=False,
 )
 async def get_relationship_graph(db_id: int, db: AsyncSession = Depends(get_db)) -> RelationshipGraphResponse:
     engine = RelationshipGraphEngine(db)
@@ -75,9 +80,14 @@ async def get_relationship_graph(db_id: int, db: AsyncSession = Depends(get_db))
 
 
 @router.get(
-    "/table-neighbors/{table_id}",
+    "/relationships/tables/{table_id}/neighbors",
     response_model=TableNeighborsResponse,
     summary="Get neighbor tables around a table",
+)
+@router.get(
+    "/table-neighbors/{table_id}",
+    response_model=TableNeighborsResponse,
+    include_in_schema=False,
 )
 async def get_table_neighbors(
     table_id: int,
@@ -102,9 +112,14 @@ async def get_table_neighbors(
 
 
 @router.get(
-    "/join-paths/{table_a}/{table_b}",
+    "/relationships/join-paths/{table_a}/{table_b}",
     response_model=JoinPathsResponse,
     summary="Get join path(s) between two tables",
+)
+@router.get(
+    "/join-paths/{table_a}/{table_b}",
+    response_model=JoinPathsResponse,
+    include_in_schema=False,
 )
 async def get_join_paths(
     table_a: int,
@@ -135,9 +150,14 @@ async def get_join_paths(
 
 
 @router.get(
-    "/relationship-graph/{db_id}/export",
+    "/relationships/graph/{db_id}/export",
     response_model=GraphExportResponse,
     summary="Export the relationship graph as JSON, markdown, or a Mermaid diagram",
+)
+@router.get(
+    "/relationship-graph/{db_id}/export",
+    response_model=GraphExportResponse,
+    include_in_schema=False,
 )
 async def export_relationship_graph(
     db_id: int,

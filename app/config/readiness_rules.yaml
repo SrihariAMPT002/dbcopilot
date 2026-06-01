@@ -1,0 +1,152 @@
+# Readiness Scoring & Assessment Rules
+# Defines how databases are scored for AI readiness across 5 dimensions
+# Version: 1.0.0
+# Last Updated: 2026-06-01
+
+scoring:
+  # Component weights must sum to 1.0
+  weights:
+    metadata: 0.25        # Schema structure completeness (25%)
+    semantic: 0.25        # AI semantic intelligence coverage (25%)
+    embeddings: 0.20      # Vector search capability (20%)
+    relationships: 0.15   # Entity relationship clarity (15%)
+    prompt: 0.15          # Prompt context quality (15%)
+
+  # Each component is independently scored 0-100
+  # Then combined using weights to get overall_score: 0-100
+
+# Status thresholds based on overall score
+status_thresholds:
+  ready:
+    min_score: 85
+    missing_stages_allowed: 0  # All stages must be complete
+    description: "Database is AI-ready for production use"
+
+  partial:
+    min_score: 40
+    missing_stages_allowed: 1  # Some stages can be incomplete
+    description: "Database has some AI readiness but gaps remain"
+
+  not_ready:
+    min_score: 0
+    max_score: 40
+    missing_stages_allowed: 2+
+    description: "Database needs significant work before AI use"
+
+# Component-specific scoring rules
+components:
+  metadata:
+    description: "Measures schema structure quality"
+    factors:
+      - tables_count: weight 20
+      - columns_per_table: weight 20
+      - primary_keys: weight 20
+      - naming_quality: weight 20
+      - documentation: weight 20
+    thresholds:
+      excellent: 85+
+      good: 70+
+      fair: 50+
+      poor: 0
+
+  semantic:
+    description: "Measures semantic intelligence coverage"
+    factors:
+      - has_semantic_profile: weight 50  # Critical
+      - glossary_coverage: weight 30
+      - use_cases_defined: weight 20
+    thresholds:
+      excellent: 90+
+      good: 75+
+      fair: 50+
+      poor: 0
+
+  embeddings:
+    description: "Measures vector search capability"
+    factors:
+      - collections_indexed: weight 50
+      - embeddings_generated: weight 30
+      - embedding_quality: weight 20
+    thresholds:
+      excellent: 80+
+      good: 60+
+      fair: 40+
+      poor: 0
+
+  relationships:
+    description: "Measures entity relationship clarity"
+    factors:
+      - foreign_keys: weight 40
+      - inferred_relationships: weight 30
+      - relationship_quality: weight 30
+    thresholds:
+      excellent: 75+
+      good: 60+
+      fair: 40+
+      poor: 0
+
+  prompt:
+    description: "Measures prompt context quality"
+    factors:
+      - prompt_generated: weight 50
+      - context_completeness: weight 30
+      - context_quality: weight 20
+    thresholds:
+      excellent: 85+
+      good: 70+
+      fair: 50+
+      poor: 0
+
+# Readiness assessment rules
+assessment:
+  minimum_tables: 1
+  minimum_columns: 2
+  minimum_relationships: 0  # Can be AI-ready without relationships
+
+  naming_quality_thresholds:
+    poor_name_pattern: "^(tbl_|col_|d_|f_|t_|x_|v_)"  # Regex for poor names
+    poor_name_penalty: 15  # 15% score reduction
+    poor_name_threshold: 50  # If >50% names are poor, apply penalty
+
+  # Recommendations generation rules
+  recommendations:
+    low_table_count:
+      threshold: 5
+      message: "Consider adding more tables for better analysis coverage"
+      priority: low
+
+    poor_naming:
+      threshold: 50  # Percent poor names
+      message: "Improve table and column naming for better semantic analysis"
+      priority: high
+
+    missing_relationships:
+      threshold: 0  # If no relationships found
+      message: "Add foreign keys to define relationships between tables"
+      priority: medium
+
+    missing_documentation:
+      threshold: 0  # If no documentation
+      message: "Add comments/descriptions to tables and columns"
+      priority: low
+
+# Grade distribution for readiness reports
+grades:
+  A: 90-100
+  B: 75-89
+  C: 60-74
+  D: 45-59
+  F: 0-44
+
+# SLA and compliance targets
+targets:
+  enterprise_minimum: 85  # Enterprise deployments should be READY
+  production_minimum: 70  # Production should be at least good
+  staging_minimum: 50     # Staging can be partial
+  development_minimum: 0  # Development has no minimum
+
+# Refresh intervals (hours)
+refresh:
+  full_assessment: 24     # Reassess readiness daily
+  incremental_check: 6    # Quick check every 6 hours
+  after_sync: true        # Always reassess after metadata sync

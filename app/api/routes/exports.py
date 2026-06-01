@@ -28,7 +28,7 @@ from app.models.metadata import (
 from app.schema_engine import PromptBuilder, RelationshipGraphEngine
 from app.schema_engine.embeddings import EmbeddingEngine
 
-router = APIRouter(prefix="/export", tags=["Exports"])
+router = APIRouter(prefix="/exports", tags=["Exports"])
 logger = logging.getLogger(__name__)
 
 
@@ -346,6 +346,10 @@ def _csv_from_embeddings(package: Dict[str, Any]) -> str:
     "/schema/{db_id}",
     summary="Export schema intelligence package",
 )
+@router.get(
+    "/export/schema/{db_id}",
+    include_in_schema=False,
+)
 async def export_schema(
     db_id: int,
     format: str = Query(default="json", pattern="^(json|markdown|csv)$"),
@@ -377,6 +381,10 @@ async def export_schema(
 @router.get(
     "/prompts/{db_id}",
     summary="Export prompt context package",
+)
+@router.get(
+    "/export/prompts/{db_id}",
+    include_in_schema=False,
 )
 async def export_prompts(
     db_id: int,
@@ -419,6 +427,10 @@ async def export_prompts(
     "/graph/{db_id}",
     summary="Export relationship graph package",
 )
+@router.get(
+    "/export/graph/{db_id}",
+    include_in_schema=False,
+)
 async def export_graph(
     db_id: int,
     format: str = Query(default="json", pattern="^(json|markdown|csv)$"),
@@ -449,6 +461,10 @@ async def export_graph(
 @router.get(
     "/embeddings/{db_id}",
     summary="Export embeddings metadata package",
+)
+@router.get(
+    "/export/embeddings/{db_id}",
+    include_in_schema=False,
 )
 async def export_embeddings(
     db_id: int,

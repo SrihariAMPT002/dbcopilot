@@ -1,4 +1,4 @@
-# """Create complete initial schema including embeddings, relationship graph, and SSL support.
+# """Create complete initial schema including embeddings, relationship graph, semantic enrichment, and SSL support.
 
 # Revision ID: 001_complete_initial_schema
 # Revises:
@@ -58,6 +58,15 @@ def upgrade() -> None:
         "completed",
         "failed",
         name="embedding_status_enum",
+    )
+
+    semantic_generation_status_enum = sa.Enum(
+        "pending",
+        "processing",
+        "completed",
+        "failed",
+        "no_metadata",
+        name="semantic_generation_status_enum",
     )
 
     # =========================
@@ -254,6 +263,42 @@ def upgrade() -> None:
     )
 
     # =========================
+    # DATABASE SEMANTICS
+    # =========================
+    op.create_table(
+        "database_semantics",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("source_id", sa.Integer(), nullable=False),
+        sa.Column("business_domain", sa.Text(), nullable=True),
+        sa.Column("business_summary", sa.Text(), nullable=True),
+        sa.Column("key_entities", sa.Text(), nullable=False, server_default="[]"),
+        sa.Column("business_glossary", sa.Text(), nullable=False, server_default="[]"),
+        sa.Column("suggested_use_cases", sa.Text(), nullable=False, server_default="[]"),
+        sa.Column("confidence_score", sa.Float(), nullable=False, server_default="0.0"),
+        sa.Column(
+            "generation_status",
+            semantic_generation_status_enum,
+            nullable=False,
+            server_default="pending",
+        ),
+        sa.Column("raw_ai_response", sa.Text(), nullable=True),
+        sa.Column("error_message", sa.Text(), nullable=True),
+        sa.Column("generated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.PrimaryKeyConstraint("id"),
+        sa.ForeignKeyConstraint(["source_id"], ["connected_databases.id"], ondelete="CASCADE"),
+        sa.UniqueConstraint("source_id"),
+    )
+
+    op.create_index("ix_database_semantics_source_id", "database_semantics", ["source_id"])
+    op.create_index(
+        "ix_database_semantics_generation_status",
+        "database_semantics",
+        ["generation_status"],
+    )
+
+    # =========================
     # RELATIONSHIP GRAPH
     # =========================
     op.create_table(
@@ -315,6 +360,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_table("schema_relationship_graph")
     op.drop_table("schema_embeddings")
+    op.drop_table("database_semantics")
     op.drop_table("schema_semantics")
     op.drop_table("sync_logs")
     op.drop_table("database_relationships")
@@ -324,6 +370,7 @@ def downgrade() -> None:
     op.drop_table("connected_databases")
 
     op.execute("DROP TYPE IF EXISTS embedding_status_enum")
+    op.execute("DROP TYPE IF EXISTS semantic_generation_status_enum")
     op.execute("DROP TYPE IF EXISTS connection_status_enum")
     op.execute("DROP TYPE IF EXISTS database_type_enum")
     op.execute("DROP TYPE IF EXISTS sync_status_enum")

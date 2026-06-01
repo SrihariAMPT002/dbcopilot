@@ -1,0 +1,99 @@
+# AI Models Configuration
+# This file defines all AI models, their providers, parameters, and deployment configurations
+# Version: 1.0.0
+# Last Updated: 2026-06-01
+
+models:
+  # Primary LLM for semantic analysis and prompt generation
+  semantic_generation:
+    provider: azure_openai
+    model_name: gpt-5-nano
+    api_version: "2024-02-15-preview"
+    temperature: 0.3  # Low temperature for consistency
+    max_completion_tokens: 2000
+    top_p: 0.95
+    frequency_penalty: 0
+    presence_penalty: 0
+    description: "Used for database-level semantic intelligence generation"
+
+  # Schema enrichment and metadata analysis
+  schema_enrichment:
+    provider: azure_openai
+    model_name: gpt-5-nano
+    api_version: "2024-02-15-preview"
+    temperature: 0.3  # Low temperature for consistency
+    max_completion_tokens: 1000
+    top_p: 0.95
+    frequency_penalty: 0
+    presence_penalty: 0
+    description: "Used for table-level semantic enrichment"
+
+  # Relationship inference and discovery
+  relationship_inference:
+    provider: azure_openai
+    model_name: gpt-5-nano
+    api_version: "2024-02-15-preview"
+    temperature: 0.1  # Very low temperature for deterministic output
+    max_completion_tokens: 1500
+    top_p: 0.95
+    frequency_penalty: 0
+    presence_penalty: 0
+    description: "Used for detecting relationships between tables"
+
+  # Readiness and quality analysis
+  readiness_analysis:
+    provider: azure_openai
+    model_name: gpt-5-nano
+    api_version: "2024-02-15-preview"
+    temperature: 0.2
+    max_completion_tokens: 800
+    top_p: 0.95
+    frequency_penalty: 0
+    presence_penalty: 0
+    description: "Used for AI readiness assessment and recommendations"
+
+embeddings:
+  # Default embedding model for semantic search
+  default:
+    provider: azure_openai
+    model_name: text-embedding-3-small
+    dimensions: 384
+    encoding_format: float
+    description: "Default embedding model for schema semantic search"
+
+  # Alternative larger embedding model for better quality (optional)
+  large:
+    provider: azure_openai
+    model_name: text-embedding-3-large
+    dimensions: 3072
+    encoding_format: float
+    description: "Larger embedding model for higher semantic quality (uses more resources)"
+
+# Default model selections (can be overridden per operation)
+defaults:
+  llm: semantic_generation
+  embedding: default
+  
+# Environment-specific overrides (will be applied based on environment)
+environments:
+  development:
+    llm: semantic_generation
+    embedding: default
+    temperature_override: null  # Use defaults
+  
+  staging:
+    llm: semantic_generation
+    embedding: default
+    temperature_override: null
+  
+  production:
+    llm: semantic_generation
+    embedding: default
+    temperature_override: null  # Can override for consistency
+
+# Retry and timeout configuration for API calls
+api:
+  timeout_seconds: 60
+  max_retries: 3
+  retry_backoff_factor: 2
+  retry_backoff_max: 60

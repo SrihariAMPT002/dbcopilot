@@ -139,39 +139,53 @@ def generate_embeddings(db_id: int) -> Tuple[bool, Any]:
 
 
 def get_embedding_status(db_id: int) -> Tuple[bool, Any]:
-    return _get(f"/embedding-status/{db_id}")
+    return _get(f"/embeddings/status/{db_id}")
+
+
+def generate_semantics(db_id: int) -> Tuple[bool, Any]:
+    return _post(f"/semantics/generate/{db_id}", {})
 
 
 def regenerate_semantics(db_id: int) -> Tuple[bool, Any]:
-    return _post(f"/semantic/enrichment/run/{db_id}", {})
+    return generate_semantics(db_id)
 
 
-def get_semantic_summary(table_id: int) -> Tuple[bool, Any]:
-    return _get(f"/semantic/summary/{table_id}")
+def get_semantic_profile(db_id: int) -> Tuple[bool, Any]:
+    return _get(f"/semantics/{db_id}")
+
+
+def delete_semantic_profile(db_id: int) -> Tuple[bool, Any]:
+    return _delete(f"/semantics/{db_id}")
+
+
+def export_semantic_profile(db_id: int, export_format: str = "json") -> Tuple[bool, Any]:
+    return _get(f"/semantics/{db_id}/export", format=export_format)
 
 
 def get_prompt_context(db_id: int) -> Tuple[bool, Any]:
-    return _get(f"/prompt-context/{db_id}")
+    return _get(f"/semantic/prompt-context/{db_id}")
 
 
 def generate_prompt(payload: Dict) -> Tuple[bool, Any]:
-    return _post("/prompt/generate", payload)
+    return _post("/semantic/prompt/generate", payload)
 
 
 def semantic_search(payload: Dict) -> Tuple[bool, Any]:
-    return _post("/semantic-search", payload)
+    body = dict(payload or {})
+    body.setdefault("collection", "all")
+    return _post("/embeddings/search", body)
 
 
 def get_relationship_graph(db_id: int) -> Tuple[bool, Any]:
-    return _get(f"/relationship-graph/{db_id}")
+    return _get(f"/relationships/graph/{db_id}")
 
 
 def get_table_neighbors(table_id: int, depth: int = 1) -> Tuple[bool, Any]:
-    return _get(f"/table-neighbors/{table_id}", depth=depth)
+    return _get(f"/relationships/tables/{table_id}/neighbors", depth=depth)
 
 
 def get_join_paths(table_a: int, table_b: int, max_paths: int = 5) -> Tuple[bool, Any]:
-    return _get(f"/join-paths/{table_a}/{table_b}", max_paths=max_paths)
+    return _get(f"/relationships/join-paths/{table_a}/{table_b}", max_paths=max_paths)
 
 
 def export_relationship_graph(db_id: int, export_format: str = "json") -> Tuple[bool, Any]:
@@ -192,6 +206,80 @@ def export_prompts(db_id: int, export_format: str = "json") -> Tuple[bool, Any]:
 
 def export_embeddings(db_id: int, export_format: str = "json") -> Tuple[bool, Any]:
     return _get(f"/export/embeddings/{db_id}", format=export_format)
+
+
+def get_readiness(db_id: int) -> Tuple[bool, Any]:
+    return _get(f"/readiness/{db_id}")
+
+
+def get_readiness_breakdown(db_id: int) -> Tuple[bool, Any]:
+    return _get(f"/readiness/{db_id}/breakdown")
+
+
+def recompute_readiness(db_id: int) -> Tuple[bool, Any]:
+    return _post(f"/readiness/recompute/{db_id}", {})
+
+
+def run_pipeline(db_id: int, triggered_by: str = "ui") -> Tuple[bool, Any]:
+    return _post(f"/pipeline/run/{db_id}?triggered_by={triggered_by}", {})
+
+
+def generate_ai_context(db_id: int, triggered_by: str = "ui") -> Tuple[bool, Any]:
+    return _post(f"/pipeline/generate-ai-context/{db_id}?triggered_by={triggered_by}", {})
+
+
+def get_pipeline_jobs(limit: int = 100, status: Optional[str] = None) -> Tuple[bool, Any]:
+    if status:
+        return _get("/pipeline/jobs", limit=limit, status=status)
+    return _get("/pipeline/jobs", limit=limit)
+
+
+def get_pipeline_job(job_id: int) -> Tuple[bool, Any]:
+    return _get(f"/pipeline/jobs/{job_id}")
+
+
+def retry_pipeline_job(job_id: int, triggered_by: str = "ui") -> Tuple[bool, Any]:
+    return _post(f"/pipeline/jobs/{job_id}/retry?triggered_by={triggered_by}", {})
+
+
+def cancel_pipeline_job(job_id: int) -> Tuple[bool, Any]:
+    return _post(f"/pipeline/jobs/{job_id}/cancel", {})
+
+
+def list_artifacts(db_id: int) -> Tuple[bool, Any]:
+    return _get(f"/artifacts/{db_id}")
+
+
+def export_artifacts(db_id: int) -> Tuple[bool, Any]:
+    return _post(f"/artifacts/{db_id}/export", {})
+
+
+def get_artifact_manifest(db_id: int) -> Tuple[bool, Any]:
+    return _get(f"/artifacts/{db_id}/manifest")
+
+
+def mongodb_databases() -> Tuple[bool, Any]:
+    return _get("/mongodb/databases")
+
+
+def mongodb_collections(db_id: int) -> Tuple[bool, Any]:
+    return _get(f"/mongodb/collections/{db_id}")
+
+
+def mongodb_schema(collection_id: int, limit: int = 200, offset: int = 0) -> Tuple[bool, Any]:
+    return _get(f"/mongodb/schema/{collection_id}", limit=limit, offset=offset)
+
+
+def mongodb_samples(collection_id: int, limit: int = 20, offset: int = 0) -> Tuple[bool, Any]:
+    return _get(f"/mongodb/sample/{collection_id}", limit=limit, offset=offset)
+
+
+def mongodb_infer_schema(collection_id: int, sample_size: int = 100) -> Tuple[bool, Any]:
+    return _post(f"/mongodb/infer-schema/{collection_id}?sample_size={sample_size}", {})
+
+
+def mongodb_relationships(collection_id: int) -> Tuple[bool, Any]:
+    return _get(f"/mongodb/relationships/{collection_id}")
 
 
 def health_check() -> Tuple[bool, Any]:

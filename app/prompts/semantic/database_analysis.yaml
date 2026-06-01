@@ -1,0 +1,134 @@
+# Semantic Intelligence Prompt Template
+# Used for database-level semantic analysis and business understanding generation
+# Version: 1.0.0
+# Last Updated: 2026-06-01
+# Format: Jinja2 template with variable substitution
+
+id: semantic_database_analysis
+name: "Database-Level Semantic Intelligence"
+description: "Analyzes database structure to generate business understanding"
+version: 1.0
+language: English
+
+system_message: |
+  You are an Enterprise Data Architect with 15+ years of experience analyzing database schemas.
+  Your role is to understand the business purpose of databases and provide clear, actionable insights.
+  
+  Provide analysis in JSON format with the following structure:
+  {
+    "business_domain": "...",
+    "business_summary": "...",
+    "key_entities": [...],
+    "business_glossary": [{"term": "...", "definition": "..."}],
+    "suggested_use_cases": [...],
+    "analysis_notes": "..."
+  }
+
+user_prompt: |
+  Analyze this database schema and provide semantic intelligence.
+  
+  **Database Information:**
+  - Name: {{ database_name }}
+  - Type: {{ database_type }}
+  - Total Tables: {{ total_tables }}
+  - Total Columns: {{ total_columns }}
+  
+  **Schema Structure:**
+  {{ schema_summary }}
+  
+  **Relationships:**
+  {{ relationships_summary }}
+  
+  **Naming Quality Assessment:**
+  - Good naming rate: {{ naming_quality }}%
+  - Poor patterns detected: {{ poor_naming_patterns }}
+  
+  **Your Task:**
+  1. Identify the business domain this database serves (e.g., E-Commerce, Healthcare, CRM)
+  2. Provide a 2-3 sentence business summary explaining the database purpose
+  3. Extract the 5-10 most important business entities/tables
+  4. Create business glossary entries for key terms (especially if naming is unclear)
+  5. Suggest 3-5 realistic analytics use cases
+  6. Note any data quality or structural issues
+  
+  **Important:**
+  - Focus on business meaning, not technical details
+  - Translate technical jargon to business language
+  - Be concise but complete
+  - Return valid JSON only
+
+response_schema:
+  business_domain:
+    type: string
+    description: "Industry or business area (e.g., 'E-Commerce', 'Healthcare')"
+    examples:
+      - "E-Commerce"
+      - "Healthcare"
+      - "Financial Services"
+      - "Manufacturing"
+      - "Human Resources"
+    min_length: 3
+    max_length: 100
+
+  business_summary:
+    type: string
+    description: "2-3 sentence overview of database purpose"
+    min_length: 20
+    max_length: 500
+
+  key_entities:
+    type: array
+    description: "Most important business objects/tables"
+    items: string
+    min_items: 1
+    max_items: 20
+    examples:
+      - "customers"
+      - "orders"
+      - "products"
+
+  business_glossary:
+    type: array
+    description: "Business term definitions"
+    items:
+      type: object
+      properties:
+        term:
+          type: string
+          description: "Technical or business term"
+        definition:
+          type: string
+          description: "Plain English definition"
+    examples:
+      - term: "SKU"
+        definition: "Stock Keeping Unit - unique identifier for a product"
+
+  suggested_use_cases:
+    type: array
+    description: "Possible analytics applications"
+    items: string
+    min_items: 1
+    max_items: 10
+    examples:
+      - "Customer lifetime value analysis"
+      - "Product performance trending"
+
+  analysis_notes:
+    type: string
+    description: "Additional observations about the schema"
+    max_length: 500
+
+constraints:
+  max_completion_tokens: 2000
+  temperature: 0.3
+  timeout_seconds: 60
+
+metadata:
+  category: "semantic_intelligence"
+  audience: "business_analysts"
+  use_cases:
+    - "Database onboarding"
+    - "Documentation generation"
+    - "Business understanding"
+  requires_sync: true
+  supports_sampling: true

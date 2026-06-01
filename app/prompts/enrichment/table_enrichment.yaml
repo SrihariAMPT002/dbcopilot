@@ -1,0 +1,51 @@
+# Schema Enrichment Prompt Template
+# Used for table and column-level semantic enrichment
+# Version: 1.0.0
+# Last Updated: 2026-06-01
+
+id: schema_enrichment
+name: "Schema Enrichment"
+description: "Enriches individual tables and columns with business context"
+version: 1.0
+language: English
+
+system_message: |
+  You are a database expert helping to document and explain database schemas.
+  Provide clear, business-friendly descriptions for tables and columns.
+  Return JSON format with semantic enrichment.
+
+user_prompt: |
+  Provide semantic enrichment for this table.
+  
+  **Table:** {{ table_name }} ({{ row_count }} rows)
+  
+  **Description:** {{ table_description }}
+  
+  **Columns:**
+  {{ columns_list }}
+  
+  **Related Tables:**
+  {{ relationships }}
+  
+  **Your Task:**
+  1. Provide a clear business purpose for this table
+  2. List the most important columns
+  3. Identify likely use cases for this data
+  4. Suggest possible questions analysts might ask
+  5. Note data quality considerations
+  
+  Return JSON with these keys:
+  - business_summary
+  - likely_usage (list)
+  - important_columns (list)
+  - business_keywords (list)
+  - possible_questions (list)
+  - quality_notes
+
+constraints:
+  max_completion_tokens: 1000
+  temperature: 0.3
+
+metadata:
+  category: "enrichment"
+  audience: "analysts_and_engineers"

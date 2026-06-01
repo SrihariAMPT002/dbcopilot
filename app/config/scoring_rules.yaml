@@ -1,0 +1,203 @@
+# Scoring Rules & Algorithms
+# Defines scoring formulas for complexity, quality, and semantic analysis
+# Version: 1.0.0
+# Last Updated: 2026-06-01
+
+schema_complexity:
+  description: "Calculates overall complexity score (0-100) for a schema"
+  
+  formula: |
+    score = 0
+    # Column count component (max 40 points)
+    score += min(col_count * 5, 40)
+    
+    # Relationship count component (max 30 points)
+    score += min(rel_count * 10, 30)
+    
+    # Complex type columns component (max 20 points)
+    score += min(complex_col_count * 5, 20)
+    
+    # Bonus for large tables (max 10 points)
+    if has_large_tables: score += 10
+    
+    # Cap at 100
+    return min(score, 100)
+
+  components:
+    column_points:
+      value_per_column: 5
+      max_points: 40
+      description: "More columns indicate more complexity"
+
+    relationship_points:
+      value_per_relationship: 10
+      max_points: 30
+      description: "More relationships indicate higher connectivity"
+
+    complex_type_bonus:
+      value_per_complex_type: 5
+      max_points: 20
+      types_considered:
+        - array
+        - json
+        - jsonb
+        - xml
+        - enum
+        - geography
+        - geometry
+      description: "Specialized data types add complexity"
+
+    large_table_bonus:
+      points: 10
+      row_threshold: 1_000_000
+      description: "Tables with >1M rows get complexity bonus"
+
+  interpretation:
+    very_simple: 0-20      # Trivial schema
+    simple: 21-40          # Straightforward schema
+    moderate: 41-60        # Some complexity
+    complex: 61-80         # Significant complexity
+    very_complex: 81-100   # High complexity
+
+naming_quality:
+  description: "Scores naming quality as percentage of well-named elements"
+  
+  good_name_patterns:
+    - pattern: "^[a-z][a-z0-9]*(_[a-z0-9]+)*$"
+      description: "snake_case - recommended for SQL"
+    - pattern: "^[A-Z][a-zA-Z0-9]*$"
+      description: "PascalCase - acceptable for SQL"
+
+  poor_name_patterns:
+    - pattern: "^tbl_"
+      reason: "Redundant 'tbl' prefix"
+    - pattern: "^col_"
+      reason: "Redundant 'col' prefix"
+    - pattern: "^d_"
+      reason: "Generic single-letter prefix"
+    - pattern: "^f_"
+      reason: "Generic single-letter prefix"
+    - pattern: "^t_"
+      reason: "Generic single-letter prefix"
+    - pattern: "^x_"
+      reason: "Generic single-letter prefix"
+    - pattern: "^[0-9]"
+      reason: "Starts with number"
+    - pattern: "^_.*"
+      reason: "Starts with underscore"
+    - pattern: "^.*[0-9]{3,}.*$"
+      reason: "Contains numeric suffix (e.g., col_001)"
+
+  scoring:
+    formula: |
+      well_named_count = count names matching good_name_patterns
+      total_names = all table + column names
+      quality_score = (well_named_count / total_names) * 100
+    
+    quality_levels:
+      excellent: 90-100    # >90% well-named
+      good: 70-89          # 70-90% well-named
+      fair: 50-69          # 50-70% well-named
+      poor: <50            # <50% well-named
+
+semantic_confidence:
+  description: "Calculates confidence score (0-1.0) for semantic analysis"
+  
+  base_score: 0.8  # Start at 80%
+  
+  penalties:
+    poor_naming:
+      penalty_percent: 15  # -15%
+      trigger: "naming_quality < 50%"
+
+    sparse_relationships:
+      penalty_percent: 10  # -10%
+      trigger: "relationships < 0.5 per table"
+
+    large_schema:
+      penalty_percent: 5   # -5%
+      trigger: "schema sampled (>50 entities)"
+
+    generic_table_names:
+      penalty_percent: 8   # -8%
+      trigger: "multiple tables without clear purpose"
+
+  bonuses:
+    clear_documentation:
+      bonus_percent: 5  # +5%
+      trigger: ">80% of objects have descriptions"
+
+    extensive_relationships:
+      bonus_percent: 5  # +5%
+      trigger: "average >2 relationships per table"
+
+  formula: |
+    score = base_score (0.8)
+    score -= poor_naming_penalty
+    score -= sparse_relationships_penalty
+    score -= large_schema_penalty
+    score -= generic_table_names_penalty
+    score += clear_documentation_bonus
+    score += extensive_relationships_bonus
+    return max(0.0, min(1.0, score))
+
+  interpretation:
+    very_high: 0.90-1.0   # Very reliable analysis
+    high: 0.80-0.89       # Reliable analysis
+    medium: 0.60-0.79     # Reasonably reliable
+    low: 0.40-0.59        # Use with caution
+    very_low: 0.0-0.39    # Limited reliability
+
+entity_relevance:
+  description: "Scores relevance of entities for semantic search"
+  
+  factors:
+    frequency:
+      weight: 0.4
+      description: "How often entity appears in schema"
+
+    connectivity:
+      weight: 0.3
+      description: "How many relationships entity has"
+
+    metadata_completeness:
+      weight: 0.2
+      description: "How much documentation exists"
+
+    type_significance:
+      weight: 0.1
+      description: "Whether entity type is significant"
+
+  formula: |
+    score = (frequency_score * 0.4) + 
+            (connectivity_score * 0.3) + 
+            (metadata_score * 0.2) + 
+            (type_score * 0.1)
+    return score
+
+relationship_strength:
+  description: "Scores quality/strength of relationships"
+  
+  formula:
+    formula_description: |
+      strength = 0
+      # Explicit foreign key
+      if has_fk: strength += 50
+      
+      # Multiple relationships between same tables
+      if relationship_count > 1: strength += 20
+      
+      # Named constraints
+      if has_constraint_name: strength += 15
+      
+      # Documented relationship
+      if has_documentation: strength += 15
+      
+      return min(strength, 100)
+    
+    strength_levels:
+      very_strong: 85-100  # Explicit FK with documentation
+      strong: 65-84        # Explicit FK
+      moderate: 45-64      # Likely FK or named relationship
+      weak: 25-44          # Inferred or implied
+      very_weak: 0-24      # Speculative relationship

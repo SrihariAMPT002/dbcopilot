@@ -400,6 +400,134 @@ class GraphExportResponse(BaseModel):
     content: str
 
 
+# ── AI Readiness ───────────────────────────────────────────────────────────────
+
+class ReadinessCapabilityScore(BaseModel):
+    metadata_score: int
+    semantic_score: int
+    embeddings_score: int
+    relationship_score: int
+    prompt_score: int
+    overall_score: int
+
+
+class ReadinessResponse(BaseModel):
+    database_id: int
+    database_name: str
+    readiness_status: str
+    generated_at: datetime
+    scores: ReadinessCapabilityScore
+    missing_stages: List[str] = Field(default_factory=list)
+    remediation_hints: List[str] = Field(default_factory=list)
+
+
+class ReadinessBreakdownResponse(ReadinessResponse):
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
+# ── Pipeline Operations ────────────────────────────────────────────────────────
+
+class PipelineJobResponse(BaseModel):
+    id: int
+    job_type: str
+    database_id: int
+    parent_job_id: Optional[int] = None
+    entity_table_id: Optional[int] = None
+    entity_name: Optional[str] = None
+    status: str
+    progress_percentage: int
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    failure_reason: Optional[str] = None
+    triggered_by: Optional[str] = None
+
+
+class PipelineRunResponse(BaseModel):
+    database_id: int
+    created_job_ids: List[int] = Field(default_factory=list)
+    message: str
+
+
+# ── Database Semantics ────────────────────────────────────────────────────────
+
+class GlossaryTerm(BaseModel):
+    """A term in the business glossary."""
+    term: str
+    definition: str
+
+
+class DatabaseSemanticGenerateRequest(BaseModel):
+    """Request to generate database-level semantics."""
+    # No additional fields needed - uses database metadata
+    pass
+
+
+class DatabaseSemanticResponse(BaseModel):
+    """Response with database-level semantic profile."""
+    id: int
+    source_id: int
+    business_domain: Optional[str] = None
+    business_summary: Optional[str] = None
+    key_entities: List[str] = Field(default_factory=list)
+    business_glossary: List[GlossaryTerm] = Field(default_factory=list)
+    suggested_use_cases: List[str] = Field(default_factory=list)
+    confidence_score: float = 0.0
+    generation_status: str
+    generated_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DatabaseSemanticGenerateResponse(BaseModel):
+    """Response for semantic generation request."""
+    source_id: int
+    status: str
+    message: str
+    generated_at: Optional[datetime] = None
+    duration_ms: Optional[float] = None
+    task_id: Optional[str] = None
+
+
+class DatabaseSemanticExportResponse(BaseModel):
+    """Response for semantic export."""
+    format: str  # 'json' or 'markdown'
+    filename: str
+    content: str
+    generated_at: datetime
+
+
+# ── Artifact Registry ──────────────────────────────────────────────────────────
+
+class ArtifactManifestItem(BaseModel):
+    id: int
+    artifact_type: str
+    version: int
+    schema_hash: str
+    export_status: str
+    artifact_path: str
+    generated_at: datetime
+
+
+class ArtifactListResponse(BaseModel):
+    database_id: int
+    artifacts: List[ArtifactManifestItem] = Field(default_factory=list)
+
+
+class ArtifactManifestResponse(BaseModel):
+    database_id: int
+    artifact_count: int
+    latest: Dict[str, ArtifactManifestItem] = Field(default_factory=dict)
+    history: Dict[str, List[ArtifactManifestItem]] = Field(default_factory=dict)
+
+
+class ArtifactExportResponse(BaseModel):
+    database_id: int
+    manifests: List[Dict[str, Any]] = Field(default_factory=list)
+    message: str
+
+
 # ── Update forward refs ───────────────────────────────────────────────────────
 
 ConnectionDetail.model_rebuild()

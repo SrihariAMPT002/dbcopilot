@@ -16,6 +16,10 @@ async def init_db() -> None:
     """Create all tables defined in app.models (idempotent)."""
     # Import here to trigger model registration with Base.metadata
     from app.models import metadata as _  # noqa: F401
+    from app.models import readiness_snapshot as _readiness  # noqa: F401
+    from app.models import pipeline_job as _pipeline  # noqa: F401
+    from app.models import artifact_manifest as _artifact  # noqa: F401
+    from app.models import nosql_metadata as _nosql  # noqa: F401
     from app.models.metadata import Base
 
     logger.info("Initializing internal metadata database…")

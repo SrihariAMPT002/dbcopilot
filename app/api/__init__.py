@@ -1,18 +1,32 @@
 from fastapi import APIRouter
 
 from app.api.routes import (
+    capabilities,
     connections,
     metadata,
     ai_placeholders,
     semantic,
+    semantics,
+    embeddings,
+    relationship_graph,
+    exports,
+    readiness,
+    pipeline,
+    artifacts,
+    mongodb,
 )
 
-# Note: embeddings, relationship_graph, and exports temporarily disabled
-# These are Phase 2+ features that need integration testing.
-# They will be re-enabled after core table loading is verified.
-
 api_router = APIRouter()
+api_router.include_router(capabilities.router)
 api_router.include_router(connections.router)
 api_router.include_router(metadata.router)
 api_router.include_router(ai_placeholders.router)
 api_router.include_router(semantic.router)
+api_router.include_router(semantics.router)
+api_router.include_router(embeddings.router)
+api_router.include_router(relationship_graph.router)
+api_router.include_router(exports.router)
+api_router.include_router(readiness.router)
+api_router.include_router(pipeline.router)
+api_router.include_router(artifacts.router)
+api_router.include_router(mongodb.router)

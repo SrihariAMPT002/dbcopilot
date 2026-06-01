@@ -108,21 +108,32 @@ def _resolve_qdrant_url() -> str:
 
 
 def get_azure_openai_client():
-    """Return a cached Azure OpenAI client."""
-
+    """Return a cached Azure OpenAI client configured for embeddings."""
     global _openai_client
     if _openai_client is not None:
         return _openai_client
 
     if AzureOpenAI is None:
         raise ImportError("openai package is required for Azure OpenAI embeddings")
-    if not settings.azure_openai_endpoint or not settings.azure_openai_key:
-        raise ValueError("Azure OpenAI is not configured. Set AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_KEY.")
+
+    embedding_url = settings.azure_openai_embedding_url
+    embedding_key = settings.azure_openai_embedding_api_key
+
+    # Fall back to the main endpoint if embedding-specific credentials are not set
+    if not embedding_url or not embedding_key:
+        embedding_url = settings.azure_openai_endpoint
+        embedding_key = settings.azure_openai_key
+
+    if not embedding_url or not embedding_key:
+        raise ValueError(
+            "Embedding credentials not configured. Set AZURE_OPENAI_EMBEDDING_URL "
+            "and AZURE_OPENAI_EMBEDDING_API_KEY (or the main AZURE_OPENAI_ENDPOINT/KEY)."
+        )
 
     _openai_client = AzureOpenAI(
-        api_key=settings.azure_openai_key,
+        api_key=embedding_key,
         api_version=settings.azure_openai_api_version,
-        azure_endpoint=settings.azure_openai_endpoint,
+        azure_endpoint=embedding_url,
     )
     return _openai_client
 
@@ -167,15 +178,36 @@ class EmbeddingEngine:
         if not texts:
             return [], {}
 
+        dimensions = settings.azure_openai_embedding_dimensions
+
         def _call() -> tuple[List[List[float]], Dict[str, int]]:
             client = get_azure_openai_client()
-            response = client.embeddings.create(
+            kwargs: dict = dict(
                 model=settings.azure_openai_embedding_deployment,
                 input=list(texts),
             )
+            # dimensions param is supported by text-embedding-3-* models
+            if dimensions:
+                kwargs["dimensions"] = dimensions
+
+            response = client.embeddings.create(**kwargs)
             vectors = [item.embedding for item in response.data]
             usage = _count_token_usage(response)
             return vectors, usage
+
+        start = time.perf_counter()
+        vectors, usage = await asyncio.to_thread(_call)
+        latency_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "Embedded %d text(s) | model=%s dim=%d in %.2fms",
+            len(texts),
+            settings.azure_openai_embedding_deployment,
+            dimensions,
+            latency_ms,
+        )
+        if usage:
+            logger.info("Token usage: %s", usage)
+        return vectors, usage
 
         start = time.perf_counter()
         vectors, usage = await asyncio.to_thread(_call)
@@ -194,23 +226,43 @@ class EmbeddingEngine:
         vectors, usage = await self._embed_texts([text])
         return vectors[0], usage
 
-    def _ensure_collections(self, vector_size: int) -> None:
+    def _ensure_collections(self, vector_size: Optional[int] = None) -> None:
         client = get_qdrant_client()
         if qmodels is None:
             raise ImportError("qdrant-client is required for vector indexing and retrieval")
 
+        # Always prefer the configured dimension; fall back to the measured one only
+        # if config is 0 / None (shouldn't happen, but safe)
+        size = settings.azure_openai_embedding_dimensions or vector_size
+        if not size:
+            raise ValueError(
+                "Cannot create Qdrant collections: embedding dimensions not configured. "
+                "Set AZURE_OPENAI_EMBEDDING_DIMENSIONS in your .env."
+            )
+
         for collection_name in EMBEDDING_COLLECTIONS:
             try:
-                client.get_collection(collection_name)
+                existing = client.get_collection(collection_name)
+                existing_size = existing.config.params.vectors.size
+                if existing_size != size:
+                    logger.warning(
+                        "Collection %s has vector size %d but config says %d. "
+                        "Delete the collection and re-index if you changed dimensions.",
+                        collection_name, existing_size, size,
+                    )
             except Exception:
                 client.create_collection(
                     collection_name=collection_name,
                     vectors_config=qmodels.VectorParams(
-                        size=vector_size,
+                        size=size,
                         distance=qmodels.Distance.COSINE,
                     ),
                 )
-                logger.info("Created Qdrant collection %s", collection_name)
+                logger.info(
+                    "Created Qdrant collection %s (size=%d, distance=COSINE)",
+                    collection_name,
+                    size,
+                )
 
     async def _fetch_database(self, database_id: int) -> ConnectedDatabase:
         result = await self.db.execute(
@@ -431,9 +483,7 @@ class EmbeddingEngine:
         if not tables:
             raise ValueError(f"Database {database_id} has no tables to index")
 
-        sample_text = self._build_table_text(tables[0], await self._fetch_semantic_summary(tables[0].id))
-        sample_vector, _ = await self._embed_text(sample_text)
-        self._ensure_collections(len(sample_vector))
+        self._ensure_collections()
 
         batch_result = EmbeddingBatchResult(
             database_id=database.id,
@@ -682,7 +732,7 @@ class EmbeddingEngine:
         return counts
 
     def is_embedding_ready(self) -> bool:
-        return bool(settings.azure_openai_endpoint and settings.azure_openai_key)
+        return settings.embedding_configured
 
     def is_qdrant_ready(self) -> bool:
         try:

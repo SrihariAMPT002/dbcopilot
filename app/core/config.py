@@ -66,23 +66,23 @@ class Settings(BaseSettings):
     # ── Streamlit ──────────────────────────────────────────────
     api_base_url: str = Field(default="http://fastapi:8000/api/v1")
 
-    # ── Future: Redis ──────────────────────────────────────────
+    # ── Redis ──────────────────────────────────────────
     redis_host: Optional[str] = Field(default=None)
     redis_port: int = Field(default=6379)
 
-    # ── Future: OpenAI ─────────────────────────────────────────
-    openai_api_key: Optional[str] = Field(default=None)
-    openai_model: str = Field(default="gpt-4o")
-
-    # ── Azure OpenAI ───────────────────────────────────────────
+    # ── Azure OpenAI ───────────────────────────────────────────────
     azure_openai_endpoint: Optional[str] = Field(default=None)
     azure_openai_key: Optional[str] = Field(default=None)
     azure_openai_api_version: str = Field(default="2024-02-15-preview")
-    azure_openai_deployment: str = Field(default="gpt-4o")  # Deployment name in Azure
+    azure_openai_deployment: str = Field(default="gpt-4o")
+
+    # Embeddings use a separate endpoint/key and support custom dimensions
+    azure_openai_embedding_url: Optional[str] = Field(default=None)
+    azure_openai_embedding_api_key: Optional[str] = Field(default=None)
     azure_openai_embedding_deployment: str = Field(default="text-embedding-3-small")
+    azure_openai_embedding_dimensions: int = Field(default=384)
 
-
-    # ── Future: Qdrant ─────────────────────────────────────────
+    # ──  Qdrant ─────────────────────────────────────────
     qdrant_host: Optional[str] = Field(default=None)
     qdrant_port: int = Field(default=6333)
     qdrant_url: Optional[str] = Field(default=None)
@@ -114,7 +114,13 @@ class Settings(BaseSettings):
     def supported_db_types(self) -> List[str]:
         return ["postgresql", "mysql", "sqlserver", "mongodb"]
 
-
+    @property
+    def embedding_configured(self) -> bool:
+        """True if embedding credentials are available (either dedicated or fallback)."""
+        has_dedicated = bool(self.azure_openai_embedding_url and self.azure_openai_embedding_api_key)
+        has_fallback = bool(self.azure_openai_endpoint and self.azure_openai_key)
+        return has_dedicated or has_fallback
+    
 @lru_cache()
 def get_settings() -> Settings:
     """Return cached settings singleton."""

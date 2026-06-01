@@ -1,0 +1,342 @@
+# Semantic Rules & Intelligence Configuration
+# Defines business rules for semantic analysis, entity classification, and glossary generation
+# Version: 1.0.0
+# Last Updated: 2026-06-01
+
+entity_classification:
+  description: "Rules for classifying database entities (tables/collections)"
+  
+  business_entities:
+    patterns:
+      - "^(customer|client|account|user|person|employee|contact)s?$"
+      - "^(order|purchase|sale|invoice|transaction)s?$"
+      - "^(product|item|sku|inventory|stock)s?$"
+      - "^(department|division|branch|location|site)s?$"
+    category: "Core Business Entity"
+    significance: high
+
+  transaction_entities:
+    patterns:
+      - "^(payment|receipt|refund|charge)s?$"
+      - "^(log|event|audit|history)s?$"
+      - "^(record|entry|document|message)s?$"
+    category: "Transaction/Activity Log"
+    significance: medium
+
+  reference_entities:
+    patterns:
+      - "^(type|category|status|priority|level)s?$"
+      - "^(reason|code|config|setting|option)s?$"
+    category: "Reference/Lookup"
+    significance: low
+
+  system_entities:
+    patterns:
+      - "^(sys_|internal_|system_)"
+      - "^_(.*)"
+    category: "System/Infrastructure"
+    significance: low
+    exclude_from_glossary: true
+
+# Column role classification
+column_roles:
+  identifier:
+    patterns:
+      - "_id$"
+      - "^id_"
+      - "_key$"
+      - "^key_"
+    meaning: "Unique identifier for records"
+
+  name_description:
+    patterns:
+      - "_name$"
+      - "^name_"
+      - "_title$"
+      - "_label$"
+      - "_description$"
+    meaning: "Human-readable name or description"
+
+  category:
+    patterns:
+      - "_type$"
+      - "^type_"
+      - "_category$"
+      - "_status$"
+      - "_state$"
+    meaning: "Categorization or status value"
+
+  measurement:
+    patterns:
+      - "_count$"
+      - "_amount$"
+      - "_value$"
+      - "_price$"
+      - "_total$"
+      - "_quantity$"
+    meaning: "Numeric measurement or quantity"
+
+  temporal:
+    patterns:
+      - "_date$"
+      - "^date_"
+      - "_time$"
+      - "_at$"
+      - "_timestamp$"
+      - "_created"
+      - "_modified"
+      - "_updated"
+    meaning: "Date or time information"
+
+  flag:
+    patterns:
+      - "_flag$"
+      - "^is_"
+      - "^has_"
+      - "_enabled$"
+      - "_active$"
+    meaning: "Boolean flag or indicator"
+
+  reference:
+    patterns:
+      - "_id$"
+      - "^fk_"
+      - "_ref$"
+    meaning: "Reference to another table"
+
+# Business glossary rules
+glossary:
+  description: "Rules for generating business glossary terms"
+  
+  term_extraction:
+    sources:
+      - table_names
+      - column_names
+      - column_types
+      - documented_comments
+
+  transform_rules:
+    - replace_underscores_with_spaces: true
+    - convert_snake_case_to_title_case: true
+    - expand_common_abbreviations: true
+      abbreviations:
+        id: "Identifier"
+        fk: "Foreign Key"
+        pk: "Primary Key"
+        dept: "Department"
+        emp: "Employee"
+        mgr: "Manager"
+        qty: "Quantity"
+        amt: "Amount"
+        pmt: "Payment"
+        inv: "Invoice"
+        ref: "Reference"
+        seq: "Sequence"
+
+  definition_generation:
+    # Use semantic analysis to generate definitions
+    include_column_type: true
+    include_examples: false  # For privacy
+    include_statistics: false  # For privacy
+    include_relationships: true
+
+  quality_filters:
+    minimum_term_length: 2  # Skip single letters
+    exclude_system_terms: true
+    exclude_generic_terms:
+      - "data"
+      - "value"
+      - "record"
+      - "entry"
+
+# Relationship inference rules
+relationship_inference:
+  description: "Rules for inferring relationships between tables"
+  
+  explicit_relationships:
+    # Foreign keys are always explicit
+    source: foreign_keys
+    confidence: 1.0  # 100% confidence
+
+  naming_conventions:
+    # Infer from naming patterns
+    patterns:
+      - pattern: "{child_table}_id"
+        matches: "{parent_table}.id"
+        description: "Foreign key naming convention"
+        confidence: 0.85
+
+      - pattern: "{parent_table}_id"
+        matches: "{parent_table}.id"
+        description: "Reference to parent table"
+        confidence: 0.75
+
+  column_matching:
+    # Infer from matching column names and types
+    same_name_and_type:
+      confidence: 0.6
+      description: "Columns with same name and type likely related"
+
+    semantic_matching:
+      confidence: 0.4
+      description: "Semantic similarity of column names"
+
+  candidate_ranking:
+    order:
+      1: explicit_foreign_keys
+      2: naming_conventions
+      3: column_matching
+      4: semantic_matching
+
+# Use case suggestion rules
+use_case_suggestions:
+  description: "Rules for suggesting analytics use cases"
+  
+  patterns:
+    transaction_analysis:
+      triggers:
+        - has_order_or_transaction_table: true
+        - has_customer_table: true
+        - has_temporal_data: true
+      suggestions:
+        - "Customer purchase pattern analysis"
+        - "Transaction frequency trends"
+        - "Revenue trending and forecasting"
+
+    customer_analytics:
+      triggers:
+        - has_customer_table: true
+        - has_order_table: true
+      suggestions:
+        - "Customer lifetime value (CLV) analysis"
+        - "Customer segmentation"
+        - "Churn prediction"
+        - "Customer acquisition cost (CAC) analysis"
+
+    product_analysis:
+      triggers:
+        - has_product_table: true
+        - has_inventory_table: true
+      suggestions:
+        - "Product performance metrics"
+        - "Inventory optimization"
+        - "SKU profitability analysis"
+        - "Product mix analysis"
+
+    operational_intelligence:
+      triggers:
+        - has_employee_table: true
+        - has_department_table: true
+      suggestions:
+        - "Organizational structure analysis"
+        - "Department performance metrics"
+        - "Headcount trending"
+
+    quality_assurance:
+      triggers:
+        - has_audit_or_log_table: true
+      suggestions:
+        - "Error rate monitoring"
+        - "System health metrics"
+        - "Data quality assurance"
+
+# Semantic intelligence modes
+analysis_modes:
+  full:
+    description: "Comprehensive analysis of all aspects"
+    analyzes:
+      - business_domain
+      - key_entities
+      - relationships
+      - glossary
+      - use_cases
+      - quality_metrics
+
+  quick:
+    description: "Fast analysis focusing on core aspects"
+    analyzes:
+      - business_domain
+      - key_entities
+      - use_cases
+
+  minimal:
+    description: "Lightweight analysis for resource constraints"
+    analyzes:
+      - business_domain
+      - key_entities
+
+# Schema sampling for large databases
+schema_sampling:
+  description: "Rules for sampling large schemas to stay within token limits"
+  
+  max_entities_to_analyze: 50
+  sampling_strategy: "priority-based"
+  
+  priority:
+    1: "Core business entities"
+    2: "Entities with most relationships"
+    3: "Largest tables"
+    4: "Recently modified entities"
+    5: "Random selection for diversity"
+
+  fallback_strategy:
+    "When exceeds max_entities":
+      - "Sample top 30 by priority"
+      - "Note in analysis that sampling was applied"
+      - "Reduce confidence score by 5%"
+
+# AI output validation rules
+output_validation:
+  description: "Rules for validating AI responses"
+  
+  semantic_response:
+    required_fields:
+      - business_domain
+      - business_summary
+      - key_entities
+      - business_glossary
+      - suggested_use_cases
+      - confidence_score
+
+    field_constraints:
+      business_domain:
+        type: string
+        min_length: 3
+        max_length: 100
+        examples: "E-Commerce, Healthcare, Finance, Manufacturing"
+
+      business_summary:
+        type: string
+        min_length: 20
+        max_length: 500
+
+      key_entities:
+        type: array
+        min_items: 1
+        max_items: 20
+        item_type: string
+
+      business_glossary:
+        type: array
+        items:
+          term: string
+          definition: string
+
+      confidence_score:
+        type: float
+        min: 0.0
+        max: 1.0
+
+# Future extensibility hooks
+extensibility:
+  custom_scoring_engines:
+    description: "Support for custom scoring implementations"
+    interface: "ScoringEngine"
+    
+  custom_classifiers:
+    description: "Support for custom entity classification"
+    interface: "EntityClassifier"
+
+  custom_glossary_generators:
+    description: "Support for custom glossary generation"
+    interface: "GlossaryGenerator"

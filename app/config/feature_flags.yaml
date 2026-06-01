@@ -1,0 +1,276 @@
+# Feature Flags Configuration
+# Controls feature availability across different environments
+# Version: 1.0.0
+# Last Updated: 2026-06-01
+
+features:
+  # Semantic Intelligence - AI-powered business understanding
+  semantic_intelligence:
+    enabled: true
+    description: "Database-level semantic analysis and glossary generation"
+    environments:
+      development: true
+      staging: true
+      production: true
+    dependencies:
+      - azure_openai_configured
+    requires_sync: true
+
+  # Table-level semantic enrichment
+  semantic_enrichment:
+    enabled: true
+    description: "Table and column-level semantic enrichment"
+    environments:
+      development: true
+      staging: true
+      production: true
+    dependencies:
+      - azure_openai_configured
+
+  # Vector embeddings and semantic search
+  embeddings:
+    enabled: true
+    description: "Vector embedding generation and semantic search"
+    environments:
+      development: true
+      staging: true
+      production: true
+    dependencies:
+      - qdrant_available
+      - azure_openai_configured
+
+  # Semantic search API
+  semantic_search:
+    enabled: true
+    description: "Query vector database for semantic results"
+    environments:
+      development: true
+      staging: true
+      production: true
+    depends_on: embeddings
+
+  # Relationship inference and graph
+  relationship_inference:
+    enabled: true
+    description: "Infer and visualize relationships between entities"
+    environments:
+      development: true
+      staging: true
+      production: true
+    dependencies:
+      - azure_openai_configured
+
+  # Prompt Studio - AI context generation
+  prompt_studio:
+    enabled: true
+    description: "Generate AI-ready prompt context from databases"
+    environments:
+      development: true
+      staging: true
+      production: true
+    dependencies:
+      - schema_metadata_available
+
+  # AI Readiness Assessment
+  ai_readiness:
+    enabled: true
+    description: "Assess database readiness for AI/ML applications"
+    environments:
+      development: true
+      staging: true
+      production: true
+    
+  # Export functionality
+  exports:
+    enabled: true
+    description: "Export semantic packages and artifacts"
+    environments:
+      development: true
+      staging: true
+      production: true
+
+  # Advanced relationship graph visualization
+  advanced_graph_viz:
+    enabled: true
+    description: "Interactive relationship graph visualization"
+    environments:
+      development: true
+      staging: true
+      production: false  # Disabled in production due to performance
+    performance_tier: premium
+
+  # MongoDB/NoSQL support
+  nosql_support:
+    enabled: true
+    description: "Support for MongoDB and NoSQL databases"
+    environments:
+      development: true
+      staging: true
+      production: true
+    dependencies:
+      - mongodb_connection_available
+
+  # Streaming metadata sync
+  streaming_sync:
+    enabled: false
+    description: "Real-time streaming metadata sync (experimental)"
+    environments:
+      development: true
+      staging: false
+      production: false
+    tier: experimental
+    note: "Coming in future release"
+
+  # AI-generated schema recommendations
+  schema_recommendations:
+    enabled: false
+    description: "AI-powered schema improvement suggestions (experimental)"
+    environments:
+      development: true
+      staging: false
+      production: false
+    tier: experimental
+    dependencies:
+      - azure_openai_configured
+
+  # Multi-language support
+  multi_language:
+    enabled: false
+    description: "Support for prompts/glossaries in multiple languages"
+    environments:
+      development: false
+      staging: false
+      production: false
+    tier: experimental
+
+  # Caching layer (Redis)
+  caching:
+    enabled: false
+    description: "Redis caching for frequently accessed queries"
+    environments:
+      development: false
+      staging: true
+      production: false
+    dependencies:
+      - redis_available
+    performance_impact: high
+    tier: premium
+
+  # Audit logging
+  audit_logging:
+    enabled: true
+    description: "Track all semantic generation and export activities"
+    environments:
+      development: true
+      staging: true
+      production: true
+    compliance_required: true
+
+  # Rate limiting
+  rate_limiting:
+    enabled: true
+    description: "Protect API endpoints from abuse"
+    environments:
+      development: false
+      staging: true
+      production: true
+
+  # API versioning
+  api_versioning:
+    enabled: true
+    description: "Support multiple API versions for backward compatibility"
+    environments:
+      development: true
+      staging: true
+      production: true
+
+# Feature tiers (for future licensing/SaaS model)
+tiers:
+  free:
+    features:
+      - semantic_intelligence
+      - semantic_enrichment
+      - relationship_inference
+      - exports
+      - ai_readiness
+    limits:
+      requests_per_month: 1000
+      databases: 5
+      concurrent_operations: 1
+
+  professional:
+    features:
+      - semantic_intelligence
+      - semantic_enrichment
+      - embeddings
+      - semantic_search
+      - relationship_inference
+      - prompt_studio
+      - exports
+      - ai_readiness
+      - audit_logging
+      - rate_limiting
+    limits:
+      requests_per_month: 50000
+      databases: 100
+      concurrent_operations: 5
+
+  enterprise:
+    features:
+      - semantic_intelligence
+      - semantic_enrichment
+      - embeddings
+      - semantic_search
+      - relationship_inference
+      - prompt_studio
+      - exports
+      - ai_readiness
+      - advanced_graph_viz
+      - nosql_support
+      - audit_logging
+      - rate_limiting
+      - api_versioning
+      - caching
+    limits:
+      requests_per_month: unlimited
+      databases: unlimited
+      concurrent_operations: unlimited
+
+# Environment-specific overrides
+environments:
+  development:
+    debug: true
+    verbose_logging: true
+    # Can enable experimental features in dev
+
+  staging:
+    debug: false
+    verbose_logging: false
+    # Limited experimental features
+
+  production:
+    debug: false
+    verbose_logging: false
+    # Only stable, production-ready features
+
+# Beta/experimental tracking
+experimental_features:
+  enabled: false  # Set true to enable all experimental features
+  features:
+    - streaming_sync
+    - schema_recommendations
+    - multi_language
+    - caching
+  note: "Enable only in non-production environments"
+
+# Feature announcements (for future UI)
+announcements:
+  multi_language:
+    title: "Multi-language Semantic Intelligence"
+    description: "Coming in Q3 2026"
+    expected_release: "2026-07-01"
+
+  schema_recommendations:
+    title: "AI-Powered Schema Recommendations"
+    description: "Let AI suggest schema improvements"
+    expected_release: "2026-06-15"

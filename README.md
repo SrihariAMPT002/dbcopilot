@@ -316,6 +316,3 @@ alembic downgrade -1
 
 ---
 
-## 📜 License
-
-MIT License — see LICENSE file.

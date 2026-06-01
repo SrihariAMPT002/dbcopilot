@@ -78,6 +78,7 @@ services:
       dockerfile: Dockerfile.streamlit
     container_name: dbcopilot-streamlit
     restart: unless-stopped
+    env_file: .env
     environment:
       API_BASE_URL: ${API_BASE_URL:-http://fastapi:8000/api/v1}
       STREAMLIT_PORT: ${STREAMLIT_PORT:-8501}

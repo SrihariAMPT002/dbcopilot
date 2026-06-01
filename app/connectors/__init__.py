@@ -10,6 +10,7 @@ Usage:
 from typing import Any
 
 from app.connectors.base import BaseConnector
+from app.connectors.base_nosql import BaseNoSQLConnector
 from app.connectors.connection_utils import (
     ConnectionResult,
     ConnectionUtilityError,
@@ -55,6 +56,7 @@ def get_connector(db_type: str, **kwargs: Any) -> BaseConnector:
 __all__ = [
     "get_connector",
     "BaseConnector",
+    "BaseNoSQLConnector",
     "PostgresConnector",
     "MySQLConnector",
     "SQLServerConnector",

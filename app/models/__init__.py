@@ -7,12 +7,24 @@ from app.models.metadata import (
     DatabaseRelationship,
     SchemaEmbedding,
     SchemaRelationshipGraph,
+    SchemaSemantic,
+    DatabaseSemantic,
     SyncLog,
     DatabaseType,
     ConnectionStatus,
     EmbeddingStatus,
     SyncStatus,
     TableType,
+    SemanticGenerationStatus,
+)
+from app.models.readiness_snapshot import ReadinessSnapshot, ReadinessStatus
+from app.models.pipeline_job import PipelineJob, JobStatus, JobType
+from app.models.artifact_manifest import ArtifactManifest, ArtifactType, ExportStatus
+from app.models.nosql_metadata import (
+    NoSQLCollection,
+    NoSQLSchemaField,
+    NoSQLDocumentSample,
+    NoSQLRelationship,
 )
 
 __all__ = [
@@ -24,10 +36,25 @@ __all__ = [
     "DatabaseRelationship",
     "SchemaEmbedding",
     "SchemaRelationshipGraph",
+    "SchemaSemantic",
+    "DatabaseSemantic",
     "SyncLog",
     "DatabaseType",
     "ConnectionStatus",
     "EmbeddingStatus",
     "SyncStatus",
     "TableType",
+    "SemanticGenerationStatus",
+    "ReadinessSnapshot",
+    "ReadinessStatus",
+    "PipelineJob",
+    "JobStatus",
+    "JobType",
+    "ArtifactManifest",
+    "ArtifactType",
+    "ExportStatus",
+    "NoSQLCollection",
+    "NoSQLSchemaField",
+    "NoSQLDocumentSample",
+    "NoSQLRelationship",
 ]

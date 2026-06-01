@@ -1,5 +1,5 @@
 """
-Exports page.
+Artifact Registry page.
 """
 
 from __future__ import annotations
@@ -8,209 +8,145 @@ from datetime import datetime
 
 import streamlit as st
 
-from components.api_client import export_embeddings, export_graph, export_prompts, export_schema, get_connections
+from components.api_client import (
+    export_artifacts,
+    get_artifact_manifest,
+    get_connections,
+    list_artifacts,
+)
 from components.sidebar import render_sidebar
 from components.source_terms import source_family, terminology
 
 
-st.set_page_config(
-    page_title="Exports",
-    page_icon="",
-    layout="wide",
-)
-
-st.markdown(
-    """
-<style>
-    .export-card {
-        background: white;
-        border: 1px solid #e2e8f0;
-        border-radius: 14px;
-        padding: 16px 18px;
-        margin-bottom: 14px;
-        box-shadow: 0 1px 3px rgba(15,23,42,0.05);
-    }
-    .export-title {
-        font-size: 1.05rem;
-        font-weight: 700;
-        color: #0f172a;
-        margin-bottom: 6px;
-    }
-    .export-meta {
-        color: #64748b;
-        font-size: 0.83rem;
-        margin-bottom: 10px;
-    }
-    .preview-box {
-        background: #0f172a;
-        color: #e2e8f0;
-        border-radius: 12px;
-        padding: 18px;
-        white-space: pre-wrap;
-        font-family: monospace;
-        line-height: 1.55;
-        min-height: 220px;
-    }
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
+st.set_page_config(page_title="Artifact Registry", page_icon="", layout="wide")
 render_sidebar()
 
-
-def _append_history(entry: dict) -> None:
-    history = st.session_state.get("export_history", [])
-    history.insert(0, entry)
-    st.session_state["export_history"] = history[:20]
+st.markdown("## Artifact Registry")
+st.markdown("Versioned AI context packages for semantic intelligence, embeddings, graph intelligence, and prompt context.")
+st.markdown("---")
 
 
-def _fmt_dt(value):
-    if not value:
+def _fmt_dt(value: str | datetime | None) -> str:
+    if value is None:
         return "n/a"
     if isinstance(value, datetime):
         return value.strftime("%Y-%m-%d %H:%M")
-    return str(value)
+    return str(value).replace("T", " ")[:19]
 
-
-def _render_export_block(title: str, helper, db_id: int, export_key: str, default_format: str = "json") -> None:
-    st.markdown(
-        f"""
-        <div class="export-card">
-            <div class="export-title">{title}</div>
-            <div class="export-meta">Formats: JSON, Markdown, CSV</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    format_choice = st.radio(
-        f"{title} format",
-        options=["json", "markdown", "csv"],
-        horizontal=True,
-        index=["json", "markdown", "csv"].index(default_format),
-        key=f"format_{export_key}",
-        label_visibility="collapsed",
-    )
-
-    preview_key = f"preview_{export_key}"
-    payload_key = f"payload_{export_key}"
-
-    cols = st.columns([1, 1, 4])
-    with cols[0]:
-        if st.button(f"Generate {title}", key=f"gen_{export_key}", type="primary", use_container_width=True):
-            ok, payload = helper(db_id, format_choice)
-            if ok:
-                st.session_state[payload_key] = payload
-                st.session_state[preview_key] = payload.get("content", "")
-                _append_history(
-                    {
-                        "title": title,
-                        "format": format_choice,
-                        "filename": payload.get("filename"),
-                        "generated_at": _fmt_dt(datetime.now()),
-                    }
-                )
-                st.success(f"{title} export generated.")
-            else:
-                st.error(payload.get("error", "Export failed"))
-    with cols[1]:
-        if st.button(f"Refresh {title}", key=f"refresh_{export_key}", use_container_width=True):
-            st.rerun()
-    with cols[2]:
-        st.caption("Preview updates after generation. Download is available from the button below.")
-
-    preview = st.session_state.get(preview_key, "")
-    payload = st.session_state.get(payload_key, {})
-    if preview:
-        st.markdown(f"<div class='preview-box'>{preview[:5000]}</div>", unsafe_allow_html=True)
-        download_mime = payload.get("mime", "text/plain")
-        st.download_button(
-            f"Download {title}",
-            data=preview,
-            file_name=payload.get("filename", f"{export_key}.{format_choice}"),
-            mime=download_mime,
-            use_container_width=True,
-            key=f"download_{export_key}",
-        )
-    else:
-        st.info(f"No {title.lower()} export generated yet.")
-
-
-st.markdown("## Exports")
-st.markdown("Very enterprise-style export workspace for AI schema intelligence packages.")
-if source_family(selected_conn.get("db_type", "")) == "NoSQL":
-    st.info(
-        f"NoSQL export mode is UI-ready for {terms['entity_label'].lower()} metadata. "
-        "The backend export endpoints currently surface relational metadata."
-    )
-st.markdown("---")
 
 ok, conns = get_connections()
-if not ok or not conns:
+if not ok or not isinstance(conns, list) or not conns:
     st.warning("No connected databases found. Connect one first.")
     st.stop()
 
-connections = conns if isinstance(conns, list) else []
+connections = [c for c in conns if c.get("status") == "active"]
 source_filter = st.radio("Source Type Filter", options=["All Sources", "SQL", "NoSQL"], horizontal=True)
 if source_filter == "SQL":
     connections = [c for c in connections if source_family(c.get("db_type", "")) == "SQL"]
 elif source_filter == "NoSQL":
     connections = [c for c in connections if source_family(c.get("db_type", "")) == "NoSQL"]
 
-active_conns = [c for c in connections if c.get("status") == "active"]
-if not active_conns:
-    st.warning("No active databases. Activate a connection first.")
+if not connections:
+    st.warning("No active sources in selected filter.")
     st.stop()
 
-db_options = {f"{c['name']} ({c.get('db_type', '').upper()})": c for c in active_conns}
-selected_label = st.selectbox("Select Database", options=list(db_options.keys()))
-selected_conn = db_options[selected_label]
+db_options = {f"{c['name']} ({c.get('db_type', '').upper()})": c for c in connections}
+selected = st.selectbox("Select Database", options=list(db_options.keys()))
+selected_conn = db_options[selected]
 db_id = selected_conn["id"]
 terms = terminology(selected_conn.get("db_type", ""))
 
-summary_cols = st.columns(4)
-summary_cols[0].metric("Database", selected_conn.get("name", "Unnamed"))
-summary_cols[1].metric("Schemas", selected_conn.get("schema_count", 0))
-summary_cols[2].metric(f"{terms['entity_label']}s", selected_conn.get("table_count", 0))
-summary_cols[3].metric("Export History", len(st.session_state.get("export_history", [])))
+if source_family(selected_conn.get("db_type", "")) == "NoSQL":
+    st.info(
+        f"NoSQL artifact packaging is enabled for {terms['entity_label'].lower()} metadata. "
+        "Coverage currently reflects backend semantic extraction parity."
+    )
+
+top_cols = st.columns([1, 1, 1, 1])
+top_cols[0].metric("Database", selected_conn.get("name", "Unknown"))
+top_cols[1].metric("Schemas", selected_conn.get("schema_count", 0))
+top_cols[2].metric(f"{terms['entity_label']}s", selected_conn.get("table_count", 0))
+
+ok_list, artifacts_payload = list_artifacts(db_id)
+artifacts = artifacts_payload.get("artifacts", []) if ok_list and isinstance(artifacts_payload, dict) else []
+top_cols[3].metric("Artifact Versions", len(artifacts))
+
+action_cols = st.columns([1, 1, 4])
+with action_cols[0]:
+    if st.button("Generate Versioned Package", type="primary", use_container_width=True):
+        ok_export, payload = export_artifacts(db_id)
+        if ok_export:
+            st.session_state["latest_artifact_export"] = payload
+            st.success(payload.get("message", "Versioned artifacts generated."))
+            st.rerun()
+        else:
+            st.error(payload.get("error", "Artifact export failed"))
+with action_cols[1]:
+    if st.button("Refresh Registry", use_container_width=True):
+        st.rerun()
+with action_cols[2]:
+    st.caption("Generates semantic_summary.json, embeddings.json, relationship_graph.json, and prompt_context.md as versioned AI context packages.")
 
 st.markdown("---")
 
-schema_tab, prompt_tab, graph_tab, embeddings_tab = st.tabs(
-    ["Schema Graph", "Semantic Summaries", "Prompt Context", "Embeddings Metadata"]
-)
-
-with schema_tab:
-    _render_export_block("Schema Graph", export_graph, db_id, "graph")
-
-with prompt_tab:
-    _render_export_block("Prompt Context", export_prompts, db_id, "prompts")
-
-with graph_tab:
-    _render_export_block("Semantic Summaries", export_schema, db_id, "schema")
-
-with embeddings_tab:
-    _render_export_block("Embeddings Metadata", export_embeddings, db_id, "embeddings")
-
-st.markdown("---")
-st.markdown("### Export History")
-history = st.session_state.get("export_history", [])
-if history:
-    for entry in history[:10]:
-        h1, h2, h3 = st.columns([2, 1, 2])
-        h1.markdown(f"**{entry['title']}**")
-        h2.markdown(f"`{entry['format']}`")
-        h3.caption(f"{entry.get('generated_at', 'n/a')} · {entry.get('filename', '')}")
+ok_manifest, manifest_payload = get_artifact_manifest(db_id)
+if ok_manifest:
+    latest = manifest_payload.get("latest", {}) if isinstance(manifest_payload, dict) else {}
+    st.markdown("### Latest Manifest")
+    if latest:
+        rows = []
+        for artifact_type, item in latest.items():
+            rows.append(
+                {
+                    "artifact_type": artifact_type,
+                    "version": item.get("version"),
+                    "status": item.get("export_status"),
+                    "schema_hash": str(item.get("schema_hash", ""))[:16],
+                    "generated_at": _fmt_dt(item.get("generated_at")),
+                    "path": item.get("artifact_path"),
+                }
+            )
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+    else:
+        st.info("No artifact manifests available yet.")
 else:
-    st.info("Export history will appear here after you generate downloads.")
+    st.warning(manifest_payload.get("error", "Could not load manifest."))
 
-st.markdown("---")
-st.markdown(
-    """
-    **About Exports**
+latest_export = st.session_state.get("latest_artifact_export", {})
+latest_manifests = latest_export.get("manifests", []) if isinstance(latest_export, dict) else []
+if latest_manifests:
+    st.markdown("### Latest Generated Package (Download)")
+    for item in latest_manifests:
+        cols = st.columns([3, 2, 2, 2])
+        cols[0].markdown(f"**{item.get('artifact_type')}**")
+        cols[1].markdown(f"v{item.get('version', '?')}")
+        cols[2].markdown(f"`{item.get('export_status', '')}`")
+        cols[3].caption(_fmt_dt(item.get("generated_at")))
+        if item.get("content"):
+            default_name = item.get("artifact_type", "artifact").replace("/", "_")
+            st.download_button(
+                f"Download {item.get('artifact_type')}",
+                data=item.get("content", ""),
+                file_name=item.get("filename", default_name),
+                mime=item.get("mime", "text/plain"),
+                key=f"download_latest_{item.get('id')}",
+            )
 
-    Export AI schema intelligence artifacts in enterprise-friendly formats:
-    JSON, Markdown, and CSV.
-    """
-)
+st.markdown("### Generation History")
+if artifacts:
+    history_rows = []
+    for entry in artifacts:
+        history_rows.append(
+            {
+                "id": entry.get("id"),
+                "artifact_type": entry.get("artifact_type"),
+                "version": entry.get("version"),
+                "status": entry.get("export_status"),
+                "schema_hash": str(entry.get("schema_hash", ""))[:16],
+                "generated_at": _fmt_dt(entry.get("generated_at")),
+                "artifact_path": entry.get("artifact_path"),
+            }
+        )
+    st.dataframe(history_rows, use_container_width=True, hide_index=True)
+else:
+    st.info("No artifacts generated yet.")

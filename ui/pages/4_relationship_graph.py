@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 from pyvis.network import Network
 
 from components.api_client import (
@@ -195,7 +196,6 @@ def _build_network() -> str:
     net.toggle_physics(True)
     net.barnes_hut(gravity=-22000, central_gravity=0.3, spring_length=180, spring_strength=0.04, damping=0.35)
 
-    node_lookup = {node["table_id"]: node for node in nodes}
     focused_id = focus_node["table_id"]
     neighbor_ids = {item["table_id"] for item in neighbor_payload.get("neighbors", [])}
     search_term = focus_search.lower().strip()
@@ -296,7 +296,7 @@ def _build_network() -> str:
 
 st.markdown("### Interactive Graph")
 graph_html = _build_network()
-st.components.v1.html(graph_html, height=780, scrolling=True)
+components.html(graph_html, height=780, scrolling=True)
 
 st.markdown("### Dependency Paths")
 if paths_payload.get("paths"):

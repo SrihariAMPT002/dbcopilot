@@ -8,7 +8,19 @@ from typing import Any, Dict, List
 
 import streamlit as st
 
-from components.api_client import get_columns, get_connections, get_relationships, get_schemas, get_tables, diagnose_connection
+from components.api_client import (
+    diagnose_connection,
+    get_columns,
+    get_connections,
+    get_relationships,
+    get_schemas,
+    get_tables,
+    mongodb_collections,
+    mongodb_infer_schema,
+    mongodb_relationships,
+    mongodb_samples,
+    mongodb_schema,
+)
 from components.sidebar import render_sidebar
 from components.source_terms import badge_label, is_nosql, source_family, terminology
 
@@ -355,62 +367,84 @@ if family == "SQL":
                             )
 
 else:
-    # NoSQL UI state: database-agnostic panels that can render inferred metadata later
-    collection_rows = []
-    for schema in schemas or []:
-        schema_name = schema.get("name", "")
-        if schema_search and not _match_text(schema_name, schema_search):
-            continue
-        for table in _safe_list(schema.get("tables", [])):
-            collection_name = table.get("name", "")
-            if schema_search and not _match_text(collection_name, schema_search):
-                continue
-            collection_rows.append(
-                {
-                    "database_name": selected_conn.get("database_name", ""),
-                    "collection_name": collection_name,
-                    "sample_documents": table.get("row_count", "optional"),
-                    "inferred_fields": table.get("column_count", 0),
-                    "nested_structures": "Available in NoSQL inference mode",
-                }
-            )
+    ok_collections, collections_payload = mongodb_collections(db_id)
+    collection_rows = (
+        collections_payload.get("collections", [])
+        if ok_collections and isinstance(collections_payload, dict)
+        else []
+    )
+    if schema_search:
+        collection_rows = [
+            item for item in collection_rows if _match_text(item.get("name", ""), schema_search)
+        ]
 
     if collection_rows:
         schema_hits = 1
         entity_hits = len(collection_rows)
-        field_hits = sum(int(item.get("inferred_fields", 0) or 0) for item in collection_rows)
         st.markdown("### Collections")
         for item in collection_rows:
+            collection_id = item.get("id")
+            collection_name = item.get("name", "unknown")
             with st.container(border=True):
                 st.markdown(
-                    f"**{item['collection_name']}** "
+                    f"**{collection_name}** "
                     f"<span class='stats-pill'>Collection</span>"
-                    f"<span class='stats-pill'>Inferred schema</span>"
-                    f"<span class='stats-pill'>Nested fields</span>",
+                    f"<span class='stats-pill'>Confidence {float(item.get('schema_confidence', 0.0)):.2f}</span>",
                     unsafe_allow_html=True,
                 )
-                st.markdown(f"- Sampled documents: {item['sample_documents']}")
-                st.markdown(f"- Inferred fields: {item['inferred_fields']}")
-                st.markdown(f"- Nested structures: {item['nested_structures']}")
-    else:
-        st.info("No NoSQL metadata has been surfaced yet. The UI is ready for inferred collections and fields.")
-        st.markdown("### NoSQL Visual States")
-        a, b, c, d = st.columns(4)
-        a.metric("Collections", "Pending")
-        b.metric("Sampled Documents", "Pending")
-        c.metric("Inferred Fields", "Pending")
-        d.metric("Nested Structures", "Pending")
-        st.markdown(
-            """
-            **Planned NoSQL view**
+                st.markdown(
+                    f"- Sampled documents: {item.get('sampled_documents', 0)} / approx {item.get('document_count', 'n/a')}"
+                )
 
-            - Collections
-            - Sampled Documents
-            - Inferred Fields
-            - Nested Structures
-            - Badges for inferred schema, nested fields, and array fields
-            """
-        )
+                controls = st.columns([1, 1, 1, 3])
+                if controls[0].button("Infer Schema", key=f"infer_{collection_id}", use_container_width=True):
+                    ok_infer, infer_payload = mongodb_infer_schema(collection_id, sample_size=100)
+                    if ok_infer:
+                        st.success(infer_payload.get("message", "Schema inference completed"))
+                        st.rerun()
+                    else:
+                        st.error(infer_payload.get("error", "Schema inference failed"))
+                if controls[1].button("View Fields", key=f"fields_{collection_id}", use_container_width=True):
+                    st.session_state["nosql_selected_collection"] = collection_id
+                if controls[2].button("View Samples", key=f"samples_{collection_id}", use_container_width=True):
+                    st.session_state["nosql_selected_samples"] = collection_id
+
+                ok_rel, rel_payload = mongodb_relationships(collection_id)
+                rel_count = len(rel_payload.get("relationships", [])) if ok_rel and isinstance(rel_payload, dict) else 0
+                st.caption(f"Inferred relationships: {rel_count}")
+
+        selected_fields_collection = st.session_state.get("nosql_selected_collection")
+        if selected_fields_collection:
+            st.markdown("### Inferred Field Map")
+            ok_schema, schema_payload = mongodb_schema(selected_fields_collection, limit=500, offset=0)
+            if ok_schema and isinstance(schema_payload, dict):
+                fields = schema_payload.get("fields", [])
+                if field_search:
+                    fields = [f for f in fields if _match_text(f.get("field_path", ""), field_search)]
+                field_hits += len(fields)
+                for field in fields:
+                    depth_prefix = "  " * int(field.get("nested_depth", 0))
+                    array_marker = "[] " if field.get("is_array") else ""
+                    st.markdown(
+                        f"- `{depth_prefix}{array_marker}{field.get('field_path')}` "
+                        f"· {field.get('inferred_data_type')} "
+                        f"· occ {float(field.get('occurrence_percentage', 0.0)):.1f}% "
+                        f"· conf {float(field.get('schema_confidence', 0.0)):.2f}"
+                    )
+            else:
+                st.error(schema_payload.get("error", "Failed to load inferred schema"))
+
+        selected_samples_collection = st.session_state.get("nosql_selected_samples")
+        if selected_samples_collection:
+            st.markdown("### Document Samples")
+            ok_samples, sample_payload = mongodb_samples(selected_samples_collection, limit=5, offset=0)
+            if ok_samples and isinstance(sample_payload, dict):
+                for sample in sample_payload.get("samples", []):
+                    st.json(sample.get("sample_document", {}))
+            else:
+                st.error(sample_payload.get("error", "Failed to load samples"))
+    else:
+        st.info("No NoSQL collections surfaced yet. Sync first, then run Mongo schema inference.")
 
 st.markdown("---")
 st.caption(

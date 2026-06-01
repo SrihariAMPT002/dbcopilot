@@ -1,0 +1,265 @@
+# Retry Policies & Resilience Configuration
+# Defines retry strategies for all external service calls
+# Version: 1.0.0
+# Last Updated: 2026-06-01
+
+defaults:
+  # Default retry configuration applied to all services
+  max_retries: 3
+  initial_backoff_seconds: 1
+  backoff_multiplier: 2
+  max_backoff_seconds: 60
+  jitter: true  # Add randomization to prevent thundering herd
+
+retry_policies:
+  # Azure OpenAI API calls
+  azure_openai:
+    description: "Retry strategy for Azure OpenAI API calls"
+    max_retries: 3
+    initial_backoff_seconds: 2
+    backoff_multiplier: 2
+    max_backoff_seconds: 30
+    jitter: true
+    
+    # Retry on specific error codes
+    retry_on_status_codes:
+      - 429  # Rate limited
+      - 500  # Internal server error
+      - 502  # Bad gateway
+      - 503  # Service unavailable
+      - 504  # Gateway timeout
+    
+    do_not_retry_on_status_codes:
+      - 401  # Unauthorized (credentials issue)
+      - 403  # Forbidden (permission issue)
+      - 404  # Not found
+      - 413  # Payload too large
+
+    timeout_seconds: 60
+    circuit_breaker:
+      enabled: true
+      failure_threshold: 5  # Fail after 5 consecutive errors
+      recovery_timeout_seconds: 60
+      half_open_requests: 1
+
+  # Qdrant vector database calls
+  qdrant:
+    description: "Retry strategy for Qdrant operations"
+    max_retries: 3
+    initial_backoff_seconds: 1
+    backoff_multiplier: 2
+    max_backoff_seconds: 30
+    jitter: true
+
+    retry_on_status_codes:
+      - 429  # Rate limited
+      - 500  # Internal server error
+      - 502  # Bad gateway
+      - 503  # Service unavailable
+      - 504  # Gateway timeout
+
+    timeout_seconds: 30
+    circuit_breaker:
+      enabled: true
+      failure_threshold: 10
+      recovery_timeout_seconds: 120
+
+  # PostgreSQL database connections
+  postgresql:
+    description: "Retry strategy for PostgreSQL connections"
+    max_retries: 3
+    initial_backoff_seconds: 1
+    backoff_multiplier: 1.5
+    max_backoff_seconds: 15
+    jitter: false  # Deterministic for database connections
+    
+    retry_on_errors:
+      - "SQLALCHEMY_OPERATIONAL_ERROR"
+      - "connection refused"
+      - "connection reset"
+      - "timeout"
+
+    do_not_retry_on_errors:
+      - "syntax error"
+      - "constraint violation"
+      - "permission denied"
+
+    timeout_seconds: 30
+    pool_recycle_seconds: 3600  # Recycle connections hourly
+
+  # MongoDB connection retries
+  mongodb:
+    description: "Retry strategy for MongoDB operations"
+    max_retries: 3
+    initial_backoff_seconds: 1
+    backoff_multiplier: 2
+    max_backoff_seconds: 30
+    jitter: true
+
+    retry_on_errors:
+      - "connection refused"
+      - "timeout"
+      - "server selection failed"
+
+    timeout_seconds: 30
+
+  # MySQL/MariaDB connections
+  mysql:
+    description: "Retry strategy for MySQL connections"
+    max_retries: 3
+    initial_backoff_seconds: 1
+    backoff_multiplier: 1.5
+    max_backoff_seconds: 15
+    jitter: false
+
+    retry_on_errors:
+      - "connection refused"
+      - "connection reset"
+      - "timeout"
+
+    timeout_seconds: 30
+
+  # SQL Server connections
+  sqlserver:
+    description: "Retry strategy for SQL Server connections"
+    max_retries: 3
+    initial_backoff_seconds: 1
+    backoff_multiplier: 1.5
+    max_backoff_seconds: 15
+    jitter: false
+
+    timeout_seconds: 30
+
+  # Generic HTTP API calls
+  http_api:
+    description: "Retry strategy for generic HTTP API calls"
+    max_retries: 3
+    initial_backoff_seconds: 1
+    backoff_multiplier: 2
+    max_backoff_seconds: 30
+    jitter: true
+
+    retry_on_status_codes:
+      - 429  # Rate limited
+      - 500  # Internal server error
+      - 502  # Bad gateway
+      - 503  # Service unavailable
+      - 504  # Gateway timeout
+
+    timeout_seconds: 30
+
+# Operation-specific retry configurations
+operation_overrides:
+  semantic_generation:
+    # More aggressive retry for critical semantic generation
+    policy: azure_openai
+    max_retries: 5
+    timeout_seconds: 120
+
+  embedding_generation:
+    # More retries for embeddings as they're batched
+    policy: azure_openai
+    max_retries: 5
+    timeout_seconds: 90
+
+  metadata_sync:
+    # More tolerant for background sync operations
+    policy: postgresql
+    max_retries: 10
+    initial_backoff_seconds: 5
+
+  schema_enrichment:
+    # Standard retry for enrichment
+    policy: azure_openai
+    max_retries: 3
+    timeout_seconds: 60
+
+  relationship_inference:
+    # Standard retry for relationships
+    policy: azure_openai
+    max_retries: 3
+    timeout_seconds: 45
+
+# Idempotency settings
+idempotency:
+  enabled: true
+  description: "Support idempotent operations for safe retries"
+  
+  operations:
+    semantic_generation:
+      idempotent: true
+      idempotency_key_source: "source_id"
+
+    embedding_generation:
+      idempotent: true
+      idempotency_key_source: "table_id"
+
+    export_generation:
+      idempotent: true
+      idempotency_key_source: "export_id"
+
+# Circuit breaker settings
+circuit_breaker:
+  description: "Prevent cascading failures with circuit breakers"
+  
+  defaults:
+    failure_threshold: 5  # Fail after N consecutive errors
+    recovery_timeout_seconds: 60
+    half_open_requests: 1  # Try 1 request before full recovery
+
+  services:
+    azure_openai:
+      failure_threshold: 5
+      recovery_timeout_seconds: 60
+
+    qdrant:
+      failure_threshold: 10
+      recovery_timeout_seconds: 120
+
+    postgresql:
+      failure_threshold: 5
+      recovery_timeout_seconds: 30
+
+# Fallback strategies
+fallbacks:
+  azure_openai_unavailable:
+    strategy: "return_cached_response"
+    cache_duration_hours: 24
+    fallback_message: "Using cached semantic data"
+
+  qdrant_unavailable:
+    strategy: "disable_semantic_search"
+    fallback_message: "Semantic search temporarily unavailable"
+
+  database_unavailable:
+    strategy: "return_error"
+    error_message: "Database connection unavailable"
+
+# Monitoring and alerting
+monitoring:
+  track_retry_metrics: true
+  alert_on_circuit_breaker_open: true
+  alert_on_repeated_failures: true
+  failure_threshold_for_alert: 5  # Alert after 5 failures
+
+# Logging configuration
+logging:
+  log_retry_attempts: true
+  log_backoff_delays: true
+  log_circuit_breaker_state_changes: true
+  log_level: INFO  # DEBUG for verbose, INFO for standard
+
+# Environment-specific overrides
+environments:
+  development:
+    max_retries: 1  # Fail fast in dev for debugging
+    initial_backoff_seconds: 0.1
+
+  staging:
+    max_retries: 3
+    initial_backoff_seconds: 1
+
+  production:
+    max_retries: 5
+    initial_backoff_seconds: 2
+    circuit_breaker_enabled: true

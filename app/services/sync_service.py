@@ -86,6 +86,19 @@ class SyncService:
                     exc_info=True,
                 )
 
+            if conn.db_type.value == "mongodb":
+                try:
+                    from app.services.mongodb_service import MongoDBService
+
+                    await MongoDBService(self.db).ensure_collection_registry(db_id)
+                except Exception as nosql_exc:
+                    logger.warning(
+                        "NoSQL collection registry update failed for db_id=%s: %s",
+                        db_id,
+                        nosql_exc,
+                        exc_info=True,
+                    )
+
             elapsed = time.monotonic() - start
 
             # Finalize sync log

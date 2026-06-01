@@ -8,12 +8,14 @@ NAV_LINKS = [
     ("pages/1_connect_database.py", "Connect Database"),
     ("pages/2_connected_sources.py", "Connected Sources"),
     ("pages/3_schema_explorer.py", "Schema Explorer"),
-    ("pages/6_relationship_graph.py", "Relationship Graph"),
-    ("pages/6_semantic_intelligence.py", "Semantic Intelligence"),
+    ("pages/4_relationship_graph.py", "Relationship Graph"),
+    ("pages/5_semantic_intelligence.py", "Semantic Intelligence"),
+    ("pages/6_ai_readiness.py", "AI Readiness"),
     ("pages/7_embeddings_retrieval.py", "Embeddings & Retrieval"),
     ("pages/8_prompt_studio.py", "Prompt Studio"),
     ("pages/9_exports.py", "Exports"),
-    ("pages/5_settings.py", "Settings"),
+    ("pages/10_operations.py", "Operations"),
+    ("pages/11_settings.py", "Settings"),
 ]
 
 
