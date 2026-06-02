@@ -528,6 +528,52 @@ class ArtifactExportResponse(BaseModel):
     message: str
 
 
+# â”€â”€ Prompt Studio â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+class PromptStudioTemplateItem(BaseModel):
+    id: str
+    name: str
+    description: str
+    category: str
+    version: str
+    language: str
+    path: str
+
+
+class PromptStudioTemplateListResponse(BaseModel):
+    templates: List[PromptStudioTemplateItem] = Field(default_factory=list)
+
+
+class PromptStudioArtifactItem(BaseModel):
+    artifact_type: str
+    version: int
+    schema_hash: Optional[str] = None
+    export_status: Optional[str] = None
+    artifact_path: Optional[str] = None
+    filename: Optional[str] = None
+    mime: str = "text/markdown"
+    generated_at: Optional[datetime] = None
+
+
+class PromptStudioArtifactResponse(BaseModel):
+    database_id: int
+    artifact_type: str
+    filename: str
+    mime: str
+    content: str
+    manifest: Optional[PromptStudioArtifactItem] = None
+    generated_at: datetime
+
+
+class PromptStudioBundleResponse(BaseModel):
+    database_id: int
+    bundle_filename: str
+    bundle_mime: str = "application/json"
+    content: str
+    artifacts: List[PromptStudioArtifactResponse] = Field(default_factory=list)
+    message: str
+
+
 # ── Update forward refs ───────────────────────────────────────────────────────
 
 ConnectionDetail.model_rebuild()

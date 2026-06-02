@@ -26,6 +26,7 @@ from app.schemas.api_schemas import (
     DatabaseSemanticResponse,
 )
 from app.services.database_semantic_service import DatabaseSemanticService
+from app.schema_engine.embeddings import _traceable
 from app.utils import now_utc
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,7 @@ def _semantic_response(db_semantic: DatabaseSemantic) -> DatabaseSemanticRespons
     summary="Generate semantic intelligence for a database",
     status_code=status.HTTP_202_ACCEPTED,
 )
+@_traceable("api_generate_semantics", run_type="chain")
 async def generate_semantics(
     source_id: int,
     db: AsyncSession = Depends(get_db),

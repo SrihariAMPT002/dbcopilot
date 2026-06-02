@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.models.metadata import ConnectedDatabase
 from app.schema_engine.prompt_builder import PromptBuilder
+from app.services.prompt_studio_service import PromptStudioService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/semantic", tags=["Prompt Context"])
@@ -46,29 +47,16 @@ class PromptGenerateResponse(BaseModel):
     context_type: str = "schema_context"
 
 
-def _build_prompt_for_template(template: str, database_name: str, context: str) -> str:
+def _template_to_artifact_type(template: str) -> str:
     template = (template or "default").lower()
-    if template == "concise":
-        return f"Database: {database_name}\n\n{context[:4000]}"
-    if template == "detailed":
-        return (
-            f"Database: {database_name}\n\n"
-            f"{context}\n\n"
-            "Use this schema context to reason about joins, business terms, and analytics use cases."
-        )
-    if template == "analytics":
-        return (
-            f"Analytics prompt for {database_name}\n\n"
-            f"{context}\n\n"
-            "Focus on revenue, trends, KPIs, customer behavior, and operational reporting."
-        )
-    if template == "retrieval":
-        return (
-            f"Retrieval prompt for {database_name}\n\n"
-            f"{context}\n\n"
-            "Prioritize schema search, table linking, and prompt-context reuse."
-        )
-    return context
+    mapping = {
+        "default": "database_context",
+        "concise": "database_context",
+        "detailed": "system_prompt",
+        "analytics": "rag_context",
+        "retrieval": "text_to_sql_context",
+    }
+    return mapping.get(template, "database_context")
 
 
 @router.get(
@@ -114,9 +102,10 @@ async def generate_prompt(
             detail=f"Database {req.database_id} not found",
         )
 
-    builder = PromptBuilder(db)
-    context = await builder.build_semantic_context(req.database_id)
-    prompt = _build_prompt_for_template(req.template, database.display_name or database.name, context)
+    artifact_type = _template_to_artifact_type(req.template)
+    service = PromptStudioService(db)
+    artifact = await service.preview_artifact(req.database_id, artifact_type)
+    prompt = artifact.content
     token_estimate = max(1, int(len(prompt.split()) * 1.33))
     return PromptGenerateResponse(
         database_id=req.database_id,
@@ -125,4 +114,5 @@ async def generate_prompt(
         prompt=prompt,
         token_estimate=token_estimate,
         prompt_length=len(prompt),
+        context_type=artifact_type,
     )

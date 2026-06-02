@@ -85,6 +85,33 @@ def _fmt_score(value: float) -> str:
     return f"{value:.3f}"
 
 
+SEARCH_PRESETS = ["call", "ticket", "intent", "malicious", "call summary"]
+
+
+def _get_result_value(item: dict, *keys: str, default: str = "") -> str:
+    for key in keys:
+        value = item.get(key)
+        if value not in (None, "", []):
+            return value
+    return default
+
+
+def _normalize_search_results(payload: dict) -> list[dict]:
+    if not isinstance(payload, dict):
+        return []
+
+    results = payload.get("results")
+    if isinstance(results, list):
+        return results
+
+    fallback_sections = []
+    for section_name in ("tables", "relationships", "prompt_contexts"):
+        section = payload.get(section_name)
+        if isinstance(section, list):
+            fallback_sections.extend(section)
+    return fallback_sections
+
+
 st.markdown("## Embeddings & Retrieval")
 st.markdown("Very important AI engineering module. Convert semantic intelligence into vector-searchable schema intelligence.")
 st.markdown("---")
@@ -114,24 +141,15 @@ terms = terminology(selected_conn.get("db_type", ""))
 
 status_ok, status_payload = get_embedding_status(db_id)
 
-top_cols = st.columns(5)
+top_cols = st.columns(4)
 top_cols[0].metric(f"Indexed {terms['entity_label']}s", status_payload.get("indexed_tables", 0) if status_ok else 0)
 top_cols[1].metric("Embedding Health", "Healthy" if status_payload.get("embedding_health") else "Needs attention")
 top_cols[2].metric("Qdrant Collections", len(status_payload.get("collections", [])) if status_ok else 0)
-top_cols[3].metric("Retrieval Latency", f"{status_payload.get('latency_ms', 0):.0f} ms" if status_ok and status_payload.get("latency_ms") else "n/a")
-top_cols[4].metric("Vector Count", status_payload.get("vectors_total", 0) if status_ok else 0)
+top_cols[3].metric("Vector Count", status_payload.get("vectors_total", 0) if status_ok else 0)
 
 st.markdown("---")
 
-left, right = st.columns([2, 1])
-with left:
-    search_query = st.text_input(
-        "Semantic Search Box",
-        placeholder="customer revenue",
-        help="Enter a business query to retrieve relevant tables, columns, and semantic matches.",
-    )
-with right:
-    top_k = st.slider("Top K", min_value=1, max_value=10, value=5)
+top_k = st.slider("Top K", min_value=1, max_value=10, value=5)
 
 action_cols = st.columns([1, 1, 4])
 with action_cols[0]:
@@ -192,61 +210,108 @@ else:
 st.markdown("---")
 st.markdown("### Semantic Search")
 
-if search_query.strip():
+quick_cols = st.columns(len(SEARCH_PRESETS))
+if "semantic_search_query" not in st.session_state:
+    st.session_state.semantic_search_query = ""
+
+for idx, preset in enumerate(SEARCH_PRESETS):
+    if quick_cols[idx].button(preset, use_container_width=True):
+        st.session_state.semantic_search_query = preset
+        st.rerun()
+
+search_collection = st.selectbox(
+    "Search Collection",
+    options=["all", "schema_tables", "schema_relationships", "schema_prompts"],
+    index=0,
+    help="Choose a single Qdrant collection or search across all of them.",
+)
+
+with st.form("semantic_search_form", clear_on_submit=False):
+    search_query = st.text_input(
+        "Semantic Search Query",
+        placeholder="call summary",
+        value=st.session_state.semantic_search_query,
+        help="Enter a business query to retrieve relevant tables, relationships, and prompt context.",
+    )
+    run_search = st.form_submit_button("Search", type="primary", use_container_width=True)
+
+if run_search:
+    st.session_state.semantic_search_query = search_query.strip()
+
+if st.session_state.semantic_search_query.strip():
     with st.spinner("Retrieving semantic matches..."):
         ok_search, search_payload = semantic_search(
-            {"db_id": db_id, "query": search_query.strip(), "top_k": top_k}
+            {
+                "db_id": db_id,
+                "query": st.session_state.semantic_search_query.strip(),
+                "top_k": top_k,
+                "collection": search_collection,
+            }
         )
 
     if ok_search:
-        latency_ms = search_payload.get("latency_ms", 0.0)
-        st.success(
-            f"Found {search_payload.get('total_hits', 0)} matches in {_fmt_score(latency_ms)} ms"
-        )
+        results = sorted(_normalize_search_results(search_payload), key=lambda x: float(x.get("score", 0.0)), reverse=True)
+        total_results = search_payload.get("total_results", len(results))
+        top_score = results[0].get("score", 0.0) if results else 0.0
+        collection_hits = sorted({item.get("collection_name") or item.get("collection") or "" for item in results if item})
+
+        st.success(f"Found {total_results} matches for `{st.session_state.semantic_search_query.strip()}`")
 
         search_stats = st.columns(4)
-        search_stats[0].metric(f"{terms['entity_label']}s", len(search_payload.get("tables", [])))
-        search_stats[1].metric("Relationships", len(search_payload.get("relationships", [])))
-        search_stats[2].metric("Prompt Contexts", len(search_payload.get("prompt_contexts", [])))
-        search_stats[3].metric("Retrieval Latency", f"{latency_ms:.1f} ms")
+        search_stats[0].metric("Results", total_results)
+        search_stats[1].metric("Top Score", _fmt_score(float(top_score)))
+        search_stats[2].metric("Collections", len(collection_hits))
+        search_stats[3].metric("Top K", top_k)
 
-        def _render_section(title: str, items: list[dict], show_columns: bool = True) -> None:
-            if not items:
-                return
-            st.markdown(f"### {title}")
-            for item in items:
+        if results:
+            st.markdown("#### Search Results")
+            for item in results:
+                entity_name = f"{_get_result_value(item, 'schema_name')}.{_get_result_value(item, 'table_name')}"
+                collection_name = _get_result_value(item, "collection_name", "collection", "_collection")
+                matched_context = _get_result_value(item, "text", "matched_text", "semantic_summary")
+                entity_type = _get_result_value(item, "table_type", default="table")
+                columns = item.get("column_names") or item.get("columns") or []
+                relationships = item.get("relationships") or []
+
                 with st.container(border=True):
-                    st.markdown(
-                        f"<div class='result-title'>{item.get('schema_name')}.{item.get('table_name')}</div>",
-                        unsafe_allow_html=True,
-                    )
-                    st.markdown(
-                        f"<div class='result-meta'>score {_fmt_score(item.get('score', 0.0))} · "
-                        f"{item.get('table_type', 'table')} · collection `{item.get('collection', '')}`</div>",
-                        unsafe_allow_html=True,
-                    )
-                    if item.get("matched_text"):
-                        st.write(item["matched_text"])
-                    if show_columns and item.get("columns"):
-                        st.markdown(f"**Relevant {terms['field_label']}s**")
-                        st.markdown(" ".join(f"<span class='badge'>{col}</span>" for col in item["columns"]), unsafe_allow_html=True)
-                    if item.get("relationships"):
-                        st.markdown("**Relevant Relationships**")
-                        for rel in item["relationships"][:5]:
-                            st.markdown(f"- {rel}")
-                    if item.get("prompt_context"):
-                        st.markdown("**Semantic Match**")
-                        st.caption(item["prompt_context"])
+                    header_cols = st.columns([3, 1, 1, 1])
+                    header_cols[0].markdown(f"**Entity Name:** `{entity_name}`")
+                    header_cols[1].markdown(f"**Entity Type:** `{entity_type}`")
+                    header_cols[2].markdown(f"**Similarity Score:** `{_fmt_score(float(item.get('score', 0.0)))}`")
+                    header_cols[3].markdown(f"**Collection:** `{collection_name}`")
 
-        _render_section("Relevant Tables", search_payload.get("tables", []))
-        _render_section("Relevant Relationships", search_payload.get("relationships", []), show_columns=False)
-        _render_section("Semantic Matches", search_payload.get("prompt_contexts", []))
+                    if matched_context:
+                        st.markdown("**Matched Context**")
+                        st.write(matched_context)
+
+                    if columns:
+                        st.markdown(f"**Relevant {terms['field_label']}s**")
+                        st.markdown(
+                            " ".join(
+                                f"<span class='badge'>{col}</span>" for col in list(columns)[:12]
+                            ),
+                            unsafe_allow_html=True,
+                        )
+
+                    if relationships:
+                        st.markdown("**Relevant Relationships**")
+                        if isinstance(relationships, list):
+                            for rel in relationships[:5]:
+                                st.markdown(f"- {rel}")
+                        else:
+                            st.markdown(f"- {relationships}")
+
+                    extra = item.get("extra") or {}
+                    if extra:
+                        with st.expander("Raw Hit Details", expanded=False):
+                            st.json(extra)
+        else:
+            st.info("The search completed successfully, but returned no results.")
     else:
         st.error(search_payload.get("error", "Semantic search failed"))
 else:
     st.info(
-        f"Enter a search phrase like `customer revenue` to retrieve relevant {terms['entity_label'].lower()}s, "
-        f"{terms['field_label'].lower()}s, and semantic matches."
+        "Try one of the quick queries above or enter a phrase like `call summary` to search the vector store."
     )
 
 st.markdown("---")

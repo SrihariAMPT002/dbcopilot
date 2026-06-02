@@ -9,6 +9,7 @@ This module provides a PromptRegistry that:
 5. Provides prompts to services without hardcoding
 """
 
+import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, List
@@ -70,6 +71,7 @@ class PromptRegistry:
         # Add custom filters
         env.filters["truncate"] = self._truncate
         env.filters["format_list"] = self._format_list
+        env.filters["tojson"] = self._tojson
         
         return env
 
@@ -84,6 +86,11 @@ class PromptRegistry:
     def _format_list(items: List[str], separator: str = ", ") -> str:
         """Format a list as a string."""
         return separator.join(str(i) for i in items)
+
+    @staticmethod
+    def _tojson(value: Any, indent: int = 2) -> str:
+        """Render a value as JSON for prompt templates."""
+        return json.dumps(value, ensure_ascii=False, indent=indent, default=str)
 
     def load_prompt(self, prompt_id: str, category: str = None, force_reload: bool = False) -> Dict[str, Any]:
         """Load a prompt from YAML file.

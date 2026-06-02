@@ -7,6 +7,7 @@ from app.api.routes import (
     ai_placeholders,
     semantic,
     semantics,
+    prompt_studio,
     embeddings,
     relationship_graph,
     exports,
@@ -23,6 +24,7 @@ api_router.include_router(metadata.router)
 api_router.include_router(ai_placeholders.router)
 api_router.include_router(semantic.router)
 api_router.include_router(semantics.router)
+api_router.include_router(prompt_studio.router)
 api_router.include_router(embeddings.router)
 api_router.include_router(relationship_graph.router)
 api_router.include_router(exports.router)

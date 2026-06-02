@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
+from app.config.prompts import get_semantic_prompt
 from app.models.metadata import (
     ConnectedDatabase,
     DatabaseColumn,
@@ -32,6 +33,7 @@ from app.models.metadata import (
     SemanticGenerationStatus,
 )
 from app.schema_engine.enricher import get_openai_client
+from app.schema_engine.embeddings import _traceable
 from app.utils import safe_flush
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,9 @@ logger = logging.getLogger(__name__)
 
 MAX_ENTITIES_TO_SAMPLE = 50
 MAX_RELATIONSHIPS_TO_SAMPLE = 100
+MAX_TABLES_IN_PROMPT = 20
+MAX_COLUMNS_PER_TABLE_IN_PROMPT = 8
+MAX_RELATIONSHIPS_IN_PROMPT = 40
 CONFIDENCE_POOR_NAMING_PENALTY = 0.15
 CONFIDENCE_INCOMPLETE_RELATIONSHIPS_PENALTY = 0.10
 
@@ -199,6 +204,7 @@ class DatabaseSemanticService:
 
     # ── Main semantic generation method ────────────────────────────────────
 
+    @_traceable("generate_database_semantics", run_type="chain")
     async def generate_database_semantics(self, source_id: int) -> DatabaseSemanticEnrichment:
         """
         Generate semantic context for an entire database.
@@ -236,7 +242,7 @@ class DatabaseSemanticService:
 
         # Call Azure OpenAI
         try:
-            response_text = await self._call_azure_openai(metadata_payload)
+            response_text = await self._call_azure_openai(database, metadata_payload)
         except Exception as e:
             logger.error("Azure OpenAI call failed for database %d: %s", source_id, e, exc_info=True)
             raise
@@ -256,6 +262,7 @@ class DatabaseSemanticService:
 
         return enrichment
 
+    @_traceable("generate_and_store_semantics", run_type="chain")
     async def generate_and_store_semantics(self, source_id: int) -> tuple[DatabaseSemantic, float]:
         """
         Generate database semantics and persist the latest profile.
@@ -290,7 +297,7 @@ class DatabaseSemanticService:
                 metadata_payload = self._sample_large_schema(metadata_payload)
 
             logger.info("Generating semantics for database %d", source_id)
-            response_text = await self._call_azure_openai(metadata_payload)
+            response_text = await self._call_azure_openai(database, metadata_payload)
             enrichment = self._parse_enrichment_response(source_id, response_text, metadata_payload)
             enrichment.confidence_score = self._calculate_confidence_score(database, enrichment)
 
@@ -473,9 +480,73 @@ class DatabaseSemanticService:
 
         return sampled
 
+    def _build_schema_prompt_parts(self, metadata_payload: dict[str, Any]) -> tuple[list[str], list[str]]:
+        """Build compact schema and relationship summaries from sampled metadata."""
+        schema_lines: list[str] = []
+        relationship_lines: list[str] = []
+
+        for schema in (metadata_payload.get("schemas") or [])[:MAX_TABLES_IN_PROMPT]:
+            schema_name = schema.get("name", "unknown")
+            schema_lines.append(f"Schema: {schema_name}")
+
+            tables = (schema.get("tables") or [])[:MAX_TABLES_IN_PROMPT]
+            for table in tables:
+                table_name = table.get("name", "unknown")
+                table_type = table.get("type", "unknown")
+                row_count = table.get("row_count", "Unknown")
+                schema_lines.append(f"- Table: {table_name} | Type: {table_type} | Rows: {row_count}")
+
+                columns = (table.get("columns") or [])[:MAX_COLUMNS_PER_TABLE_IN_PROMPT]
+                if columns:
+                    column_names = ", ".join(
+                        f"{col.get('name', 'unknown')}({col.get('type', 'unknown')})"
+                        for col in columns
+                    )
+                    schema_lines.append(f"  Columns: {column_names}")
+
+                if table.get("_table_count_original"):
+                    schema_lines.append(
+                        f"  Note: sampled from {table.get('_table_count_original')} tables"
+                    )
+
+                for rel in (table.get("relationships") or [])[:MAX_RELATIONSHIPS_IN_PROMPT]:
+                    relationship_lines.append(
+                        f"{schema_name}.{table_name}.{rel.get('column', 'unknown')} -> {rel.get('references', 'unknown')}"
+                    )
+                    if len(relationship_lines) >= MAX_RELATIONSHIPS_IN_PROMPT:
+                        return schema_lines, relationship_lines
+
+        return schema_lines, relationship_lines
+
     # ── Azure OpenAI Integration ───────────────────────────────────────────
 
-    async def _call_azure_openai(self, metadata_payload: dict[str, Any]) -> str:
+    def _build_prompt_variables(self, database: ConnectedDatabase, metadata_payload: dict[str, Any]) -> dict[str, Any]:
+        """Build variables for the semantic prompt template."""
+        schema_lines, relationships = self._build_schema_prompt_parts(metadata_payload)
+        total_columns = 0
+
+        for schema in database.schemas or []:
+            for table in schema.tables or []:
+                total_columns += len(table.columns or [])
+
+        naming_patterns = metadata_payload.get("naming_patterns", {}) or {}
+        total_tables = metadata_payload.get("total_tables", 0)
+        poor_ratio = float(naming_patterns.get("poor_naming_ratio", 0) or 0)
+        good_naming_rate = max(0.0, min(100.0, (1.0 - poor_ratio) * 100.0))
+
+        return {
+            "database_name": database.name,
+            "database_type": database.db_type.value,
+            "total_tables": total_tables,
+            "total_columns": total_columns,
+            "schema_summary": "\n".join(schema_lines) if schema_lines else "No schemas available.",
+            "relationships_summary": "\n".join(relationships) if relationships else "No relationships found.",
+            "naming_quality": round(good_naming_rate, 1),
+            "poor_naming_patterns": ", ".join(naming_patterns.get("table_prefixes", [])) or "None detected",
+        }
+
+    @_traceable("database_semantic_openai_call", run_type="llm")
+    async def _call_azure_openai(self, database: ConnectedDatabase, metadata_payload: dict[str, Any]) -> str:
         """
         Call Azure OpenAI to generate semantic understanding.
         
@@ -484,63 +555,85 @@ class DatabaseSemanticService:
         """
         client = self._get_openai_client()
 
-        # Build prompt
-        prompt = self._build_semantic_prompt(metadata_payload)
+        prompt_variables = self._build_prompt_variables(database, metadata_payload)
+        rendered_prompt = get_semantic_prompt(prompt_variables)
 
-        # Call Azure OpenAI
-        response = client.chat.completions.create(
-            model=settings.azure_openai_deployment,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are an Enterprise Data Architect specializing in semantic analysis. "
-                        "Analyze database metadata and provide business insights. "
-                        "ALWAYS respond with valid JSON only, no markdown, no explanations."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.3,
-            max_completion_tokens=2000,
-            response_format={"type": "json_object"},  # Force JSON output
+        messages = [
+            {
+                "role": "system",
+                "content": rendered_prompt.system_message
+                or (
+                    "You are an Enterprise Data Architect specializing in semantic analysis. "
+                    "Analyze database metadata and provide business insights. "
+                    "ALWAYS respond with valid JSON only, no markdown, no explanations."
+                ),
+            },
+            {"role": "user", "content": rendered_prompt.user_prompt},
+        ]
+
+        def _invoke_chat_completion(use_json_mode: bool) -> tuple[str, Any, Any]:
+            request_kwargs: dict[str, Any] = {
+                "model": settings.azure_openai_deployment,
+                "messages": messages,
+                "max_completion_tokens": 4000,
+            }
+            if use_json_mode:
+                request_kwargs["response_format"] = {"type": "json_object"}
+
+            response = client.chat.completions.create(**request_kwargs)
+            choice = response.choices[0]
+            message = choice.message
+            content = (message.content or "").strip()
+            logger.debug(
+                "OpenAI semantic response: json_mode=%s, finish_reason=%s, content_len=%d, refusal=%s",
+                use_json_mode,
+                getattr(choice, "finish_reason", None),
+                len(content),
+                getattr(message, "refusal", None),
+            )
+            return content, choice, message
+
+        content, choice, message = _invoke_chat_completion(use_json_mode=True)
+        if content:
+            return content
+
+        logger.warning(
+            "Empty OpenAI semantic response received in JSON mode for database %d; retrying without response_format",
+            database.id,
+        )
+        content, choice, message = _invoke_chat_completion(use_json_mode=False)
+        if content:
+            return content
+
+        raise ValueError(
+            "Empty response from OpenAI "
+            f"(finish_reason={getattr(choice, 'finish_reason', None)}, "
+            f"refusal={getattr(message, 'refusal', None)})"
         )
 
-        return response.choices[0].message.content
+    def _extract_json_payload(self, response_text: str) -> str:
+        """Extract a JSON object from common model response wrappers."""
+        text = (response_text or "").strip()
+        if not text:
+            raise ValueError("Empty response from OpenAI")
 
-    def _build_semantic_prompt(self, metadata_payload: dict[str, Any]) -> str:
-        """Build the prompt for Azure OpenAI semantic analysis."""
-        prompt = f"""
-Analyze the following database metadata and provide semantic business intelligence.
+        if text.startswith("```"):
+            lines = text.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip().startswith("```"):
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
 
-DATABASE METADATA:
-{json.dumps(metadata_payload, indent=2)}
+        if text.startswith("{") and text.endswith("}"):
+            return text
 
-Based on this metadata, provide a JSON response with the following structure:
-{{
-  "business_domain": "Primary business domain (e.g., E-Commerce, Healthcare, Finance)",
-  "business_summary": "2-3 sentence summary of the database purpose and scope",
-  "key_entities": ["entity1", "entity2", "entity3", ...],
-  "business_glossary": [
-    {{"term": "term_name", "definition": "brief definition"}},
-    ...
-  ],
-  "suggested_use_cases": [
-    "Use case 1",
-    "Use case 2",
-    ...
-  ]
-}}
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return text[start : end + 1]
 
-Requirements:
-- Infer business domain from table/column names and structure
-- Key entities should be the main business objects (e.g., customers, orders, products)
-- Glossary should map technical names to business terminology
-- Confidence in your analysis (higher for clear naming, lower for generic/poor naming)
-- Use cases should be specific analytics or reporting possibilities
-- Return ONLY valid JSON, no markdown or explanations
-"""
-        return prompt.strip()
+        return text
 
     # ── Response parsing ───────────────────────────────────────────────────
 
@@ -553,7 +646,8 @@ Requirements:
         Handles malformed JSON gracefully.
         """
         try:
-            response_data = json.loads(response_text)
+            clean_response = self._extract_json_payload(response_text)
+            response_data = json.loads(clean_response)
         except json.JSONDecodeError as e:
             logger.error("Failed to parse OpenAI response as JSON: %s", e)
             logger.debug("Response text: %s", response_text)

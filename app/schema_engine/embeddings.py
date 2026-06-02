@@ -209,19 +209,6 @@ class EmbeddingEngine:
             logger.info("Token usage: %s", usage)
         return vectors, usage
 
-        start = time.perf_counter()
-        vectors, usage = await asyncio.to_thread(_call)
-        latency_ms = (time.perf_counter() - start) * 1000
-        logger.info(
-            "Embedded %d text item(s) with %s in %.2fms",
-            len(texts),
-            settings.azure_openai_embedding_deployment,
-            latency_ms,
-        )
-        if usage:
-            logger.info("Embedding token usage: %s", usage)
-        return vectors, usage
-
     async def _embed_text(self, text: str) -> tuple[List[float], Dict[str, int]]:
         vectors, usage = await self._embed_texts([text])
         return vectors[0], usage
@@ -509,8 +496,8 @@ class EmbeddingEngine:
                     table_id=table.id,
                     embedding_model=settings.azure_openai_embedding_deployment,
                     vector_id=self._point_id(COLLECTION_SCHEMA_TABLES, database_id, table.id),
-                    status=EmbeddingStatus.running,
-                    embedded_text=table_text
+                    status=EmbeddingStatus.failed,
+                    embedded_text=None,
                 )
                 batch_result.success = False
                 continue

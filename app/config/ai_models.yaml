@@ -9,9 +9,7 @@ models:
     provider: azure_openai
     model_name: gpt-5-nano
     api_version: "2024-02-15-preview"
-    temperature: 0.3  # Low temperature for consistency
     max_completion_tokens: 2000
-    top_p: 0.95
     frequency_penalty: 0
     presence_penalty: 0
     description: "Used for database-level semantic intelligence generation"
@@ -21,9 +19,7 @@ models:
     provider: azure_openai
     model_name: gpt-5-nano
     api_version: "2024-02-15-preview"
-    temperature: 0.3  # Low temperature for consistency
     max_completion_tokens: 1000
-    top_p: 0.95
     frequency_penalty: 0
     presence_penalty: 0
     description: "Used for table-level semantic enrichment"
@@ -33,9 +29,7 @@ models:
     provider: azure_openai
     model_name: gpt-5-nano
     api_version: "2024-02-15-preview"
-    temperature: 0.1  # Very low temperature for deterministic output
     max_completion_tokens: 1500
-    top_p: 0.95
     frequency_penalty: 0
     presence_penalty: 0
     description: "Used for detecting relationships between tables"
@@ -45,9 +39,7 @@ models:
     provider: azure_openai
     model_name: gpt-5-nano
     api_version: "2024-02-15-preview"
-    temperature: 0.2
     max_completion_tokens: 800
-    top_p: 0.95
     frequency_penalty: 0
     presence_penalty: 0
     description: "Used for AI readiness assessment and recommendations"
@@ -79,17 +71,14 @@ environments:
   development:
     llm: semantic_generation
     embedding: default
-    temperature_override: null  # Use defaults
   
   staging:
     llm: semantic_generation
     embedding: default
-    temperature_override: null
   
   production:
     llm: semantic_generation
     embedding: default
-    temperature_override: null  # Can override for consistency
 
 # Retry and timeout configuration for API calls
 api:

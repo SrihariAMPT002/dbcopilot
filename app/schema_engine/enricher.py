@@ -285,7 +285,6 @@ Return ONLY a valid JSON object (no markdown, no extra text) with these fields:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message},
                 ],
-                temperature=0.3,  # Low temperature for consistency
                 max_completion_tokens=1000,
             ),
         )

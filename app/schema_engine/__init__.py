@@ -16,7 +16,6 @@ from app.schema_engine.embeddings import (
 from app.schema_engine.enricher import SchemaEnricher
 from app.schema_engine.metrics import MetricsEngine
 from app.schema_engine.prompt_builder import PromptBuilder
-from app.schema_engine.retrieval import RetrievalEngine, RetrievalHit, RetrievalResult
 from app.schema_engine.relationship_graph import (
     RelationshipGraphEngine,
     RelationshipGraphSnapshot,
@@ -31,9 +30,6 @@ __all__ = [
     "SchemaEnricher",
     "EmbeddingEngine",
     "EmbeddingBatchResult",
-    "RetrievalEngine",
-    "RetrievalHit",
-    "RetrievalResult",
     "RelationshipGraphEngine",
     "RelationshipGraphSnapshot",
     "NeighborGraphSnapshot",

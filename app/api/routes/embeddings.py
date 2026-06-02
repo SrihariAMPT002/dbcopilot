@@ -10,7 +10,7 @@ POST /embeddings/search                       — semantic search over stored ve
 from __future__ import annotations
 
 import logging
-from typing import List
+from typing import Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, update
@@ -52,6 +52,28 @@ _VALID_COLLECTIONS = {
 }
 
 
+def _format_relationship(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, dict):
+        return str(value)
+
+    source_column = value.get("column_name") or value.get("source_column") or value.get("column") or "unknown"
+    target_schema = f"{value.get('referenced_schema')}." if value.get("referenced_schema") else ""
+    target_table = value.get("referenced_table_name") or value.get("table_name") or "unknown"
+    target_column = value.get("referenced_column_name") or value.get("target_column") or "unknown"
+    constraint = f" ({value.get('constraint_name')})" if value.get("constraint_name") else ""
+    return f"{source_column} -> {target_schema}{target_table}.{target_column}{constraint}"
+
+
+def _normalize_relationships(raw: Any) -> list[str]:
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return [_format_relationship(item) for item in raw]
+    return [_format_relationship(raw)]
+
+
 # ── Generate ──────────────────────────────────────────────────────────────────
 
 
@@ -74,7 +96,15 @@ async def generate_database_embeddings(
     engine = EmbeddingEngine(db)
     _guard_embedding_config(engine)
     try:
+        logger.info("Embedding generation started for db_id=%s", db_id)
         result = await engine.generate_database_embeddings(db_id)
+        logger.info(
+            "Embedding generation completed for db_id=%s in %.2fms (%d tables, %d vectors)",
+            db_id,
+            result.latency_ms,
+            result.tables_indexed,
+            result.vectors_indexed,
+        )
         return EmbeddingGenerateResponse(
             database_id=result.database_id,
             database_name=result.database_name,
@@ -251,6 +281,12 @@ async def semantic_search(
     _guard_qdrant(engine)
 
     try:
+        logger.info(
+            "Semantic search started for db_id=%s collection=%s top_k=%s",
+            request.db_id,
+            request.collection,
+            request.top_k,
+        )
         query_vector, _ = await engine._embed_text(request.query)
     except Exception as exc:
         logger.error("Query embedding failed: %s", exc, exc_info=True)
@@ -303,11 +339,18 @@ async def semantic_search(
                 text=item.get("text", ""),
                 semantic_summary=item.get("semantic_summary"),
                 column_names=item.get("column_names") or [],
-                relationships=item.get("relationships") or [],
+                relationships=_normalize_relationships(item.get("relationships")),
                 collection_name=item.get("collection_name") or item.get("_collection", request.collection),
                 extra=extra,
             )
         )
+
+    logger.info(
+        "Semantic search completed for db_id=%s collection=%s hits=%d",
+        request.db_id,
+        result_collection_label,
+        len(hits),
+    )
 
     return SemanticSearchResponse(
         query=request.query,

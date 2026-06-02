@@ -12,6 +12,8 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config.prompts import get_prompt_registry
+
 from app.models.metadata import (
     ConnectedDatabase,
     DatabaseColumn,
@@ -95,6 +97,13 @@ class PromptBuilder:
         if not all_tables:
             lines.append("(No tables found)")
             return "\n".join(lines)
+
+        context = await PromptStudioService(self.db)._build_context(database_id)
+        return get_prompt_registry().render_prompt(
+            "database_context",
+            context,
+            category="system",
+        ).user_prompt
 
         lines.append(f"Tables: {len(all_tables)}")
         lines.append("")
@@ -296,6 +305,13 @@ class PromptBuilder:
             select(SchemaSemantic).where(SchemaSemantic.database_id == database_id)
         )
         semantics = {s.table_id: s for s in semantic_result.scalars().all()}
+
+        context = await PromptStudioService(self.db)._build_context(database_id)
+        return get_prompt_registry().render_prompt(
+            "rag_context",
+            context,
+            category="system",
+        ).user_prompt
 
         lines = [
             "=" * 80,

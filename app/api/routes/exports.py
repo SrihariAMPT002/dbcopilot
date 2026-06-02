@@ -25,9 +25,8 @@ from app.models.metadata import (
     SchemaEmbedding,
     SchemaSemantic,
 )
-from app.schema_engine import PromptBuilder, RelationshipGraphEngine
-from app.schema_engine.embeddings import EmbeddingEngine
-
+from app.schema_engine.prompt_builder import PromptBuilder
+from app.schema_engine.relationship_graph import RelationshipGraphEngine
 router = APIRouter(prefix="/exports", tags=["Exports"])
 logger = logging.getLogger(__name__)
 

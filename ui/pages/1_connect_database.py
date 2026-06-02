@@ -113,11 +113,11 @@ with right:
         "Test Connection validates credentials only. Connect & Sync saves the connection, "
         "then introspects schemas, tables, columns, and relationships."
     )
-    st.markdown("### SSL Note")
-    if db_meta["ssl_supported"]:
-        st.caption("SSL/TLS is supported in the UI and persisted with the connection record.")
-    else:
-        st.caption("This source type does not currently use an SSL toggle.")
+    # st.markdown("### SSL Note")
+    # if db_meta["ssl_supported"]:
+    #     st.caption("SSL/TLS is supported in the UI and persisted with the connection record.")
+    # else:
+    #     st.caption("This source type does not currently use an SSL toggle.")
 
 
 def _validate() -> bool:

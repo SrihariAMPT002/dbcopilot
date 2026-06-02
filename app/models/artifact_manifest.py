@@ -19,6 +19,11 @@ class ArtifactType(str, enum.Enum):
     embeddings = "embeddings.json"
     relationship_graph = "relationship_graph.json"
     prompt_context = "prompt_context.md"
+    database_context = "database_context.md"
+    system_prompt = "system_prompt.md"
+    rag_context = "rag_context.md"
+    agent_context = "agent_context.json"
+    text_to_sql_context = "text_to_sql_context.md"
 
 
 class ExportStatus(str, enum.Enum):

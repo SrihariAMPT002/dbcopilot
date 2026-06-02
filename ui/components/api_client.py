@@ -170,6 +170,26 @@ def generate_prompt(payload: Dict) -> Tuple[bool, Any]:
     return _post("/semantic/prompt/generate", payload)
 
 
+def list_prompt_templates() -> Tuple[bool, Any]:
+    return _get("/prompt-studio/templates")
+
+
+def generate_prompt_artifacts(db_id: int) -> Tuple[bool, Any]:
+    return _post(f"/prompt-studio/generate/{db_id}", {})
+
+
+def preview_prompt_artifact(db_id: int, artifact_type: str) -> Tuple[bool, Any]:
+    return _get(f"/prompt-studio/preview/{db_id}/{artifact_type}")
+
+
+def download_prompt_artifact(db_id: int, artifact_type: str) -> Tuple[bool, Any]:
+    return _get(f"/prompt-studio/download/{db_id}/{artifact_type}")
+
+
+def download_prompt_bundle(db_id: int) -> Tuple[bool, Any]:
+    return _get(f"/prompt-studio/download-bundle/{db_id}")
+
+
 def semantic_search(payload: Dict) -> Tuple[bool, Any]:
     body = dict(payload or {})
     body.setdefault("collection", "all")

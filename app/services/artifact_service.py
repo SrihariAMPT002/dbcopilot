@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.routes import exports as exports_route
+# from app.api.routes import exports as exports_route
 from app.models.artifact_manifest import ArtifactManifest, ArtifactType, ExportStatus
 from app.models.metadata import ConnectedDatabase
 
@@ -123,6 +123,59 @@ class ArtifactService:
         await self.db.flush()
         return created
 
+    async def record_artifact(
+        self,
+        database_id: int,
+        artifact_type: ArtifactType,
+        content: str,
+        *,
+        mime: str = "text/plain",
+        extension: str | None = None,
+        schema_hash_payload: Any | None = None,
+    ) -> dict[str, Any]:
+        """Persist an artifact manifest row and write its content to the registry root."""
+        await self._ensure_database(database_id)
+        self.registry_root.mkdir(parents=True, exist_ok=True)
+
+        schema_hash = self._schema_hash(schema_hash_payload if schema_hash_payload is not None else content)
+        version = await self._next_version(database_id, artifact_type)
+        suffix = extension or self._suffix_for_type(artifact_type)
+        filename = f"db_{database_id}_{artifact_type.name}_v{version}{suffix}"
+        path = self.registry_root / filename
+
+        manifest = ArtifactManifest(
+            database_id=database_id,
+            artifact_type=artifact_type,
+            version=version,
+            schema_hash=schema_hash,
+            export_status=ExportStatus.running,
+            artifact_path=str(path),
+        )
+        self.db.add(manifest)
+        await self.db.flush()
+
+        try:
+            path.write_text(content, encoding="utf-8")
+            manifest.export_status = ExportStatus.completed
+        except Exception:
+            manifest.export_status = ExportStatus.failed
+            raise
+        finally:
+            await self.db.flush()
+
+        return {
+            "id": manifest.id,
+            "artifact_type": artifact_type.value,
+            "version": manifest.version,
+            "schema_hash": manifest.schema_hash,
+            "export_status": manifest.export_status.value,
+            "artifact_path": manifest.artifact_path,
+            "generated_at": manifest.generated_at,
+            "filename": path.name,
+            "mime": mime,
+            "content": content,
+        }
+
     @staticmethod
     def _schema_hash(payload: Any) -> str:
         raw = payload if isinstance(payload, str) else json.dumps(payload, default=str, sort_keys=True)
@@ -150,8 +203,16 @@ class ArtifactService:
 
     @staticmethod
     def _suffix_for_type(artifact_type: ArtifactType) -> str:
-        if artifact_type == ArtifactType.prompt_context:
+        if artifact_type in {
+            ArtifactType.prompt_context,
+            ArtifactType.database_context,
+            ArtifactType.system_prompt,
+            ArtifactType.rag_context,
+            ArtifactType.text_to_sql_context,
+        }:
             return ".md"
+        if artifact_type == ArtifactType.agent_context:
+            return ".json"
         return ".json"
 
     @staticmethod
