@@ -31,6 +31,7 @@ from app.models.metadata import (
     SchemaEmbedding,
     SchemaSemantic,
 )
+from app.services.ai_observability_service import AIObservabilityService
 from app.utils import safe_flush, truncate
 
 logger = logging.getLogger(__name__)
@@ -45,18 +46,12 @@ EMBEDDING_COLLECTIONS = (
     COLLECTION_SCHEMA_PROMPTS,
 )
 
-_openai_client = None
 _qdrant_client = None
 
 try:  # Optional dependency.
     from langsmith import traceable
 except Exception:  # pragma: no cover - optional dependency.
     traceable = None
-
-try:  # Optional dependency.
-    from openai import AzureOpenAI
-except Exception:  # pragma: no cover - optional dependency.
-    AzureOpenAI = None
 
 try:  # Optional dependency.
     from qdrant_client import QdrantClient
@@ -107,37 +102,6 @@ def _resolve_qdrant_url() -> str:
     return f"http://qdrant:{settings.qdrant_port}"
 
 
-def get_azure_openai_client():
-    """Return a cached Azure OpenAI client configured for embeddings."""
-    global _openai_client
-    if _openai_client is not None:
-        return _openai_client
-
-    if AzureOpenAI is None:
-        raise ImportError("openai package is required for Azure OpenAI embeddings")
-
-    embedding_url = settings.azure_openai_embedding_url
-    embedding_key = settings.azure_openai_embedding_api_key
-
-    # Fall back to the main endpoint if embedding-specific credentials are not set
-    if not embedding_url or not embedding_key:
-        embedding_url = settings.azure_openai_endpoint
-        embedding_key = settings.azure_openai_key
-
-    if not embedding_url or not embedding_key:
-        raise ValueError(
-            "Embedding credentials not configured. Set AZURE_OPENAI_EMBEDDING_URL "
-            "and AZURE_OPENAI_EMBEDDING_API_KEY (or the main AZURE_OPENAI_ENDPOINT/KEY)."
-        )
-
-    _openai_client = AzureOpenAI(
-        api_key=embedding_key,
-        api_version=settings.azure_openai_api_version,
-        azure_endpoint=embedding_url,
-    )
-    return _openai_client
-
-
 def get_qdrant_client():
     """Return a cached Qdrant client."""
 
@@ -174,36 +138,47 @@ class EmbeddingEngine:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def _embed_texts(self, texts: Sequence[str]) -> tuple[List[List[float]], Dict[str, int]]:
+    async def _embed_texts(
+        self,
+        texts: Sequence[str],
+        *,
+        database_id: int | None = None,
+        database_name: str | None = None,
+        table_name: str | None = None,
+        artifact_type: str = "schema_embedding",
+    ) -> tuple[List[List[float]], Dict[str, int]]:
         if not texts:
             return [], {}
 
         dimensions = settings.azure_openai_embedding_dimensions
-
-        def _call() -> tuple[List[List[float]], Dict[str, int]]:
-            client = get_azure_openai_client()
-            kwargs: dict = dict(
-                model=settings.azure_openai_embedding_deployment,
-                input=list(texts),
-            )
-            # dimensions param is supported by text-embedding-3-* models
-            if dimensions:
-                kwargs["dimensions"] = dimensions
-
-            response = client.embeddings.create(**kwargs)
-            vectors = [item.embedding for item in response.data]
-            usage = _count_token_usage(response)
-            return vectors, usage
-
-        start = time.perf_counter()
-        vectors, usage = await asyncio.to_thread(_call)
-        latency_ms = (time.perf_counter() - start) * 1000
+        observability = AIObservabilityService()
+        result = await observability.generate(
+            operation="embeddings",
+            module="semantic_intelligence",
+            artifact_type=artifact_type,
+            database_id=database_id,
+            database_name=database_name,
+            prompt_id="embedding",
+            prompt_version="1",
+            model_name=settings.azure_openai_embedding_deployment,
+            input_texts=list(texts),
+            request_kwargs={"dimensions": dimensions} if dimensions else {},
+            completeness_score=1.0 if texts else 0.0,
+            coverage_score=min(1.0, len(texts) / 3.0),
+            confidence_score=0.0,
+            extra_metadata={
+                "table_name": table_name,
+                "text_count": len(texts),
+            },
+        )
+        vectors = result.embeddings or []
+        usage = result.token_usage
         logger.info(
             "Embedded %d text(s) | model=%s dim=%d in %.2fms",
             len(texts),
             settings.azure_openai_embedding_deployment,
             dimensions,
-            latency_ms,
+            result.latency_ms,
         )
         if usage:
             logger.info("Token usage: %s", usage)
@@ -534,7 +509,13 @@ class EmbeddingEngine:
         prompt_text = self._build_prompt_text(table, semantic)
 
         texts = [table_text, relationship_text, prompt_text]
-        vectors, usage = await self._embed_texts(texts)
+        vectors, usage = await self._embed_texts(
+            texts,
+            database_id=database_id,
+            database_name=database.name,
+            table_name=table.name,
+            artifact_type="schema_embedding",
+        )
         self._ensure_collections(len(vectors[0]))
 
         point_ids = {

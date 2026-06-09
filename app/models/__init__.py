@@ -26,6 +26,7 @@ from app.models.nosql_metadata import (
     NoSQLDocumentSample,
     NoSQLRelationship,
 )
+from app.models.column_semantic import ColumnSemantic
 
 __all__ = [
     "Base",
@@ -57,4 +58,5 @@ __all__ = [
     "NoSQLSchemaField",
     "NoSQLDocumentSample",
     "NoSQLRelationship",
+    "ColumnSemantic",
 ]

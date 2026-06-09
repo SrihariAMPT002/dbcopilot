@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.schemas.api_schemas import (
+    ArtifactContentResponse,
     ArtifactExportResponse,
     ArtifactListResponse,
     ArtifactManifestItem,
@@ -110,4 +111,41 @@ async def get_artifact_manifest(db_id: int, db: AsyncSession = Depends(get_db)) 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve artifact manifest",
+        )
+
+
+@router.get(
+    "/{db_id}/content/{artifact_type}",
+    response_model=ArtifactContentResponse,
+    summary="Get stored artifact content for a database and artifact type",
+)
+async def get_artifact_content(
+    db_id: int,
+    artifact_type: str,
+    version: int | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> ArtifactContentResponse:
+    service = ArtifactService(db)
+    try:
+        from app.models.artifact_manifest import ArtifactType
+
+        artifact_enum = ArtifactType(artifact_type)
+        payload = await service.get_artifact_content(db_id, artifact_enum, version=version)
+        return ArtifactContentResponse(**payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except Exception as exc:
+        logger.error(
+            "Artifact content retrieval failed for db_id=%s type=%s version=%s: %s",
+            db_id,
+            artifact_type,
+            version,
+            exc,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve artifact content",
         )

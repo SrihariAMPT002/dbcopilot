@@ -13,6 +13,7 @@ from app.db import get_db
 from app.schemas.api_schemas import (
     ReadinessBreakdownResponse,
     ReadinessCapabilityScore,
+    ReadinessCategoryScore,
     ReadinessResponse,
 )
 from app.services.readiness_service import ReadinessBreakdown, ReadinessService
@@ -33,6 +34,14 @@ def _to_readiness_response(data: ReadinessBreakdown) -> ReadinessResponse:
             embeddings_score=data.embeddings_score,
             relationship_score=data.relationship_score,
             prompt_score=data.prompt_score,
+            overall_score=data.overall_score,
+        ),
+        category_scores=ReadinessCategoryScore(
+            metadata_readiness_score=data.metadata_readiness_score,
+            semantic_readiness_score=data.semantic_readiness_score,
+            relationship_readiness_score=data.relationship_readiness_score,
+            ai_context_readiness_score=data.ai_context_readiness_score,
+            governance_readiness_score=data.governance_readiness_score,
             overall_score=data.overall_score,
         ),
         missing_stages=data.missing_stages,

@@ -155,6 +155,30 @@ class ColumnResponse(BaseModel):
 
 # ── Relationship ──────────────────────────────────────────────────────────────
 
+class ColumnSemanticResponse(BaseModel):
+    column_id: int
+    database_id: int
+    business_name: Optional[str] = None
+    business_description: Optional[str] = None
+    prompt_id: Optional[str] = None
+    prompt_version: Optional[str] = None
+    model_name: Optional[str] = None
+    column_category: Optional[str] = None
+    table_category: Optional[str] = None
+    is_pii: bool = False
+    pii_type: Optional[str] = None
+    risk_level: Optional[str] = None
+    confidence_score: float = 0.0
+    generated_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    schema_name: Optional[str] = None
+    table_name: Optional[str] = None
+    column_name: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
 class RelationshipResponse(BaseModel):
     id: int
     table_id: int
@@ -411,12 +435,22 @@ class ReadinessCapabilityScore(BaseModel):
     overall_score: int
 
 
+class ReadinessCategoryScore(BaseModel):
+    metadata_readiness_score: int
+    semantic_readiness_score: int
+    relationship_readiness_score: int
+    ai_context_readiness_score: int
+    governance_readiness_score: int
+    overall_score: int
+
+
 class ReadinessResponse(BaseModel):
     database_id: int
     database_name: str
     readiness_status: str
     generated_at: datetime
     scores: ReadinessCapabilityScore
+    category_scores: ReadinessCategoryScore
     missing_stages: List[str] = Field(default_factory=list)
     remediation_hints: List[str] = Field(default_factory=list)
 
@@ -468,6 +502,7 @@ class DatabaseSemanticResponse(BaseModel):
     source_id: int
     business_domain: Optional[str] = None
     business_summary: Optional[str] = None
+    analysis_notes: Optional[str] = None
     key_entities: List[str] = Field(default_factory=list)
     business_glossary: List[GlossaryTerm] = Field(default_factory=list)
     suggested_use_cases: List[str] = Field(default_factory=list)
@@ -505,6 +540,9 @@ class ArtifactManifestItem(BaseModel):
     artifact_type: str
     version: int
     schema_hash: str
+    prompt_id: Optional[str] = None
+    prompt_version: Optional[str] = None
+    model_name: Optional[str] = None
     export_status: str
     artifact_path: str
     generated_at: datetime
@@ -528,6 +566,23 @@ class ArtifactExportResponse(BaseModel):
     message: str
 
 
+class ArtifactContentResponse(BaseModel):
+    id: int
+    database_id: int
+    artifact_type: str
+    version: int
+    schema_hash: str
+    prompt_id: Optional[str] = None
+    prompt_version: Optional[str] = None
+    model_name: Optional[str] = None
+    export_status: str
+    artifact_path: str
+    generated_at: datetime
+    filename: str
+    mime: str
+    content: str
+
+
 # â”€â”€ Prompt Studio â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class PromptStudioTemplateItem(BaseModel):
@@ -548,6 +603,9 @@ class PromptStudioArtifactItem(BaseModel):
     artifact_type: str
     version: int
     schema_hash: Optional[str] = None
+    prompt_id: Optional[str] = None
+    prompt_version: Optional[str] = None
+    model_name: Optional[str] = None
     export_status: Optional[str] = None
     artifact_path: Optional[str] = None
     filename: Optional[str] = None

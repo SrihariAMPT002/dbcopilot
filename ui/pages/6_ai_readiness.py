@@ -70,8 +70,18 @@ if not ok_breakdown:
     st.stop()
 
 scores = breakdown.get("scores", {})
+category_scores = breakdown.get("category_scores", {})
+if not category_scores:
+    category_scores = {
+        "metadata_readiness_score": int(scores.get("metadata_score", 0)),
+        "semantic_readiness_score": int(scores.get("semantic_score", 0)),
+        "relationship_readiness_score": int(scores.get("relationship_score", 0)),
+        "ai_context_readiness_score": int(scores.get("prompt_score", 0)),
+        "governance_readiness_score": int(scores.get("embeddings_score", 0)),
+        "overall_score": int(scores.get("overall_score", 0)),
+    }
 status = breakdown.get("readiness_status", "NOT_READY")
-overall = int(scores.get("overall_score", 0))
+overall = int(category_scores.get("overall_score", scores.get("overall_score", 0)))
 
 status_color = {
     "READY": "green",
@@ -83,22 +93,22 @@ status_color = {
 st.markdown(f"### Status: :{status_color}[{status}]")
 top = st.columns(6)
 top[0].metric("Overall", f"{overall}%")
-top[1].metric("Metadata", f"{int(scores.get('metadata_score', 0))}%")
-top[2].metric("Semantic", f"{int(scores.get('semantic_score', 0))}%")
-top[3].metric("Embeddings", f"{int(scores.get('embeddings_score', 0))}%")
-top[4].metric("Relationships", f"{int(scores.get('relationship_score', 0))}%")
-top[5].metric("Prompt", f"{int(scores.get('prompt_score', 0))}%")
+top[1].metric("Metadata", f"{int(category_scores.get('metadata_readiness_score', 0))}%")
+top[2].metric("Semantic", f"{int(category_scores.get('semantic_readiness_score', 0))}%")
+top[3].metric("Relationship", f"{int(category_scores.get('relationship_readiness_score', 0))}%")
+top[4].metric("AI Context", f"{int(category_scores.get('ai_context_readiness_score', 0))}%")
+top[5].metric("Governance", f"{int(category_scores.get('governance_readiness_score', 0))}%")
 
 st.progress(overall / 100.0, text=f"Overall Readiness: {overall}%")
 
 st.markdown("### Stage Progress")
 stage_cols = st.columns(5)
 stage_scores = [
-    ("Metadata", int(scores.get("metadata_score", 0))),
-    ("Semantic", int(scores.get("semantic_score", 0))),
-    ("Embeddings", int(scores.get("embeddings_score", 0))),
-    ("Relationships", int(scores.get("relationship_score", 0))),
-    ("Prompt", int(scores.get("prompt_score", 0))),
+    ("Metadata", int(category_scores.get("metadata_readiness_score", 0))),
+    ("Semantic", int(category_scores.get("semantic_readiness_score", 0))),
+    ("Relationship", int(category_scores.get("relationship_readiness_score", 0))),
+    ("AI Context", int(category_scores.get("ai_context_readiness_score", 0))),
+    ("Governance", int(category_scores.get("governance_readiness_score", 0))),
 ]
 for idx, (name, value) in enumerate(stage_scores):
     with stage_cols[idx]:
@@ -116,7 +126,7 @@ with left:
     st.markdown("### Missing Stages")
     if missing:
         for item in missing:
-            st.warning(item)
+            st.warning(item.replace("_", " ").title())
     else:
         st.success("No missing stages detected.")
 
@@ -130,12 +140,46 @@ with right:
 
 st.markdown("### Pipeline Coverage Details")
 detail_cols = st.columns(4)
-detail_cols[0].metric("Schemas", details.get("schemas", 0))
-detail_cols[1].metric("Tables/Entities", details.get("tables", 0))
-detail_cols[2].metric("Columns/Fields", details.get("columns", 0))
-detail_cols[3].metric("Relationships", details.get("relationships", 0))
+metadata_details = details.get("metadata", {})
+semantic_details = details.get("semantic", {})
+relationship_details = details.get("relationships", {})
+ai_context_details = details.get("ai_context", {})
+governance_details = details.get("governance", {})
+embedding_details = details.get("embeddings", {})
+
+detail_cols[0].metric("Schemas", metadata_details.get("schemas", 0))
+detail_cols[1].metric("Tables/Entities", metadata_details.get("tables", 0))
+detail_cols[2].metric("Columns/Fields", metadata_details.get("columns", 0))
+detail_cols[3].metric("Relationships", metadata_details.get("relationships", 0))
 
 detail_cols2 = st.columns(3)
-detail_cols2[0].metric("Semantic Coverage", details.get("semantic_tables", 0))
-detail_cols2[1].metric("Embedding Coverage", details.get("embedding_completed", 0))
-detail_cols2[2].metric("Prompt Coverage", details.get("tables_with_prompt_context", 0))
+detail_cols2[0].metric("Schema Docs", metadata_details.get("schemas_with_description", 0))
+detail_cols2[1].metric("Table Docs", metadata_details.get("tables_with_description", 0))
+detail_cols2[2].metric("Column Docs", metadata_details.get("columns_with_description", 0))
+
+st.markdown("### Coverage Signals")
+signal_cols = st.columns(4)
+signal_cols[0].metric("Semantic Tables", semantic_details.get("schema_semantics", 0))
+signal_cols[1].metric("Graph Edges", relationship_details.get("graph_edges", 0))
+signal_cols[2].metric("Prompt Artifacts", ai_context_details.get("prompt_artifacts_rendered", 0))
+signal_cols[3].metric("Column Semantics", governance_details.get("column_semantics", 0))
+
+st.markdown("### Governance & AI Context")
+governance_cols = st.columns(4)
+governance_cols[0].metric("PII Columns", governance_details.get("pii_columns", 0))
+governance_cols[1].metric("PII Risk Tagged", governance_details.get("pii_risk_tagged_columns", 0))
+governance_cols[2].metric("Prompt Context Len", ai_context_details.get("prompt_context_length", 0))
+governance_cols[3].metric("Embedding Coverage", embedding_details.get("completed_tables", 0))
+
+st.markdown("### Coverage Breakdown")
+coverage_cols = st.columns(2)
+with coverage_cols[0]:
+    st.markdown("#### Metadata")
+    st.json(metadata_details)
+with coverage_cols[1]:
+    st.markdown("#### Semantic / AI Context")
+    st.json({
+        "semantic": semantic_details,
+        "ai_context": ai_context_details,
+        "governance": governance_details,
+    })

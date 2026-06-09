@@ -92,6 +92,9 @@ class Settings(BaseSettings):
     langsmith_api_key: Optional[str] = Field(default=None)
     langsmith_project: Optional[str] = Field(default=None)
     langsmith_endpoint: Optional[str] = Field(default=None)
+    langfuse_public_key: Optional[str] = Field(default=None)
+    langfuse_secret_key: Optional[str] = Field(default=None)
+    langfuse_host: Optional[str] = Field(default=None)
 
     @field_validator("log_level")
     @classmethod

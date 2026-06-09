@@ -14,7 +14,6 @@ NAV_LINKS = [
     ("pages/8_prompt_studio.py", "Prompt Studio"),
     ("pages/6_ai_readiness.py", "AI Readiness"),
     ("pages/9_exports.py", "Exports"),
-    ("pages/10_operations.py", "Operations"),
     ("pages/11_settings.py", "Settings"),
 ]
 

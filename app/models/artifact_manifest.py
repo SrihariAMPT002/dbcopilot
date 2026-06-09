@@ -50,6 +50,9 @@ class ArtifactManifest(Base):
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     schema_hash: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    prompt_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    prompt_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     export_status: Mapped[ExportStatus] = mapped_column(
         Enum(ExportStatus, name="artifact_export_status_enum"),
         nullable=False,

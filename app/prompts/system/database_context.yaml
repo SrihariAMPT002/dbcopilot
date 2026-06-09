@@ -21,6 +21,7 @@ user_prompt: |
   ## Semantic Intelligence
   - Business Domain: {{ semantic.business_domain or 'Unknown' }}
   - Business Summary: {{ semantic.business_summary or 'Not available' }}
+  - Analysis Notes: {{ semantic.analysis_notes or 'Not available' }}
   - Confidence Score: {{ '%.2f'|format(semantic.confidence_score or 0) }}
   - Generation Status: {{ semantic.generation_status or 'not_generated' }}
 

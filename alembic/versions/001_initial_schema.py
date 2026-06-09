@@ -271,6 +271,7 @@ def upgrade() -> None:
         sa.Column("source_id", sa.Integer(), nullable=False),
         sa.Column("business_domain", sa.Text(), nullable=True),
         sa.Column("business_summary", sa.Text(), nullable=True),
+        sa.Column("analysis_notes", sa.Text(), nullable=True),
         sa.Column("key_entities", sa.Text(), nullable=False, server_default="[]"),
         sa.Column("business_glossary", sa.Text(), nullable=False, server_default="[]"),
         sa.Column("suggested_use_cases", sa.Text(), nullable=False, server_default="[]"),

@@ -297,14 +297,33 @@ st.markdown(
 
 st.write("")
 
-st.markdown('<div class="section-card">', unsafe_allow_html=True)
-st.markdown("### Business Summary")
-st.write(summary.get("business_summary") or "No summary available.")
-st.markdown("</div>", unsafe_allow_html=True)
+st.markdown(
+    f"""
+    <div class="section-card">
+        <div class="label">Business Summary</div>
+        <div style="height: 0.7rem;"></div>
+        <div class="value">{summary.get('business_summary') or 'No summary available.'}</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.write("")
+st.markdown(
+    f"""
+    <div class="section-card">
+        <div class="label">Analysis Notes</div>
+        <div style="height: 0.7rem;"></div>
+        <div class="value">{summary.get('analysis_notes') or 'No analysis notes available.'}</div>  
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 st.write("")
 
-st.markdown('<div class="section-card">', unsafe_allow_html=True)
+st.markdown('<div>', unsafe_allow_html=True)
 st.markdown("### Key Entities")
 entities = _safe_list(summary.get("key_entities"))
 if entities:
@@ -315,7 +334,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 st.write("")
 
-st.markdown('<div class="section-card">', unsafe_allow_html=True)
+st.markdown('<div>', unsafe_allow_html=True)
 st.markdown("### Business Glossary")
 glossary_items = _safe_list(summary.get("business_glossary"))
 if glossary_items:
@@ -332,7 +351,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 st.write("")
 
-st.markdown('<div class="section-card">', unsafe_allow_html=True)
+st.markdown('<div>', unsafe_allow_html=True)
 st.markdown("### Suggested Use Cases")
 use_cases = _safe_list(summary.get("suggested_use_cases"))
 if use_cases:

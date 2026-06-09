@@ -93,6 +93,7 @@ def sample_database():
         data_type="INTEGER",
         is_primary_key=True,
         is_nullable=False,
+        description="Unique customer identifier",
     )
     
     customer_name_col = DatabaseColumn(
@@ -233,6 +234,7 @@ class TestDatabaseSemanticServiceMetadataAggregation:
         # Verify schema structure
         schema_info = payload["schemas"][0]
         assert schema_info["name"] == "public"
+        assert schema_info["description"] == "Public schema"
         assert schema_info["table_count"] == 2
         assert len(schema_info["tables"]) == 2
         
@@ -240,9 +242,12 @@ class TestDatabaseSemanticServiceMetadataAggregation:
         table_info = schema_info["tables"][0]
         assert table_info["name"] == "customers"
         assert table_info["type"] == "table"
+        assert table_info["description"] == "Customer master data"
         assert len(table_info["columns"]) == 2
         assert table_info["columns"][0]["name"] == "customer_id"
         assert table_info["columns"][0]["is_pk"] is True
+        assert table_info["columns"][0]["description"] == "Unique customer identifier"
+        assert "description" not in table_info["columns"][1]
 
     def test_analyze_naming_patterns_good_names(self, sample_database):
         """Test analyzing good naming patterns."""
@@ -301,6 +306,44 @@ class TestDatabaseSemanticServiceMetadataAggregation:
         # Large payload
         large_payload = {"tables": [{"name": f"table_{i}", "data": "x" * 10000} for i in range(100)]}
         assert service._validate_payload_size(large_payload) is False
+
+    def test_build_schema_prompt_parts_includes_descriptions(self):
+        """Test LLM schema summary includes catalog descriptions."""
+        service = DatabaseSemanticService(AsyncMock())
+        metadata = {
+            "schemas": [
+                {
+                    "name": "public",
+                    "description": "Main application schema",
+                    "tables": [
+                        {
+                            "name": "customers",
+                            "type": "table",
+                            "row_count": 100,
+                            "description": "Customer master data",
+                            "columns": [
+                                {
+                                    "name": "customer_id",
+                                    "type": "INTEGER",
+                                    "description": "Unique customer identifier",
+                                },
+                                {"name": "customer_name", "type": "VARCHAR(255)"},
+                            ],
+                            "relationships": [],
+                        }
+                    ],
+                }
+            ]
+        }
+
+        schema_lines, _ = service._build_schema_prompt_parts(metadata)
+        joined = "\n".join(schema_lines)
+
+        assert "Schema description: Main application schema" in joined
+        assert "Table description: Customer master data" in joined
+        assert "customer_id(INTEGER) — Unique customer identifier" in joined
+        assert "customer_name(VARCHAR(255))" in joined
+        assert "customer_name(VARCHAR(255)) —" not in joined
 
     def test_sample_large_schema(self):
         """Test schema sampling for large databases."""
@@ -395,6 +438,7 @@ class TestDatabaseSemanticServiceResponseParsing:
                 "Customer lifetime value analysis",
                 "Order fulfillment tracking",
             ],
+            "analysis_notes": "Schema was sampled; some tables omitted.",
         })
         
         enrichment = service._parse_enrichment_response(1, response_text, {})
@@ -402,6 +446,7 @@ class TestDatabaseSemanticServiceResponseParsing:
         assert enrichment.business_domain == "E-Commerce"
         assert len(enrichment.key_entities) == 3
         assert enrichment.confidence_score == 1.0
+        assert enrichment.analysis_notes == "Schema was sampled; some tables omitted."
 
     def test_parse_enrichment_response_invalid_json(self):
         """Test parsing invalid JSON response."""
@@ -413,6 +458,7 @@ class TestDatabaseSemanticServiceResponseParsing:
         
         assert enrichment.business_domain == "Unknown"
         assert enrichment.confidence_score == 0.0
+        assert enrichment.analysis_notes is None
         assert enrichment.raw_response == response_text
 
 
@@ -437,6 +483,7 @@ class TestDatabaseSemanticServiceDatabaseOperations:
             business_glossary=[],
             suggested_use_cases=["Customer analysis"],
             confidence_score=0.85,
+            analysis_notes="Limited FK metadata detected.",
         )
         
         result = await service.save_enrichment(enrichment)
@@ -456,6 +503,7 @@ class TestDatabaseSemanticServiceDatabaseOperations:
         )
         existing.business_domain = "Legacy"
         existing.business_summary = "Old summary"
+        existing.analysis_notes = "Old notes"
         existing.key_entities = ["old"]
         existing.business_glossary = [{"term": "old", "definition": "old"}]
         existing.suggested_use_cases = ["old use case"]
@@ -478,6 +526,7 @@ class TestDatabaseSemanticServiceDatabaseOperations:
             business_glossary=[{"term": "SKU", "definition": "Stock keeping unit"}],
             suggested_use_cases=["Customer analysis"],
             confidence_score=0.85,
+            analysis_notes="Regenerated with full metadata.",
             raw_response='{"business_domain":"E-Commerce"}',
         )
 
@@ -486,6 +535,7 @@ class TestDatabaseSemanticServiceDatabaseOperations:
         assert result is existing
         assert existing.business_domain == "E-Commerce"
         assert existing.business_summary == "Order management system"
+        assert existing.analysis_notes == "Regenerated with full metadata."
         assert existing.key_entities == ["customers", "orders"]
         assert existing.business_glossary[0]["term"] == "SKU"
         assert existing.suggested_use_cases == ["Customer analysis"]
@@ -568,33 +618,16 @@ class TestDatabaseSemanticServiceDatabaseOperations:
 class TestDatabaseSemanticServicePrompts:
     """Test prompt building for Azure OpenAI."""
 
-    def test_build_semantic_prompt(self):
-        """Test semantic prompt construction."""
-        service = DatabaseSemanticService(AsyncMock())
-        
-        metadata = {
-            "database_name": "ecommerce",
-            "schemas": [
-                {
-                    "name": "public",
-                    "tables": [
-                        {
-                            "name": "customers",
-                            "columns": [
-                                {"name": "customer_id", "type": "INTEGER"},
-                                {"name": "name", "type": "VARCHAR"},
-                            ],
-                        }
-                    ],
-                }
-            ],
-        }
-        
-        prompt = service._build_semantic_prompt(metadata)
-        
-        # Verify prompt contains key elements
-        assert "ecommerce" in prompt
-        assert "customers" in prompt
-        assert "business_domain" in prompt
-        assert "key_entities" in prompt
-        assert "business_glossary" in prompt
+    @pytest.mark.asyncio
+    async def test_build_prompt_variables_schema_summary(self, mock_db, sample_database):
+        """Test schema_summary passed to the semantic prompt template."""
+        service = DatabaseSemanticService(mock_db)
+        metadata = await service._build_metadata_summary(sample_database)
+
+        variables = service._build_prompt_variables(sample_database, metadata)
+        schema_summary = variables["schema_summary"]
+
+        assert "customers" in schema_summary
+        assert "Schema description: Public schema" in schema_summary
+        assert "Table description: Customer master data" in schema_summary
+        assert "customer_id(INTEGER) — Unique customer identifier" in schema_summary

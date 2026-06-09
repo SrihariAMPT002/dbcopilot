@@ -27,38 +27,14 @@ from app.models.metadata import (
     DatabaseSchema,
     DatabaseTable,
 )
+from app.config.prompts import get_enrichment_prompt
 from app.schema_engine.metrics import MetricsEngine
+from app.services.ai_observability_service import AIObservabilityService
 from app.utils import safe_flush
 
 logger = logging.getLogger(__name__)
 
 # ── Azure OpenAI Client (lazy initialization) ────────────────────────────────
-
-_openai_client = None
-
-
-def get_openai_client():
-    """Lazy-load OpenAI client with Azure configuration."""
-    global _openai_client
-    if _openai_client is None:
-        if not settings.azure_openai_endpoint or not settings.azure_openai_key:
-            raise ValueError(
-                "Azure OpenAI not configured. Set AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_KEY"
-            )
-        try:
-            from openai import AzureOpenAI
-            
-            _openai_client = AzureOpenAI(
-                api_key=settings.azure_openai_key,
-                api_version=settings.azure_openai_api_version,
-                azure_endpoint=settings.azure_openai_endpoint,
-            )
-        except ImportError:
-            raise ImportError(
-                "openai package not installed. Install with: pip install openai"
-            )
-    return _openai_client
-
 
 # ── Semantic Enrichment Data Model ───────────────────────────────────────────
 
@@ -75,6 +51,9 @@ class SemanticEnrichment:
         business_keywords: list[str],
         possible_questions: list[str],
         raw_response: Optional[str] = None,
+        prompt_id: Optional[str] = None,
+        prompt_version: Optional[str] = None,
+        model_name: Optional[str] = None,
     ):
         self.table_id = table_id
         self.database_id = database_id
@@ -84,6 +63,9 @@ class SemanticEnrichment:
         self.business_keywords = business_keywords
         self.possible_questions = possible_questions
         self.raw_response = raw_response
+        self.prompt_id = prompt_id
+        self.prompt_version = prompt_version
+        self.model_name = model_name
         self.generated_at = datetime.now(timezone.utc)
 
 
@@ -130,7 +112,7 @@ class SchemaEnricher:
 
         # Call Azure OpenAI
         try:
-            response = await self._call_azure_openai(context_doc)
+            ai_result = await self._call_azure_openai(table, context_doc)
             self.metrics.record_openai_call(time.time() - start_time)
         except Exception as e:
             logger.error("Azure OpenAI call failed: %s", e, exc_info=True)
@@ -138,7 +120,10 @@ class SchemaEnricher:
             raise
 
         # Parse response
-        enrichment = self._parse_enrichment_response(table_id, table.schema.connected_db_id, response)
+        enrichment = self._parse_enrichment_response(table_id, table.schema.connected_db_id, ai_result.content or "")
+        enrichment.prompt_id = ai_result.prompt_id
+        enrichment.prompt_version = ai_result.prompt_version
+        enrichment.model_name = ai_result.model_name
 
         # Record metrics
         self.metrics.record_enrichment_latency(time.time() - start_time)
@@ -246,50 +231,90 @@ class SchemaEnricher:
 
         return "\n".join(doc_lines)
 
+    @staticmethod
+    def _schema_completeness(table: DatabaseTable) -> float:
+        columns = len(table.columns or [])
+        relationships = len(table.relationships_from or [])
+        if columns <= 0:
+            return 0.0
+        score = 0.55
+        if table.description:
+            score += 0.20
+        if relationships > 0:
+            score += 0.25
+        return round(min(1.0, score), 3)
+
+    @staticmethod
+    def _schema_coverage(table: DatabaseTable) -> float:
+        columns = len(table.columns or [])
+        if columns <= 0:
+            return 0.0
+        descriptive_columns = sum(1 for column in table.columns or [] if column.description)
+        return round(min(1.0, (descriptive_columns / columns) if columns else 0.0), 3)
+
     # ── Call Azure OpenAI ──────────────────────────────────────────────────
 
-    async def _call_azure_openai(self, context_doc: str) -> str:
+    async def _call_azure_openai(self, table: DatabaseTable, context_doc: str):
         """
         Call Azure OpenAI GPT-4o to generate semantic enrichment.
-        
-        Uses a system prompt to guide the model toward specific outputs.
+
+        Uses the shared observability wrapper so the call is traced in Langfuse.
         """
-        client = get_openai_client()
-
-        system_prompt = """You are a database schema analyzer. Analyze the provided database table schema and provide:
-
-1. A 2-3 sentence business summary of what this table likely contains
-2. List of 3-5 likely usage patterns (e.g., "sales analytics", "customer reporting")
-3. List of 3-5 key/important column names
-4. List of 5-10 business keywords related to this table
-5. List of 5-10 possible analytics questions that could be answered with this data
-
-Return ONLY a valid JSON object (no markdown, no extra text) with these fields:
-{
-  "business_summary": "string",
-  "likely_usage": ["string", ...],
-  "important_columns": ["string", ...],
-  "business_keywords": ["string", ...],
-  "possible_questions": ["string", ...]
-}"""
-
-        user_message = f"Analyze this database table:\n\n{context_doc}"
-
-        # Run in thread pool to avoid blocking
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: client.chat.completions.create(
-                model=settings.azure_openai_deployment,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message},
+        rendered_prompt = get_enrichment_prompt(
+            {
+                "table_name": table.name,
+                "schema_name": table.schema.name,
+                "table_type": table.table_type.value,
+                "row_count": table.row_count or "Unknown",
+                "description": table.description or "",
+                "columns": [
+                    {
+                        "name": column.name,
+                        "type": column.data_type,
+                        "description": column.description or "",
+                    }
+                    for column in table.columns
                 ],
-                max_completion_tokens=1000,
-            ),
+                "relationships": [
+                    {
+                        "column": rel.column_name,
+                        "references": f"{rel.referenced_table_name}.{rel.referenced_column_name}",
+                    }
+                    for rel in table.relationships_from
+                ],
+                "context_doc": context_doc,
+            }
         )
 
-        return response.choices[0].message.content
+        observability = AIObservabilityService()
+        return await observability.generate(
+            operation="chat",
+            module="semantic_intelligence",
+            artifact_type="schema_semantic",
+            database_id=table.schema.connected_db_id,
+            database_name=table.schema.connected_database.display_name or table.schema.connected_database.name,
+            prompt_id=rendered_prompt.metadata.id,
+            prompt_version=rendered_prompt.metadata.version,
+            model_name=settings.azure_openai_deployment,
+            messages=[
+                {
+                    "role": "system",
+                    "content": rendered_prompt.system_message
+                    or "You are a database schema analyzer. Analyze the provided database table schema and provide semantic context.",
+                },
+                {"role": "user", "content": rendered_prompt.user_prompt},
+            ],
+            request_kwargs={
+                "max_completion_tokens": 1000,
+            },
+            completeness_score=self._schema_completeness(table),
+            coverage_score=self._schema_coverage(table),
+            confidence_score=0.0,
+            extra_metadata={
+                "table_name": table.name,
+                "column_count": len(table.columns or []),
+            },
+        )
 
     # ── Parse OpenAI response ──────────────────────────────────────────────
 
@@ -358,6 +383,9 @@ Return ONLY a valid JSON object (no markdown, no extra text) with these fields:
             semantic.important_columns = enrichment.important_columns
             semantic.business_keywords = enrichment.business_keywords
             semantic.possible_questions = enrichment.possible_questions
+            semantic.prompt_id = enrichment.prompt_id
+            semantic.prompt_version = enrichment.prompt_version
+            semantic.model_name = enrichment.model_name
             semantic.generated_at = enrichment.generated_at
             logger.info("Updated semantic enrichment for table %d", enrichment.table_id)
         else:
@@ -366,6 +394,9 @@ Return ONLY a valid JSON object (no markdown, no extra text) with these fields:
                 database_id=enrichment.database_id,
                 table_id=enrichment.table_id,
                 semantic_summary=enrichment.business_summary,
+                prompt_id=enrichment.prompt_id,
+                prompt_version=enrichment.prompt_version,
+                model_name=enrichment.model_name,
                 likely_usage=enrichment.likely_usage,
                 important_columns=enrichment.important_columns,
                 business_keywords=enrichment.business_keywords,

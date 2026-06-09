@@ -1,16 +1,18 @@
 # Readiness Scoring & Assessment Rules
 # Defines how databases are scored for AI readiness across 5 dimensions
+# Legacy compatibility: older "embeddings" and "prompt" labels are now folded
+# into the richer AI Context and Governance readiness categories.
 # Version: 1.0.0
 # Last Updated: 2026-06-01
 
 scoring:
   # Component weights must sum to 1.0
   weights:
-    metadata: 0.25        # Schema structure completeness (25%)
-    semantic: 0.25        # AI semantic intelligence coverage (25%)
-    embeddings: 0.20      # Vector search capability (20%)
-    relationships: 0.15   # Entity relationship clarity (15%)
-    prompt: 0.15          # Prompt context quality (15%)
+    metadata: 0.24        # Schema/table/column documentation completeness (24%)
+    semantic: 0.24        # Database semantic intelligence coverage (24%)
+    relationship: 0.20    # Relationship graph discovery coverage (20%)
+    ai_context: 0.18      # Prompt package and context artifact readiness (18%)
+    governance: 0.14      # PII, documentation, and ownership readiness (14%)
 
   # Each component is independently scored 0-100
   # Then combined using weights to get overall_score: 0-100
@@ -36,13 +38,15 @@ status_thresholds:
 # Component-specific scoring rules
 components:
   metadata:
-    description: "Measures schema structure quality"
+    description: "Measures schema, table, and column documentation completeness"
     factors:
-      - tables_count: weight 20
-      - columns_per_table: weight 20
-      - primary_keys: weight 20
-      - naming_quality: weight 20
-      - documentation: weight 20
+      - schemas_present: weight 20
+      - tables_present: weight 20
+      - columns_present: weight 15
+      - schema_descriptions: weight 15
+      - table_descriptions: weight 15
+      - column_descriptions: weight 15
+      - row_count_coverage: weight 10
     thresholds:
       excellent: 85+
       good: 70+
@@ -52,47 +56,51 @@ components:
   semantic:
     description: "Measures semantic intelligence coverage"
     factors:
-      - has_semantic_profile: weight 50  # Critical
-      - glossary_coverage: weight 30
-      - use_cases_defined: weight 20
+      - has_semantic_profile: weight 30
+      - table_semantics_coverage: weight 30
+      - glossary_coverage: weight 20
+      - use_cases_defined: weight 15
+      - confidence_score: weight 5
     thresholds:
       excellent: 90+
       good: 75+
       fair: 50+
       poor: 0
 
-  embeddings:
-    description: "Measures vector search capability"
+  relationship:
+    description: "Measures relationship discovery coverage and graph completeness"
     factors:
-      - collections_indexed: weight 50
-      - embeddings_generated: weight 30
-      - embedding_quality: weight 20
+      - graph_table_coverage: weight 35
+      - graph_edge_coverage: weight 25
+      - density: weight 20
+      - cycles: weight 10
+      - isolated_tables: weight 10
     thresholds:
       excellent: 80+
       good: 60+
       fair: 40+
       poor: 0
 
-  relationships:
-    description: "Measures entity relationship clarity"
+  ai_context:
+    description: "Measures prompt package generation and context artifact readiness"
     factors:
-      - foreign_keys: weight 40
-      - inferred_relationships: weight 30
-      - relationship_quality: weight 30
+      - prompt_artifacts_rendered: weight 50
+      - embeddings_ready: weight 30
+      - semantic_dependency: weight 20
     thresholds:
-      excellent: 75+
-      good: 60+
+      excellent: 90+
+      good: 75+
       fair: 40+
       poor: 0
 
-  prompt:
-    description: "Measures prompt context quality"
+  governance:
+    description: "Measures documentation, PII classification, and ownership readiness"
     factors:
-      - prompt_generated: weight 50
-      - context_completeness: weight 30
-      - context_quality: weight 20
+      - documentation_coverage: weight 50
+      - pii_coverage: weight 35
+      - ownership_coverage: weight 15
     thresholds:
-      excellent: 85+
+      excellent: 80+
       good: 70+
       fair: 50+
       poor: 0
@@ -103,32 +111,32 @@ assessment:
   minimum_columns: 2
   minimum_relationships: 0  # Can be AI-ready without relationships
 
-  naming_quality_thresholds:
-    poor_name_pattern: "^(tbl_|col_|d_|f_|t_|x_|v_)"  # Regex for poor names
-    poor_name_penalty: 15  # 15% score reduction
-    poor_name_threshold: 50  # If >50% names are poor, apply penalty
-
   # Recommendations generation rules
   recommendations:
-    low_table_count:
-      threshold: 5
-      message: "Consider adding more tables for better analysis coverage"
-      priority: low
+    missing_metadata_docs:
+      threshold: 70
+      message: "Add schema, table, and column descriptions to improve metadata readiness"
+      priority: high
 
-    poor_naming:
-      threshold: 50  # Percent poor names
-      message: "Improve table and column naming for better semantic analysis"
+    missing_semantics:
+      threshold: 75
+      message: "Generate database semantic intelligence and business glossary coverage"
       priority: high
 
     missing_relationships:
       threshold: 0  # If no relationships found
-      message: "Add foreign keys to define relationships between tables"
+      message: "Add foreign keys and persist the relationship graph"
       priority: medium
 
-    missing_documentation:
-      threshold: 0  # If no documentation
-      message: "Add comments/descriptions to tables and columns"
-      priority: low
+    missing_ai_context:
+      threshold: 75
+      message: "Render the full prompt package and context artifacts"
+      priority: medium
+
+    missing_governance:
+      threshold: 70
+      message: "Add PII classification, ownership metadata, and documentation coverage"
+      priority: high
 
 # Grade distribution for readiness reports
 grades:

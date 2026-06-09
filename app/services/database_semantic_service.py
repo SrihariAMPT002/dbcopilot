@@ -32,8 +32,8 @@ from app.models.metadata import (
     DatabaseTable,
     SemanticGenerationStatus,
 )
-from app.schema_engine.enricher import get_openai_client
 from app.schema_engine.embeddings import _traceable
+from app.services.ai_observability_service import AIObservabilityService, AIObservationResult
 from app.utils import safe_flush
 
 logger = logging.getLogger(__name__)
@@ -63,11 +63,16 @@ class DatabaseSemanticEnrichment:
         business_glossary: list[dict],
         suggested_use_cases: list[str],
         confidence_score: float,
+        analysis_notes: Optional[str] = None,
         raw_response: Optional[str] = None,
+        prompt_id: Optional[str] = None,
+        prompt_version: Optional[str] = None,
+        model_name: Optional[str] = None,
     ):
         self.source_id = source_id
         self.business_domain = business_domain
         self.business_summary = business_summary
+        self.analysis_notes = analysis_notes
         self.key_entities = key_entities
         self.business_glossary = business_glossary
         self.suggested_use_cases = suggested_use_cases
@@ -90,13 +95,6 @@ class DatabaseSemanticService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.openai_client = None
-
-    def _get_openai_client(self):
-        """Lazy-load OpenAI client with Azure configuration."""
-        if self.openai_client is None:
-            self.openai_client = get_openai_client()
-        return self.openai_client
 
     def _apply_enrichment_fields(
         self,
@@ -107,6 +105,7 @@ class DatabaseSemanticService:
         """Copy generated semantic values onto an ORM row."""
         db_semantic.business_domain = enrichment.business_domain
         db_semantic.business_summary = enrichment.business_summary
+        db_semantic.analysis_notes = enrichment.analysis_notes
         db_semantic.key_entities = enrichment.key_entities
         db_semantic.business_glossary = enrichment.business_glossary
         db_semantic.suggested_use_cases = enrichment.suggested_use_cases
@@ -127,6 +126,7 @@ class DatabaseSemanticService:
         now = datetime.now(timezone.utc)
         db_semantic.business_domain = None
         db_semantic.business_summary = None
+        db_semantic.analysis_notes = None
         db_semantic.key_entities = []
         db_semantic.business_glossary = []
         db_semantic.suggested_use_cases = []
@@ -242,12 +242,13 @@ class DatabaseSemanticService:
 
         # Call Azure OpenAI
         try:
-            response_text = await self._call_azure_openai(database, metadata_payload)
+            ai_result = await self._call_azure_openai(database, metadata_payload)
         except Exception as e:
             logger.error("Azure OpenAI call failed for database %d: %s", source_id, e, exc_info=True)
             raise
 
         # Parse response
+        response_text = ai_result.content or ""
         enrichment = self._parse_enrichment_response(source_id, response_text, metadata_payload)
 
         # Calculate confidence score
@@ -297,7 +298,8 @@ class DatabaseSemanticService:
                 metadata_payload = self._sample_large_schema(metadata_payload)
 
             logger.info("Generating semantics for database %d", source_id)
-            response_text = await self._call_azure_openai(database, metadata_payload)
+            ai_result = await self._call_azure_openai(database, metadata_payload)
+            response_text = ai_result.content or ""
             enrichment = self._parse_enrichment_response(source_id, response_text, metadata_payload)
             enrichment.confidence_score = self._calculate_confidence_score(database, enrichment)
 
@@ -341,7 +343,7 @@ class DatabaseSemanticService:
         
         Returns structured metadata payload with:
         - Database name and type
-        - Schemas and tables
+        - Schemas and tables (including catalog descriptions when present)
         - Relationships
         - Column patterns
         """
@@ -356,28 +358,22 @@ class DatabaseSemanticService:
 
         # Collect schema information
         for schema in database.schemas or []:
-            schema_info = {
+            schema_info: dict[str, Any] = {
                 "name": schema.name,
                 "tables": [],
                 "table_count": len(schema.tables) if schema.tables else 0,
             }
+            schema_description = self._normalize_description(schema.description)
+            if schema_description:
+                schema_info["description"] = schema_description
 
             # Collect table information
             for table in schema.tables or []:
-                table_info = {
+                table_info: dict[str, Any] = {
                     "name": table.name,
                     "type": table.table_type.value if hasattr(table.table_type, "value") else str(table.table_type),
                     "row_count": table.row_count,
-                    "columns": [
-                        {
-                            "name": col.name,
-                            "type": col.data_type,
-                            "is_pk": col.is_primary_key,
-                            "is_fk": col.is_foreign_key,
-                            "nullable": col.is_nullable,
-                        }
-                        for col in (table.columns or [])
-                    ],
+                    "columns": [self._column_metadata_entry(col) for col in (table.columns or [])],
                     "relationships": [
                         {
                             "column": rel.column_name,
@@ -386,6 +382,9 @@ class DatabaseSemanticService:
                         for rel in (table.relationships_from or [])
                     ],
                 }
+                table_description = self._normalize_description(table.description)
+                if table_description:
+                    table_info["description"] = table_description
 
                 schema_info["tables"].append(table_info)
                 payload["total_tables"] += 1
@@ -397,6 +396,29 @@ class DatabaseSemanticService:
         payload["naming_patterns"] = self._analyze_naming_patterns(database)
 
         return payload
+
+    @staticmethod
+    def _normalize_description(description: Optional[str]) -> Optional[str]:
+        """Return a trimmed catalog description, or None when empty."""
+        if not description:
+            return None
+        text = description.strip()
+        return text or None
+
+    @classmethod
+    def _column_metadata_entry(cls, column: DatabaseColumn) -> dict[str, Any]:
+        """Build a column dict for the metadata payload."""
+        entry: dict[str, Any] = {
+            "name": column.name,
+            "type": column.data_type,
+            "is_pk": column.is_primary_key,
+            "is_fk": column.is_foreign_key,
+            "nullable": column.is_nullable,
+        }
+        column_description = cls._normalize_description(column.description)
+        if column_description:
+            entry["description"] = column_description
+        return entry
 
     def _analyze_naming_patterns(self, database: ConnectedDatabase) -> dict[str, Any]:
         """Analyze naming patterns to assess metadata quality."""
@@ -488,6 +510,9 @@ class DatabaseSemanticService:
         for schema in (metadata_payload.get("schemas") or [])[:MAX_TABLES_IN_PROMPT]:
             schema_name = schema.get("name", "unknown")
             schema_lines.append(f"Schema: {schema_name}")
+            schema_description = self._normalize_description(schema.get("description"))
+            if schema_description:
+                schema_lines.append(f"  Schema description: {schema_description}")
 
             tables = (schema.get("tables") or [])[:MAX_TABLES_IN_PROMPT]
             for table in tables:
@@ -495,14 +520,14 @@ class DatabaseSemanticService:
                 table_type = table.get("type", "unknown")
                 row_count = table.get("row_count", "Unknown")
                 schema_lines.append(f"- Table: {table_name} | Type: {table_type} | Rows: {row_count}")
+                table_description = self._normalize_description(table.get("description"))
+                if table_description:
+                    schema_lines.append(f"  Table description: {table_description}")
 
                 columns = (table.get("columns") or [])[:MAX_COLUMNS_PER_TABLE_IN_PROMPT]
                 if columns:
-                    column_names = ", ".join(
-                        f"{col.get('name', 'unknown')}({col.get('type', 'unknown')})"
-                        for col in columns
-                    )
-                    schema_lines.append(f"  Columns: {column_names}")
+                    column_parts = [self._format_column_for_prompt(col) for col in columns]
+                    schema_lines.append(f"  Columns: {', '.join(column_parts)}")
 
                 if table.get("_table_count_original"):
                     schema_lines.append(
@@ -517,6 +542,15 @@ class DatabaseSemanticService:
                         return schema_lines, relationship_lines
 
         return schema_lines, relationship_lines
+
+    @classmethod
+    def _format_column_for_prompt(cls, column: dict[str, Any]) -> str:
+        """Format a column for the LLM schema summary, including description when present."""
+        base = f"{column.get('name', 'unknown')}({column.get('type', 'unknown')})"
+        description = cls._normalize_description(column.get("description"))
+        if description:
+            return f"{base} — {description}"
+        return base
 
     # ── Azure OpenAI Integration ───────────────────────────────────────────
 
@@ -545,71 +579,83 @@ class DatabaseSemanticService:
             "poor_naming_patterns": ", ".join(naming_patterns.get("table_prefixes", [])) or "None detected",
         }
 
+    @staticmethod
+    def _semantic_completeness(metadata_payload: dict[str, Any]) -> float:
+        total_tables = int(metadata_payload.get("total_tables", 0) or 0)
+        total_relationships = int(metadata_payload.get("total_relationships", 0) or 0)
+        if total_tables <= 0:
+            return 0.0
+        score = 0.5
+        if total_relationships > 0:
+            score += 0.25
+        if metadata_payload.get("naming_patterns"):
+            score += 0.25
+        return round(min(1.0, score), 3)
+
+    @staticmethod
+    def _semantic_coverage(metadata_payload: dict[str, Any]) -> float:
+        schemas = len(metadata_payload.get("schemas") or [])
+        tables = int(metadata_payload.get("total_tables", 0) or 0)
+        if tables <= 0:
+            return 0.0
+        coverage = min(1.0, (schemas + tables) / max(1, tables + 3))
+        return round(coverage, 3)
+
     @_traceable("database_semantic_openai_call", run_type="llm")
-    async def _call_azure_openai(self, database: ConnectedDatabase, metadata_payload: dict[str, Any]) -> str:
+    async def _call_azure_openai(self, database: ConnectedDatabase, metadata_payload: dict[str, Any]) -> AIObservationResult:
         """
         Call Azure OpenAI to generate semantic understanding.
-        
-        Returns:
-            Raw response text from the model
-        """
-        client = self._get_openai_client()
 
+        Returns:
+            AIObservationResult with response text, token usage, and trace metadata.
+        """
         prompt_variables = self._build_prompt_variables(database, metadata_payload)
         rendered_prompt = get_semantic_prompt(prompt_variables)
 
-        messages = [
-            {
-                "role": "system",
-                "content": rendered_prompt.system_message
-                or (
-                    "You are an Enterprise Data Architect specializing in semantic analysis. "
-                    "Analyze database metadata and provide business insights. "
-                    "ALWAYS respond with valid JSON only, no markdown, no explanations."
-                ),
-            },
-            {"role": "user", "content": rendered_prompt.user_prompt},
-        ]
-
-        def _invoke_chat_completion(use_json_mode: bool) -> tuple[str, Any, Any]:
-            request_kwargs: dict[str, Any] = {
-                "model": settings.azure_openai_deployment,
-                "messages": messages,
+        observability = AIObservabilityService()
+        ai_result = await observability.generate(
+            operation="chat",
+            module="semantic_intelligence",
+            artifact_type="database_semantic",
+            database_id=database.id,
+            database_name=database.display_name or database.name,
+            prompt_id=rendered_prompt.metadata.id,
+            prompt_version=rendered_prompt.metadata.version,
+            model_name=settings.azure_openai_deployment,
+            messages=[
+                {
+                    "role": "system",
+                    "content": rendered_prompt.system_message
+                    or (
+                        "You are an Enterprise Data Architect specializing in semantic analysis. "
+                        "Analyze database metadata and provide business insights. "
+                        "ALWAYS respond with valid JSON only, no markdown, no explanations."
+                    ),
+                },
+                {"role": "user", "content": rendered_prompt.user_prompt},
+            ],
+            request_kwargs={
                 "max_completion_tokens": 4000,
-            }
-            if use_json_mode:
-                request_kwargs["response_format"] = {"type": "json_object"}
+                "response_format": {"type": "json_object"},
+            },
+            completeness_score=self._semantic_completeness(metadata_payload),
+            coverage_score=self._semantic_coverage(metadata_payload),
+            confidence_score=0.0,
+            extra_metadata={
+                "database_id": database.id,
+                "database_name": database.display_name or database.name,
+                "artifact_generated": "database_semantic",
+            },
+        )
 
-            response = client.chat.completions.create(**request_kwargs)
-            choice = response.choices[0]
-            message = choice.message
-            content = (message.content or "").strip()
-            logger.debug(
-                "OpenAI semantic response: json_mode=%s, finish_reason=%s, content_len=%d, refusal=%s",
-                use_json_mode,
-                getattr(choice, "finish_reason", None),
-                len(content),
-                getattr(message, "refusal", None),
-            )
-            return content, choice, message
-
-        content, choice, message = _invoke_chat_completion(use_json_mode=True)
-        if content:
-            return content
+        if ai_result.content:
+            return ai_result
 
         logger.warning(
-            "Empty OpenAI semantic response received in JSON mode for database %d; retrying without response_format",
+            "Empty OpenAI semantic response received in JSON mode for database %d; returning empty content",
             database.id,
         )
-        content, choice, message = _invoke_chat_completion(use_json_mode=False)
-        if content:
-            return content
-
-        raise ValueError(
-            "Empty response from OpenAI "
-            f"(finish_reason={getattr(choice, 'finish_reason', None)}, "
-            f"refusal={getattr(message, 'refusal', None)})"
-        )
+        return ai_result
 
     def _extract_json_payload(self, response_text: str) -> str:
         """Extract a JSON object from common model response wrappers."""
@@ -660,6 +706,7 @@ class DatabaseSemanticService:
                 business_glossary=[],
                 suggested_use_cases=[],
                 confidence_score=0.0,
+                analysis_notes=None,
                 raw_response=response_text,
             )
 
@@ -671,6 +718,7 @@ class DatabaseSemanticService:
             business_glossary=response_data.get("business_glossary", []),
             suggested_use_cases=response_data.get("suggested_use_cases", []),
             confidence_score=1.0,  # Will be adjusted by calculate_confidence_score
+            analysis_notes=self._normalize_description(response_data.get("analysis_notes")),
             raw_response=response_text,
         )
 

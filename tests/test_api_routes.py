@@ -8,6 +8,8 @@ without a real database.
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
+from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from app.main import app
 from app.db.session import get_db
@@ -196,6 +198,50 @@ def test_generate_sql_placeholder(client):
         "natural_language_query": "Show me total revenue by month",
     })
     assert r.status_code == 200
+
+
+def test_readiness_endpoint_includes_category_scores(client):
+    fake_breakdown = SimpleNamespace(
+        database_id=1,
+        database_name="Demo DB",
+        readiness_status=SimpleNamespace(value="READY"),
+        generated_at=datetime.now(timezone.utc),
+        metadata_score=95,
+        semantic_score=92,
+        embeddings_score=88,
+        relationship_score=90,
+        prompt_score=85,
+        overall_score=92,
+        metadata_readiness_score=95,
+        semantic_readiness_score=92,
+        relationship_readiness_score=90,
+        ai_context_readiness_score=88,
+        governance_readiness_score=85,
+        category_scores={
+            "metadata_readiness_score": 95,
+            "semantic_readiness_score": 92,
+            "relationship_readiness_score": 90,
+            "ai_context_readiness_score": 88,
+            "governance_readiness_score": 85,
+            "overall_score": 92,
+        },
+        missing_stages=[],
+        remediation_hints=[],
+        details={},
+    )
+
+    with patch(
+        "app.api.routes.readiness.ReadinessService.get_or_compute",
+        new_callable=AsyncMock,
+        return_value=fake_breakdown,
+    ):
+        r = client.get("/api/v1/readiness/1")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert "category_scores" in body
+    assert body["category_scores"]["ai_context_readiness_score"] == 88
+    assert body["scores"]["overall_score"] == 92
 
 
 # ── OpenAPI docs ──────────────────────────────────────────────────────────────

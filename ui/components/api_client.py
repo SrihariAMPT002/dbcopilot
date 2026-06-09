@@ -278,6 +278,13 @@ def get_artifact_manifest(db_id: int) -> Tuple[bool, Any]:
     return _get(f"/artifacts/{db_id}/manifest")
 
 
+def get_artifact_content(db_id: int, artifact_type: str, version: Optional[int] = None) -> Tuple[bool, Any]:
+    params = {}
+    if version is not None:
+        params["version"] = version
+    return _get(f"/artifacts/{db_id}/content/{artifact_type}", **params)
+
+
 def mongodb_databases() -> Tuple[bool, Any]:
     return _get("/mongodb/databases")
 

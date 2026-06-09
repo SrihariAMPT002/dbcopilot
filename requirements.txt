@@ -55,3 +55,4 @@ qdrant-client==1.9.1
 # celery[redis]==5.4.0
 # redis==5.0.4
 langsmith
+langfuse

@@ -22,10 +22,62 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-
 st.markdown(
     """
 <style>
+.hero {
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 55%, #334155 100%);
+        color: white;
+        border-radius: 20px;
+        padding: 28px 30px;
+        margin-bottom: 22px;
+        box-shadow: 0 18px 45px rgba(15, 23, 42, 0.22);
+    }
+    .hero h1 {
+        margin: 0 0 8px 0;
+        font-size: 2rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        color: white;2
+    }
+    .hero p {
+        margin: 0;
+        max-width: 960px;
+        color: rgba(226, 232, 240, 0.95);
+        line-height: 1.6;
+    }
+    .status-card {
+        background: white;
+        border: 1px solid #e2e8f0;
+        border-radius: 16px;
+        padding: 18px 18px 16px 18px;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+        margin-bottom: 14px;
+    }
+    .status-label {
+        color: #64748b;
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 6px;
+    }
+    .status-value {
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: #0f172a;
+    }
+    .subtle {
+        color: #64748b;
+        font-size: 0.92rem;
+    }
+    .panel {
+        background: white;
+        border: 1px solid #e2e8f0;
+        border-radius: 16px;
+        padding: 18px;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+        margin-bottom: 16px;
+    }
     .stMetric { background: #f8f9fa; border-radius: 8px; padding: 12px; }
     .status-pill {
         display: inline-block;
@@ -133,9 +185,16 @@ semantic_status = (
     else "No active databases"
 )
 
-st.markdown('<p class="hero-title">AI Schema Intelligence Platform</p>', unsafe_allow_html=True)
+
 st.markdown(
-    '<p class="hero-sub">Convert raw schemas into AI-ready semantic intelligence.</p>',
+    """
+<div class="hero">
+  <h1>AI Schema Intelligence Platform</h1>
+  <p>
+    Convert raw schemas into AI-ready semantic intelligence. Get you AI ready context ready for building AI-driven data applications, without the overhead of manual data modeling or documentation.
+  </p>
+</div>
+""",
     unsafe_allow_html=True,
 )
 

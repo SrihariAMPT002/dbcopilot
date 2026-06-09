@@ -7,7 +7,7 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.metadata import Base
@@ -35,7 +35,15 @@ class ReadinessSnapshot(Base):
     embeddings_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     relationship_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     prompt_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    metadata_readiness_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    semantic_readiness_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    relationship_readiness_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ai_context_readiness_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    governance_readiness_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     overall_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    prompt_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     readiness_status: Mapped[ReadinessStatus] = mapped_column(
         Enum(ReadinessStatus, name="readiness_status_enum"),
         nullable=False,

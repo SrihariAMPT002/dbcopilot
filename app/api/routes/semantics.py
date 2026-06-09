@@ -39,6 +39,7 @@ def _semantic_response(db_semantic: DatabaseSemantic) -> DatabaseSemanticRespons
         source_id=db_semantic.source_id,
         business_domain=db_semantic.business_domain,
         business_summary=db_semantic.business_summary,
+        analysis_notes=db_semantic.analysis_notes,
         key_entities=db_semantic.key_entities,
         business_glossary=db_semantic.business_glossary,
         suggested_use_cases=db_semantic.suggested_use_cases,
@@ -180,6 +181,7 @@ async def export_semantics(
                 "database_type": database.db_type.value,
                 "business_domain": db_semantic.business_domain,
                 "business_summary": db_semantic.business_summary,
+                "analysis_notes": db_semantic.analysis_notes,
                 "key_entities": db_semantic.key_entities,
                 "business_glossary": db_semantic.business_glossary,
                 "suggested_use_cases": db_semantic.suggested_use_cases,
@@ -218,6 +220,10 @@ def _export_semantic_markdown(database: ConnectedDatabase, db_semantic: Database
 ## Business Summary
 
 {db_semantic.business_summary or 'No summary available'}
+
+## Analysis Notes
+
+{db_semantic.analysis_notes or 'No analysis notes available.'}
 
 ## Key Entities
 

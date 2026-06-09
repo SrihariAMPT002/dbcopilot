@@ -85,9 +85,6 @@ def _fmt_score(value: float) -> str:
     return f"{value:.3f}"
 
 
-SEARCH_PRESETS = ["call", "ticket", "intent", "malicious", "call summary"]
-
-
 def _get_result_value(item: dict, *keys: str, default: str = "") -> str:
     for key in keys:
         value = item.get(key)
@@ -210,14 +207,8 @@ else:
 st.markdown("---")
 st.markdown("### Semantic Search")
 
-quick_cols = st.columns(len(SEARCH_PRESETS))
 if "semantic_search_query" not in st.session_state:
     st.session_state.semantic_search_query = ""
-
-for idx, preset in enumerate(SEARCH_PRESETS):
-    if quick_cols[idx].button(preset, use_container_width=True):
-        st.session_state.semantic_search_query = preset
-        st.rerun()
 
 search_collection = st.selectbox(
     "Search Collection",
@@ -229,7 +220,7 @@ search_collection = st.selectbox(
 with st.form("semantic_search_form", clear_on_submit=False):
     search_query = st.text_input(
         "Semantic Search Query",
-        placeholder="call summary",
+        placeholder="Enter a business query to search (e.g., call summary)...",
         value=st.session_state.semantic_search_query,
         help="Enter a business query to retrieve relevant tables, relationships, and prompt context.",
     )
@@ -311,7 +302,7 @@ if st.session_state.semantic_search_query.strip():
         st.error(search_payload.get("error", "Semantic search failed"))
 else:
     st.info(
-        "Try one of the quick queries above or enter a phrase like `call summary` to search the vector store."
+        "Enter a phrase into the semantic search field above to search the vector store."
     )
 
 st.markdown("---")

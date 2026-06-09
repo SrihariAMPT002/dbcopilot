@@ -327,6 +327,68 @@ output_validation:
         min: 0.0
         max: 1.0
 
+# PII classification governance configuration
+pii_classification:
+  description: "Config-driven governance signals for PII classification"
+  categories:
+    identity:
+      labels:
+        - "person"
+        - "individual"
+        - "customer"
+        - "employee"
+        - "user"
+      pii_types:
+        - "Personal Data"
+        - "Identity Data"
+    contact:
+      labels:
+        - "email"
+        - "phone"
+        - "mobile"
+        - "address"
+        - "contact"
+      pii_types:
+        - "Contact Information"
+    financial:
+      labels:
+        - "credit card"
+        - "card"
+        - "iban"
+        - "routing"
+        - "bank"
+        - "account"
+        - "salary"
+        - "payroll"
+      pii_types:
+        - "Financial Information"
+    health:
+      labels:
+        - "health"
+        - "medical"
+        - "patient"
+        - "diagnosis"
+      pii_types:
+        - "Health Information"
+    credentials:
+      labels:
+        - "password"
+        - "token"
+        - "otp"
+        - "auth"
+        - "login"
+      pii_types:
+        - "Credentials"
+  risk_thresholds:
+    high: 0.85
+    medium: 0.6
+  decision_rules:
+    use_semantic_context: true
+    require_metadata_description: false
+    fallback_model_name: "azure_openai"
+    default_prompt_id: "pii_classification"
+    default_prompt_version: "1.0"
+
 # Future extensibility hooks
 extensibility:
   custom_scoring_engines:
