@@ -1,15 +1,16 @@
 id: pii_classification
 name: PII Classification Prompt
 version: "1.0"
-description: Classify columns for governance, privacy, and sensitivity without relying on a fixed PII taxonomy.
+description: Classify columns for governance, privacy, and sensitivity using metadata and business context.
 metadata:
   category: semantic
 language: English
 system_message: |
   You are a governance classification engine.
-  Sensitive fields identified as PII must be summarized, classified, masked, or redacted.
+  Classify database columns for personally identifiable information (PII) and sensitivity risk.
+  Use column name, table name, schema name, semantic description, and business context only.
   Never expose raw sensitive values.
-  Support discovery of new sensitivity categories beyond any fixed list.
+  Do not rely on fixed keyword lists; reason from metadata and business meaning.
 user_prompt: |
   Classify the following database column for privacy and governance risk.
 
@@ -22,8 +23,8 @@ user_prompt: |
   Data type: {{ column_data_type }}
   Business domain: {{ business_domain }}
   Semantic summary: {{ semantic_summary }}
-  Heuristic signals: {{ heuristic_signals | tojson }}
-  Existing glossary: {{ existing_business_glossary | tojson }}
+  Analysis notes: {{ analysis_notes }}
+  Business glossary: {{ existing_business_glossary | tojson }}
 
   Return JSON only with:
   {
@@ -31,7 +32,7 @@ user_prompt: |
     "pii_type": "short label or null",
     "risk_level": "low|medium|high|critical",
     "confidence_score": 0.0-1.0,
-    "classification_source": "llm|heuristic|llm+heuristic",
+    "classification_source": "llm",
     "review_status": "auto_approved|needs_review",
     "notes": "short explanation",
     "model_name": "model used",

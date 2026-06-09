@@ -67,6 +67,11 @@ class ColumnSemantic(Base):
         nullable=True,
     )
 
+    metadata_fingerprint: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+
     column_category: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,

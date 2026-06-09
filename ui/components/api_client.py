@@ -228,6 +228,18 @@ def export_embeddings(db_id: int, export_format: str = "json") -> Tuple[bool, An
     return _get(f"/export/embeddings/{db_id}", format=export_format)
 
 
+def list_column_semantics(db_id: int) -> Tuple[bool, Any]:
+    return _get(f"/column-semantics/databases/{db_id}")
+
+
+def rescan_column_semantics(db_id: int, force: bool = False) -> Tuple[bool, Any]:
+    return _post(f"/column-semantics/databases/{db_id}/rescan?force={str(force).lower()}", {})
+
+
+def classify_column(column_id: int, force: bool = False) -> Tuple[bool, Any]:
+    return _post(f"/column-semantics/columns/{column_id}/classify?force={str(force).lower()}", {})
+
+
 def get_readiness(db_id: int) -> Tuple[bool, Any]:
     return _get(f"/readiness/{db_id}")
 

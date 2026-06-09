@@ -8,7 +8,6 @@ graph, metadata, and embedding metadata using YAML templates.
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -19,7 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config.prompts import PromptRegistry, get_prompt_registry
+from app.core.config import settings
 from app.models.artifact_manifest import ArtifactType
+from app.models.column_semantic import ColumnSemantic
 from app.models.metadata import ConnectedDatabase, DatabaseSchema, DatabaseSemantic, DatabaseTable
 from app.services.ai_observability_service import AIObservabilityService
 from app.schema_engine.embeddings import EmbeddingEngine
@@ -50,20 +51,15 @@ class PromptStudioService:
         self.artifact_service = ArtifactService(db)
 
     @staticmethod
-    def _sensitive_column_patterns() -> tuple[re.Pattern[str], ...]:
-        return (
-            re.compile(r".*(email|e-mail|mail).*", re.I),
-            re.compile(r".*(password|passwd|secret|token|otp|auth).*", re.I),
-            re.compile(r".*(ssn|social_security|national_id|passport|driver|license).*", re.I),
-            re.compile(r".*(credit|card|iban|bank|account|routing|swift|tax).*", re.I),
-            re.compile(r".*(health|medical|diagnosis|patient|regulatory|employee|customer).*", re.I),
-        )
-
-    @classmethod
-    def _is_sensitive_field(cls, name: str, risk_level: str | None = None) -> bool:
-        if risk_level and risk_level.lower() in {"high", "critical"}:
+    def _is_sensitive_field(
+        is_pii: bool = False,
+        risk_level: str | None = None,
+    ) -> bool:
+        if not settings.pii_prompt_protection_enabled:
+            return False
+        if is_pii:
             return True
-        return any(pattern.match(name or "") for pattern in cls._sensitive_column_patterns())
+        return bool(risk_level and risk_level.lower() in {"high", "critical"})
 
     @staticmethod
     def _redact_text(text: str) -> str:
@@ -75,10 +71,15 @@ class PromptStudioService:
         semantic = redacted.get("semantic") or {}
         columns = redacted.get("columns") or []
         for column in columns:
-            if cls._is_sensitive_field(column.get("name", ""), column.get("risk_level")):
+            if cls._is_sensitive_field(
+                is_pii=bool(column.get("is_pii")),
+                risk_level=column.get("risk_level"),
+            ):
                 column["name"] = "[PII REDACTED]"
                 if column.get("description"):
                     column["description"] = "[PII REDACTED]"
+                if column.get("pii_type"):
+                    column["pii_type"] = "[REDACTED]"
         for table in columns:
             if isinstance(table, dict):
                 for field in ("business_description", "analysis_notes"):
@@ -276,6 +277,7 @@ class PromptStudioService:
         database = await self._fetch_database(database_id)
         semantic = await self._fetch_semantic(database_id)
         tables = await self._fetch_tables(database_id)
+        pii_map = await self._fetch_pii_map(database_id)
         try:
             relationship_graph = await RelationshipGraphEngine(self.db).get_relationship_graph(database_id)
         except Exception:
@@ -308,11 +310,26 @@ class PromptStudioService:
         }
 
         table_payloads = []
+        column_payloads = []
         for table in tables:
-            relevant_columns = [
-                column.name
-                for column in sorted(table.columns or [], key=lambda c: c.ordinal_position or 0)[:8]
-            ]
+            relevant_columns = []
+            for column in sorted(table.columns or [], key=lambda c: c.ordinal_position or 0):
+                semantic_row = pii_map.get(column.id)
+                column_info = {
+                    "column_id": column.id,
+                    "schema_name": table.schema.name,
+                    "table_name": table.name,
+                    "name": column.name,
+                    "data_type": column.data_type,
+                    "description": column.description,
+                    "is_pii": bool(semantic_row and semantic_row.is_pii),
+                    "pii_type": semantic_row.pii_type if semantic_row else None,
+                    "risk_level": semantic_row.risk_level if semantic_row else None,
+                    "confidence_score": semantic_row.confidence_score if semantic_row else 0.0,
+                }
+                column_payloads.append(column_info)
+                if len(relevant_columns) < 8:
+                    relevant_columns.append(column.name)
             table_payloads.append(
                 {
                     "schema_name": table.schema.name,
@@ -346,6 +363,7 @@ class PromptStudioService:
             "relationship_graph": relationship_graph,
             "embeddings": embeddings_payload,
             "tables": table_payloads,
+            "columns": column_payloads,
         }
 
     async def _fetch_database(self, database_id: int) -> ConnectedDatabase:
@@ -364,6 +382,12 @@ class PromptStudioService:
             select(DatabaseSemantic).where(DatabaseSemantic.source_id == database_id)
         )
         return result.scalars().first()
+
+    async def _fetch_pii_map(self, database_id: int) -> dict[int, ColumnSemantic]:
+        result = await self.db.execute(
+            select(ColumnSemantic).where(ColumnSemantic.database_id == database_id)
+        )
+        return {row.column_id: row for row in result.scalars().all()}
 
     async def _fetch_tables(self, database_id: int) -> list[DatabaseTable]:
         result = await self.db.execute(
@@ -453,7 +477,7 @@ class PromptStudioService:
 
     @staticmethod
     def _mime_for(value: str) -> str:
-        if value == "agent_context":
+        if value == "agent_context.json":
             return "application/json"
         return "text/markdown"
 

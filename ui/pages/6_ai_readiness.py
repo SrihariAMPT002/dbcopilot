@@ -165,11 +165,17 @@ signal_cols[2].metric("Prompt Artifacts", ai_context_details.get("prompt_artifac
 signal_cols[3].metric("Column Semantics", governance_details.get("column_semantics", 0))
 
 st.markdown("### Governance & AI Context")
-governance_cols = st.columns(4)
-governance_cols[0].metric("PII Columns", governance_details.get("pii_columns", 0))
-governance_cols[1].metric("PII Risk Tagged", governance_details.get("pii_risk_tagged_columns", 0))
-governance_cols[2].metric("Prompt Context Len", ai_context_details.get("prompt_context_length", 0))
-governance_cols[3].metric("Embedding Coverage", embedding_details.get("completed_tables", 0))
+governance_cols = st.columns(6)
+governance_cols[0].metric("PII Identified", f"{governance_details.get('pii_identified_coverage', governance_details.get('pii_coverage', 0))}%")
+governance_cols[1].metric("PII Classified", f"{governance_details.get('pii_classified_coverage', 0)}%")
+governance_cols[2].metric("PII Columns", governance_details.get("pii_columns", 0))
+governance_cols[3].metric("Prompt Protection", "On" if governance_details.get("prompt_protection_enabled") else "Off")
+governance_cols[4].metric("Embedding Protection", "On" if governance_details.get("embedding_protection_enabled") else "Off")
+governance_cols[5].metric("PII Risk Tagged", governance_details.get("pii_risk_tagged_columns", 0))
+
+detail_cols3 = st.columns(2)
+detail_cols3[0].metric("Prompt Context Len", ai_context_details.get("prompt_context_length", 0))
+detail_cols3[1].metric("Embedding Coverage", embedding_details.get("completed_tables", 0))
 
 st.markdown("### Coverage Breakdown")
 coverage_cols = st.columns(2)

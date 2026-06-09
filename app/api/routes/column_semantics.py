@@ -18,10 +18,6 @@ router = APIRouter(prefix="/column-semantics", tags=["Column Semantics"])
 logger = logging.getLogger(__name__)
 
 
-def _to_response(item: ColumnSemantic) -> ColumnSemanticResponse:
-    raise NotImplementedError
-
-
 def _row_to_response(item: ColumnSemantic, column: DatabaseColumn, table: DatabaseTable, schema: DatabaseSchema) -> ColumnSemanticResponse:
     return ColumnSemanticResponse(
         column_id=item.column_id,
@@ -65,12 +61,12 @@ async def list_column_semantics(db_id: int, db: AsyncSession = Depends(get_db)) 
 @router.post("/databases/{db_id}/rescan", response_model=list[ColumnSemanticResponse], summary="Rescan and upsert column PII classifications")
 async def rescan_column_semantics(
     db_id: int,
-    force: bool = Query(default=True),
+    force: bool = Query(default=False, description="Reclassify all columns when true; otherwise only new/changed columns"),
     db: AsyncSession = Depends(get_db),
 ) -> list[ColumnSemanticResponse]:
     service = ColumnSemanticService(db)
     await service._fetch_database(db_id)
-    columns = await service.rescan_database(db_id) if force else await service.generate_for_database(db_id)
+    await service.rescan_database(db_id, force=force)
     await db.commit()
     result = await db.execute(
         select(ColumnSemantic, DatabaseColumn, DatabaseTable, DatabaseSchema)

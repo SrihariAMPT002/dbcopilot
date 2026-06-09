@@ -61,6 +61,10 @@ def _good_stats() -> dict:
             "pii_columns": 2,
             "pii_typed_columns": 2,
             "pii_risk_tagged_columns": 2,
+            "pii_identified_coverage": 100,
+            "pii_classified_coverage": 100,
+            "prompt_protection_enabled": True,
+            "embedding_protection_enabled": True,
             "documentation_coverage": 100,
             "ownership_coverage": 0,
             "ownership_metadata_present": False,
@@ -137,6 +141,10 @@ def _gap_stats() -> dict:
             "pii_columns": 0,
             "pii_typed_columns": 0,
             "pii_risk_tagged_columns": 0,
+            "pii_identified_coverage": 0,
+            "pii_classified_coverage": 0,
+            "prompt_protection_enabled": False,
+            "embedding_protection_enabled": False,
             "documentation_coverage": 0,
             "ownership_coverage": 0,
             "ownership_metadata_present": False,
@@ -185,7 +193,7 @@ async def test_readiness_breakdown_reports_category_scores():
         "semantic_readiness_score": 100,
         "relationship_readiness_score": 100,
         "ai_context_readiness_score": 100,
-        "governance_readiness_score": 85,
+        "governance_readiness_score": 100,
     }
     assert breakdown.overall_score >= 90
     assert breakdown.missing_stages == []
@@ -215,5 +223,5 @@ async def test_readiness_breakdown_surfaces_missing_stages():
     assert "relationships" in breakdown.missing_stages
     assert "ai_context" in breakdown.missing_stages
     assert "governance" in breakdown.missing_stages
-    assert any("PII detection readiness" in hint for hint in breakdown.remediation_hints)
+    assert any("PII intelligence" in hint for hint in breakdown.remediation_hints)
     assert any("Ownership metadata" in hint for hint in breakdown.remediation_hints)

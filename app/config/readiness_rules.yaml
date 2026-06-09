@@ -94,11 +94,12 @@ components:
       poor: 0
 
   governance:
-    description: "Measures documentation, PII classification, and ownership readiness"
+    description: "Measures PII identification, classification, and protection readiness"
     factors:
-      - documentation_coverage: weight 50
-      - pii_coverage: weight 35
-      - ownership_coverage: weight 15
+      - pii_identified_coverage: weight 30
+      - pii_classified_coverage: weight 30
+      - prompt_protection_enabled: weight 20
+      - embedding_protection_enabled: weight 20
     thresholds:
       excellent: 80+
       good: 70+

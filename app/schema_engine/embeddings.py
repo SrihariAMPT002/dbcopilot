@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
+from app.models.column_semantic import ColumnSemantic
 from app.models.metadata import (
     ConnectedDatabase,
     DatabaseRelationship,
@@ -255,7 +256,32 @@ class EmbeddingEngine:
         )
         return result.scalars().first()
 
-    def _build_table_text(self, table: DatabaseTable, semantic: Optional[SchemaSemantic]) -> str:
+    async def _fetch_pii_map(self, database_id: int) -> dict[int, ColumnSemantic]:
+        result = await self.db.execute(
+            select(ColumnSemantic).where(ColumnSemantic.database_id == database_id)
+        )
+        return {row.column_id: row for row in result.scalars().all()}
+
+    @staticmethod
+    def _should_mask_column(
+        column_id: int,
+        pii_map: dict[int, ColumnSemantic] | None,
+    ) -> bool:
+        if not settings.pii_embedding_protection_enabled or not pii_map:
+            return False
+        semantic_row = pii_map.get(column_id)
+        if not semantic_row:
+            return False
+        if semantic_row.is_pii:
+            return True
+        return bool(semantic_row.risk_level and semantic_row.risk_level.lower() in {"high", "critical"})
+
+    def _build_table_text(
+        self,
+        table: DatabaseTable,
+        semantic: Optional[SchemaSemantic],
+        pii_map: dict[int, ColumnSemantic] | None = None,
+    ) -> str:
         lines = [
             f"Database table: {table.schema.connected_database.name if table.schema and table.schema.connected_database else 'unknown'}",
             f"Schema: {table.schema.name}",
@@ -271,6 +297,12 @@ class EmbeddingEngine:
 
         lines.append("Columns:")
         for column in sorted(table.columns, key=lambda item: item.ordinal_position or 0):
+            if self._should_mask_column(column.id, pii_map):
+                semantic_row = pii_map.get(column.id) if pii_map else None
+                pii_label = semantic_row.pii_type if semantic_row and semantic_row.pii_type else "PII"
+                risk = semantic_row.risk_level if semantic_row else "unknown"
+                lines.append(f" - [PII PROTECTED] ({pii_label}, risk={risk})")
+                continue
             flags = []
             if column.is_primary_key:
                 flags.append("PK")
@@ -503,8 +535,9 @@ class EmbeddingEngine:
         database = await self._fetch_database(database_id)
         table = await self._fetch_table(table_id)
         semantic = await self._fetch_semantic_summary(table_id)
+        pii_map = await self._fetch_pii_map(database_id)
 
-        table_text = self._build_table_text(table, semantic)
+        table_text = self._build_table_text(table, semantic, pii_map)
         relationship_text = self._build_relationship_text(table)
         prompt_text = self._build_prompt_text(table, semantic)
 

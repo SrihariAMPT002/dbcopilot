@@ -24,6 +24,7 @@ from app.models.metadata import (
 )
 from app.models.nosql_metadata import NoSQLCollection, NoSQLRelationship, NoSQLSchemaField
 from app.models.readiness_snapshot import ReadinessSnapshot, ReadinessStatus
+from app.core.config import settings
 from app.services.ai_observability_service import AIObservabilityService
 from app.schema_engine.embeddings import EmbeddingEngine
 from app.services.prompt_studio_service import PromptStudioService
@@ -511,11 +512,24 @@ class ReadinessService:
             "semantic_dependency_coverage": semantic_stats["semantic_table_coverage"],
         }
 
+        pii_identified_coverage = self._ratio_score(int(column_semantics), int(columns))
+        pii_classified_coverage = self._ratio_score(int(pii_typed_columns), max(1, int(pii_columns)))
+        prompt_protection_enabled = bool(
+            settings.pii_prompt_protection_enabled and int(column_semantics) > 0
+        )
+        embedding_protection_enabled = bool(
+            settings.pii_embedding_protection_enabled and int(column_semantics) > 0
+        )
+
         governance_stats = {
             "column_semantics": int(column_semantics),
             "pii_columns": int(pii_columns),
             "pii_typed_columns": int(pii_typed_columns),
             "pii_risk_tagged_columns": int(pii_risk_tagged_columns),
+            "pii_identified_coverage": pii_identified_coverage,
+            "pii_classified_coverage": pii_classified_coverage,
+            "prompt_protection_enabled": prompt_protection_enabled,
+            "embedding_protection_enabled": embedding_protection_enabled,
             "documentation_coverage": self._documentation_coverage(
                 int(schemas),
                 int(tables),
@@ -526,7 +540,7 @@ class ReadinessService:
             ),
             "ownership_coverage": 0,
             "ownership_metadata_present": False,
-            "pii_coverage": self._ratio_score(int(column_semantics), int(columns)),
+            "pii_coverage": pii_identified_coverage,
         }
 
         return {
@@ -687,15 +701,23 @@ class ReadinessService:
 
     def _governance_score(self, stats: dict[str, Any]) -> int:
         governance = stats["governance"]
-        doc_coverage = governance["documentation_coverage"]
-        pii_coverage = governance["pii_coverage"]
-        ownership_coverage = governance["ownership_coverage"]
+        pii_identified = governance["pii_identified_coverage"]
+        pii_classified = governance["pii_classified_coverage"]
+        prompt_protection = 100 if governance["prompt_protection_enabled"] else 0
+        embedding_protection = 100 if governance["embedding_protection_enabled"] else 0
 
         return max(
             0,
             min(
                 100,
-                int(round(0.50 * doc_coverage + 0.35 * pii_coverage + 0.15 * ownership_coverage)),
+                int(
+                    round(
+                        0.30 * pii_identified
+                        + 0.30 * pii_classified
+                        + 0.20 * prompt_protection
+                        + 0.20 * embedding_protection
+                    )
+                ),
             ),
         )
 
@@ -799,8 +821,14 @@ class ReadinessService:
                 hints.append("Ownership metadata is not captured by the current schema.")
             if governance["documentation_coverage"] < 70:
                 hints.append("Documentation coverage is low across schemas, tables, or columns.")
-            if governance["pii_coverage"] == 0 and metadata["columns"] > 0:
-                hints.append("PII detection readiness is missing; classify sensitive columns to improve governance.")
+            if governance["pii_identified_coverage"] < 100 and metadata["columns"] > 0:
+                hints.append("PII intelligence is incomplete; run column PII classification for all columns.")
+            if governance["pii_classified_coverage"] < 100 and governance["pii_columns"] > 0:
+                hints.append("Some PII columns are missing type labels; rerun PII classification.")
+            if not governance["prompt_protection_enabled"]:
+                hints.append("Enable prompt protection to redact PII from generated prompt artifacts.")
+            if not governance["embedding_protection_enabled"]:
+                hints.append("Enable embedding protection to exclude PII column details from vector indexes.")
 
         if governance["pii_risk_tagged_columns"] == 0 and governance["pii_columns"] > 0:
             hints.append("PII records exist, but risk labels are not populated for all sensitive fields.")

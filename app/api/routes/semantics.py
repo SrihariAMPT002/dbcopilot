@@ -25,6 +25,7 @@ from app.schemas.api_schemas import (
     DatabaseSemanticGenerateResponse,
     DatabaseSemanticResponse,
 )
+from app.services.column_semantic_service import ColumnSemanticService
 from app.services.database_semantic_service import DatabaseSemanticService
 from app.schema_engine.embeddings import _traceable
 from app.utils import now_utc
@@ -72,11 +73,28 @@ async def generate_semantics(
 
     try:
         db_semantic, duration_ms = await service.generate_and_store_semantics(source_id)
+        status_value = db_semantic.generation_status.value
+
+        if status_value == "completed":
+            pii_service = ColumnSemanticService(db)
+            try:
+                await pii_service.generate_for_database(source_id, force=False)
+            except Exception as pii_exc:
+                logger.error(
+                    "PII intelligence generation failed after semantics for database %d: %s",
+                    source_id,
+                    pii_exc,
+                    exc_info=True,
+                )
+
         await db.commit()
         status_value = db_semantic.generation_status.value
 
         if status_value == "completed":
-            message = f"Semantic intelligence generated for {database.display_name or database.name}"
+            message = (
+                f"Semantic intelligence and PII classification generated for "
+                f"{database.display_name or database.name}"
+            )
         elif status_value == "no_metadata":
             message = "Cannot generate semantics until the database has synced metadata."
         else:

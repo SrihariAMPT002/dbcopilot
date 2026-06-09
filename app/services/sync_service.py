@@ -120,6 +120,18 @@ class SyncService:
                 db_id, counts["schemas"], counts["tables"], counts["columns"], elapsed,
             )
 
+            try:
+                from app.services.column_semantic_service import ColumnSemanticService
+
+                await ColumnSemanticService(self.db).generate_for_database(db_id, force=False)
+            except Exception as pii_exc:
+                logger.warning(
+                    "Incremental PII rescan after metadata sync failed for db_id=%s: %s",
+                    db_id,
+                    pii_exc,
+                    exc_info=True,
+                )
+
             # Convert to DTO inside session before returning
             return SyncResponse(
                 success=True,

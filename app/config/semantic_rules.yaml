@@ -327,58 +327,9 @@ output_validation:
         min: 0.0
         max: 1.0
 
-# PII classification governance configuration
+# PII classification governance configuration (AI-driven; no keyword lists)
 pii_classification:
-  description: "Config-driven governance signals for PII classification"
-  categories:
-    identity:
-      labels:
-        - "person"
-        - "individual"
-        - "customer"
-        - "employee"
-        - "user"
-      pii_types:
-        - "Personal Data"
-        - "Identity Data"
-    contact:
-      labels:
-        - "email"
-        - "phone"
-        - "mobile"
-        - "address"
-        - "contact"
-      pii_types:
-        - "Contact Information"
-    financial:
-      labels:
-        - "credit card"
-        - "card"
-        - "iban"
-        - "routing"
-        - "bank"
-        - "account"
-        - "salary"
-        - "payroll"
-      pii_types:
-        - "Financial Information"
-    health:
-      labels:
-        - "health"
-        - "medical"
-        - "patient"
-        - "diagnosis"
-      pii_types:
-        - "Health Information"
-    credentials:
-      labels:
-        - "password"
-        - "token"
-        - "otp"
-        - "auth"
-        - "login"
-      pii_types:
-        - "Credentials"
+  description: "AI-based PII classification using metadata and semantic business context"
   risk_thresholds:
     high: 0.85
     medium: 0.6

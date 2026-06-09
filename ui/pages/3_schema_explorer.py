@@ -15,11 +15,13 @@ from components.api_client import (
     get_relationships,
     get_schemas,
     get_tables,
+    list_column_semantics,
     mongodb_collections,
     mongodb_infer_schema,
     mongodb_relationships,
     mongodb_samples,
     mongodb_schema,
+    rescan_column_semantics,
 )
 from components.sidebar import render_sidebar
 from components.source_terms import badge_label, is_nosql, source_family, terminology
@@ -52,6 +54,14 @@ st.markdown(
     .fk-badge  { background: #dbeafe; color: #1e40af; }
     .uq-badge  { background: #f3e8ff; color: #6b21a8; }
     .nn-badge  { background: #fee2e2; color: #991b1b; }
+    .pii-badge { background: #ffedd5; color: #c2410c; }
+    .pii-type-badge { background: #ede9fe; color: #5b21b6; }
+    .risk-low { background: #dcfce7; color: #166534; }
+    .risk-medium { background: #fef9c3; color: #854d0e; }
+    .risk-high { background: #ffedd5; color: #c2410c; }
+    .risk-critical { background: #fee2e2; color: #991b1b; }
+    .conf-badge { background: #e0f2fe; color: #075985; }
+    .no-pii-badge { background: #f1f5f9; color: #64748b; }
     .type-chip {
         background: #f1f5f9;
         color: #334155;
@@ -107,6 +117,46 @@ render_sidebar()
 
 def _match_text(value: str, needle: str) -> bool:
     return needle.lower() in (value or "").lower()
+
+
+def _risk_badge_class(risk_level: str | None) -> str:
+    mapping = {
+        "low": "risk-low",
+        "medium": "risk-medium",
+        "high": "risk-high",
+        "critical": "risk-critical",
+    }
+    return mapping.get((risk_level or "").lower(), "risk-low")
+
+
+def _pii_cell(semantic: dict | None) -> str:
+    if not semantic:
+        return "<span class='col-badge no-pii-badge'>—</span>"
+    if semantic.get("is_pii"):
+        return "<span class='col-badge pii-badge'>PII</span>"
+    return "<span class='col-badge no-pii-badge'>No</span>"
+
+
+def _pii_type_cell(semantic: dict | None) -> str:
+    if not semantic or not semantic.get("pii_type"):
+        return "—"
+    return (
+        f"<span class='col-badge pii-type-badge'>{semantic.get('pii_type')}</span>"
+    )
+
+
+def _risk_cell(semantic: dict | None) -> str:
+    if not semantic or not semantic.get("risk_level"):
+        return "—"
+    risk = str(semantic.get("risk_level"))
+    return f"<span class='col-badge {_risk_badge_class(risk)}'>{risk.title()}</span>"
+
+
+def _confidence_cell(semantic: dict | None) -> str:
+    if not semantic or semantic.get("confidence_score") is None:
+        return "—"
+    score = float(semantic.get("confidence_score", 0.0))
+    return f"<span class='col-badge conf-badge'>{score:.0%}</span>"
 
 
 def _col_badges(col: dict) -> str:
@@ -220,6 +270,44 @@ field_search = st.text_input(
     placeholder="Optional field filter...",
 )
 
+pii_filter = "All Columns"
+semantics_by_column: Dict[int, dict] = {}
+if family == "SQL":
+    pii_filter = st.selectbox(
+        "PII Filter",
+        options=["All Columns", "PII Only", "Non-PII Only", "Unclassified"],
+    )
+    ok_sem, semantics_payload = list_column_semantics(db_id)
+    if ok_sem and isinstance(semantics_payload, list):
+        semantics_by_column = {
+            int(item["column_id"]): item for item in semantics_payload if item.get("column_id") is not None
+        }
+
+    action_cols = st.columns([1, 1, 3])
+    with action_cols[0]:
+        if st.button("Rescan PII", use_container_width=True):
+            with st.spinner("Running incremental PII classification..."):
+                ok_rescan, rescan_payload = rescan_column_semantics(db_id, force=False)
+            if ok_rescan:
+                st.success(f"PII intelligence updated for {len(rescan_payload)} column(s).")
+                st.rerun()
+            else:
+                st.error(rescan_payload.get("error", "PII rescan failed"))
+    with action_cols[1]:
+        if st.button("Force Reclassify All", use_container_width=True):
+            with st.spinner("Reclassifying all columns..."):
+                ok_force, force_payload = rescan_column_semantics(db_id, force=True)
+            if ok_force:
+                st.success(f"Reclassified {len(force_payload)} column(s).")
+                st.rerun()
+            else:
+                st.error(force_payload.get("error", "PII reclassification failed"))
+    with action_cols[2]:
+        pii_count = sum(1 for item in semantics_by_column.values() if item.get("is_pii"))
+        st.caption(
+            f"PII intelligence: {len(semantics_by_column)} classified · {pii_count} PII column(s)"
+        )
+
 if is_nosql(db_type):
     st.info(
         "NoSQL view enabled. Collections, sampled documents, inferred fields, and nested structures will be shown "
@@ -321,23 +409,40 @@ if family == "SQL":
                     if field_search:
                         columns = [c for c in columns if _match_text(c.get("name", ""), field_search)]
 
+                    if pii_filter == "PII Only":
+                        columns = [
+                            c for c in columns
+                            if semantics_by_column.get(c.get("id"), {}).get("is_pii")
+                        ]
+                    elif pii_filter == "Non-PII Only":
+                        columns = [
+                            c for c in columns
+                            if semantics_by_column.get(c.get("id"), {}).get("is_pii") is False
+                        ]
+                    elif pii_filter == "Unclassified":
+                        columns = [c for c in columns if c.get("id") not in semantics_by_column]
+
                     if not columns:
                         st.caption(f"No {terms['field_label'].lower()}s match the current filter.")
                         continue
 
                     field_hits += len(columns)
 
-                    header = st.columns([3, 2, 1, 1, 1, 2])
+                    header = st.columns([3, 2, 1, 1, 1, 1, 1, 1, 1])
                     header[0].markdown(f"**{terms['field_label']}**")
                     header[1].markdown("**Datatype**")
                     header[2].markdown("**Nullable**")
                     header[3].markdown("**PK/FK**")
-                    header[4].markdown("**Indexes**")
-                    header[5].markdown("**Row Count**")
+                    header[4].markdown("**PII**")
+                    header[5].markdown("**PII Type**")
+                    header[6].markdown("**Risk**")
+                    header[7].markdown("**Confidence**")
+                    header[8].markdown("**Indexes**")
                     st.markdown("<hr style='margin:4px 0'>", unsafe_allow_html=True)
 
                     for col in columns:
-                        row = st.columns([3, 2, 1, 1, 1, 2])
+                        semantic = semantics_by_column.get(col.get("id"))
+                        row = st.columns([3, 2, 1, 1, 1, 1, 1, 1, 1])
                         row[0].markdown(f"`{col['name']}` {_col_badges(col)}", unsafe_allow_html=True)
                         row[1].markdown(
                             f"<span class='type-chip'>{col.get('data_type', '?')}"
@@ -347,14 +452,17 @@ if family == "SQL":
                         )
                         row[2].markdown("Yes" if col.get("is_nullable") else "No")
                         row[3].markdown("PK" if col.get("is_primary_key") else ("FK" if col.get("is_foreign_key") else ""))
+                        row[4].markdown(_pii_cell(semantic), unsafe_allow_html=True)
+                        row[5].markdown(_pii_type_cell(semantic), unsafe_allow_html=True)
+                        row[6].markdown(_risk_cell(semantic), unsafe_allow_html=True)
+                        row[7].markdown(_confidence_cell(semantic), unsafe_allow_html=True)
 
                         extras = []
                         if col.get("is_unique"):
                             extras.append("UQ")
                         if col.get("is_indexed"):
                             extras.append("IDX")
-                        row[4].markdown(" · ".join(extras) if extras else "—")
-                        row[5].markdown(str(row_count) if row_count is not None else "Optional")
+                        row[8].markdown(" · ".join(extras) if extras else "—")
 
                     ok5, rels = get_relationships(entity_id)
                     if ok5 and rels:

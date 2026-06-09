@@ -77,7 +77,7 @@ class ArtifactService:
             content = payload.get("content", "")
             schema_hash = self._schema_hash(payload.get("package") or content)
             version = await self._next_version(db_id, artifact_type)
-            filename = f"db_{db_id}_{artifact_type.name}_v{version}{self._suffix_for_type(artifact_type)}"
+            filename = f"db_{db_id}_{artifact_type.value}_v{version}{self._suffix_for_type(artifact_type)}"
             path = self.registry_root / filename
 
             manifest = ArtifactManifest(
@@ -189,7 +189,7 @@ class ArtifactService:
         schema_hash = self._schema_hash(schema_hash_payload if schema_hash_payload is not None else content)
         version = await self._next_version(db_id, artifact_type)
         suffix = extension or self._suffix_for_type(artifact_type)
-        filename = f"db_{db_id}_{artifact_type.name}_v{version}{suffix}"
+        filename = f"db_{db_id}_{artifact_type.value}_v{version}{suffix}"
         path = self.registry_root / filename
 
         manifest = ArtifactManifest(

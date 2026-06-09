@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     qdrant_port: int = Field(default=6333)
     qdrant_url: Optional[str] = Field(default=None)
 
+    # ── PII Governance ───────────────────────────────────────────
+    pii_prompt_protection_enabled: bool = Field(default=True)
+    pii_embedding_protection_enabled: bool = Field(default=True)
+
     # Observability
     langsmith_tracing: bool = Field(default=False)
     langsmith_api_key: Optional[str] = Field(default=None)

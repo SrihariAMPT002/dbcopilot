@@ -235,7 +235,12 @@ with action_cols[0]:
         if ok_generate:
             st.session_state.semantic_last_duration_ms = result.get("duration_ms")
             _load_profile(db_id, force=True)
-            st.success(result.get("message", "Semantic profile generated."))
+            st.success(
+                result.get(
+                    "message",
+                    "Semantic profile generated. PII intelligence runs automatically after semantic generation.",
+                )
+            )
             st.rerun()
         else:
             st.error(result.get("error", result.get("detail", "Semantic generation failed")))
