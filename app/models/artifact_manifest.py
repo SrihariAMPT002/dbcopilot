@@ -73,11 +73,16 @@ class ArtifactManifest(Base):
     prompt_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     prompt_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    def export_status_enum_values(enum_cls):
+        return [e.value for e in enum_cls]
+
     export_status: Mapped[ExportStatus] = mapped_column(
-        Enum(ExportStatus, name="artifact_export_status_enum"),
+        Enum(
+            ExportStatus,
+            name="artifact_export_status_enum",
+            values_callable=export_status_enum_values,
+        ),
         nullable=False,
-        default=ExportStatus.queued,
-        index=True,
     )
     artifact_path: Mapped[str] = mapped_column(Text, nullable=False)
     generated_at: Mapped[datetime] = mapped_column(
