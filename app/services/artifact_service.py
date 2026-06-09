@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # from app.api.routes import exports as exports_route
 from app.models.artifact_manifest import ArtifactManifest, ArtifactType, ExportStatus
 from app.models.metadata import ConnectedDatabase
+
+logger = logging.getLogger(__name__)
 
 
 class ArtifactService:
@@ -81,7 +84,7 @@ class ArtifactService:
             path = self.registry_root / filename
 
             manifest = ArtifactManifest(
-                db_id=db_id,
+                database_id=db_id,
                 artifact_type=artifact_type,
                 version=version,
                 schema_hash=schema_hash,
@@ -132,6 +135,7 @@ class ArtifactService:
         version: int | None = None,
     ) -> dict[str, Any]:
         """Return the stored content for an artifact manifest row."""
+        artifact_type = ArtifactType.resolve(artifact_type)
         await self._ensure_database(db_id)
         query = select(ArtifactManifest).where(
             ArtifactManifest.database_id  == db_id,
@@ -154,7 +158,7 @@ class ArtifactService:
         content = path.read_text(encoding="utf-8")
         return {
             "id": manifest.id,
-            "db_id": manifest.db_id,
+            "db_id": manifest.database_id,
             "artifact_type": manifest.artifact_type.value,
             "version": manifest.version,
             "schema_hash": manifest.schema_hash,
@@ -183,6 +187,13 @@ class ArtifactService:
         model_name: str | None = None,
     ) -> dict[str, Any]:
         """Persist an artifact manifest row and write its content to the registry root."""
+        artifact_type = ArtifactType.resolve(artifact_type)
+        logger.info(
+            "artifact_type=%s value=%s type=%s",
+            artifact_type,
+            getattr(artifact_type, "value", None),
+            type(artifact_type),
+        )
         await self._ensure_database(db_id)
         self.registry_root.mkdir(parents=True, exist_ok=True)
 
@@ -193,7 +204,7 @@ class ArtifactService:
         path = self.registry_root / filename
 
         manifest = ArtifactManifest(
-            db_id=db_id,
+            database_id=db_id,
             artifact_type=artifact_type,
             version=version,
             schema_hash=schema_hash,
@@ -237,6 +248,13 @@ class ArtifactService:
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     async def _next_version(self, db_id: int, artifact_type: ArtifactType) -> int:
+        artifact_type = ArtifactType.resolve(artifact_type)
+        logger.info(
+            "artifact_type=%s value=%s type=%s",
+            artifact_type,
+            getattr(artifact_type, "value", None),
+            type(artifact_type),
+        )
         result = await self.db.execute(
             select(ArtifactManifest)
             .where(

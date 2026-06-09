@@ -129,7 +129,7 @@ async def get_artifact_content(
     try:
         from app.models.artifact_manifest import ArtifactType
 
-        artifact_enum = ArtifactType(artifact_type)
+        artifact_enum = ArtifactType.resolve(artifact_type)
         payload = await service.get_artifact_content(db_id, artifact_enum, version=version)
         return ArtifactContentResponse(**payload)
     except ValueError as exc:

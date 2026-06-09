@@ -25,6 +25,22 @@ class ArtifactType(str, enum.Enum):
     agent_context = "agent_context.json"
     text_to_sql_context = "text_to_sql_context.md"
 
+    @classmethod
+    def resolve(cls, value: str | ArtifactType) -> ArtifactType:
+        """Resolve an enum member from its persisted value or member name."""
+        if isinstance(value, cls):
+            return value
+        for member in cls:
+            if value == member.value or value == member.name:
+                return member
+        raise ValueError(f"Unknown artifact type: {value!r}")
+
+
+def artifact_type_enum_values(enum_cls: type[ArtifactType] | None = None) -> list[str]:
+    """Return persisted PostgreSQL enum labels (member values, not names)."""
+    cls = enum_cls or ArtifactType
+    return [member.value for member in cls]
+
 
 class ExportStatus(str, enum.Enum):
     queued = "QUEUED"
@@ -44,7 +60,11 @@ class ArtifactManifest(Base):
         index=True,
     )
     artifact_type: Mapped[ArtifactType] = mapped_column(
-        Enum(ArtifactType, name="artifact_type_enum"),
+        Enum(
+            ArtifactType,
+            name="artifact_type_enum",
+            values_callable=artifact_type_enum_values,
+        ),
         nullable=False,
         index=True,
     )

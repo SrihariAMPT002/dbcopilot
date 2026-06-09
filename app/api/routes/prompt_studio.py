@@ -20,12 +20,8 @@ from app.services.prompt_studio_service import PromptStudioService
 router = APIRouter(prefix="/prompt-studio", tags=["Prompt Studio"])
 logger = logging.getLogger(__name__)
 
-_VALID_ARTIFACT_TYPES = {
-    "database_context",
-    "system_prompt",
-    "rag_context",
-    "agent_context",
-    "text_to_sql_context",
+_VALID_ARTIFACT_TYPES = {member.value for member in PromptStudioService._artifact_order()} | {
+    member.name for member in PromptStudioService._artifact_order()
 }
 
 

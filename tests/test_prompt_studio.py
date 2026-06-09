@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.services.prompt_studio_service import PromptStudioService
+from app.models.artifact_manifest import ArtifactType
 
 
 @pytest.mark.asyncio
@@ -86,14 +87,16 @@ async def test_generate_artifacts_renders_all_outputs(monkeypatch: pytest.Monkey
 
     assert len(artifacts) == 5
     assert {item["artifact_type"] for item in artifacts} == {
-        "database_context",
-        "system_prompt",
-        "rag_context",
-        "agent_context",
-        "text_to_sql_context",
+        ArtifactType.database_context.value,
+        ArtifactType.system_prompt.value,
+        ArtifactType.rag_context.value,
+        ArtifactType.agent_context.value,
+        ArtifactType.text_to_sql_context.value,
     }
     assert service.artifact_service.record_artifact.await_count == 5
 
-    agent_context = next(item for item in artifacts if item["artifact_type"] == "agent_context")
+    agent_context = next(
+        item for item in artifacts if item["artifact_type"] == ArtifactType.agent_context.value
+    )
     parsed = json.loads(agent_context["content"])
     assert parsed["database"]["name"] == "Demo DB"

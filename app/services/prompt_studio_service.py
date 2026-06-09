@@ -8,6 +8,7 @@ graph, metadata, and embedding metadata using YAML templates.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +28,8 @@ from app.schema_engine.embeddings import EmbeddingEngine
 from app.schema_engine.relationship_graph import RelationshipGraphEngine
 from app.services.artifact_service import ArtifactService
 from app.utils import now_utc
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -91,7 +94,14 @@ class PromptStudioService:
         return redacted
 
     def _prompt_context_for_artifact(self, artifact_type: str, context: dict[str, Any]) -> dict[str, Any]:
-        if artifact_type in {"database_context.md", "system_prompt.md", "rag_context.md", "agent_context.json", "text_to_sql_context.md"}:
+        redacted_types = {
+            ArtifactType.database_context.value,
+            ArtifactType.system_prompt.value,
+            ArtifactType.rag_context.value,
+            ArtifactType.agent_context.value,
+            ArtifactType.text_to_sql_context.value,
+        }
+        if artifact_type in redacted_types:
             return self._redact_context(context)
         return context
 
@@ -155,6 +165,12 @@ class PromptStudioService:
         observability = AIObservabilityService()
 
         for artifact_type in self._artifact_order():
+            logger.info(
+                "artifact_type=%s value=%s type=%s",
+                artifact_type,
+                getattr(artifact_type, "value", None),
+                type(artifact_type),
+            )
             artifact = self._render_artifact(artifact_type.value, context)
             metrics = self._evaluation_metrics(context, artifact.content)
             with observability.observe(
@@ -447,37 +463,25 @@ class PromptStudioService:
         ]
 
     @staticmethod
-    def _artifact_enum(value: str) -> ArtifactType:
-        mapping = {
-            "database_context.md": ArtifactType.database_context,
-            "system_prompt.md": ArtifactType.system_prompt,
-            "rag_context.md": ArtifactType.rag_context,
-            "agent_context.json": ArtifactType.agent_context,
-            "text_to_sql_context.md": ArtifactType.text_to_sql_context,
-        }
-        return mapping[value]
+    def _artifact_enum(value: str | ArtifactType) -> ArtifactType:
+        return ArtifactType.resolve(value)
 
     @staticmethod
     def _template_id_for(value: str) -> str:
+        artifact_type = ArtifactType.resolve(value)
         mapping = {
-            "database_context.md": "database_context",
-            "system_prompt.md": "system_prompt",
-            "rag_context.md": "rag_context",
-            "agent_context.json": "agent_context",
-            "text_to_sql_context.md": "text_to_sql",
-            # support raw names too
-            "database_context": "database_context",
-            "system_prompt": "system_prompt",
-            "rag_context": "rag_context",
-            "agent_context": "agent_context",
-            "text_to_sql_context": "text_to_sql",
+            ArtifactType.database_context: "database_context",
+            ArtifactType.system_prompt: "system_prompt",
+            ArtifactType.rag_context: "rag_context",
+            ArtifactType.agent_context: "agent_context",
+            ArtifactType.text_to_sql_context: "text_to_sql",
         }
-
-        return mapping[value]
+        return mapping[artifact_type]
 
     @staticmethod
     def _mime_for(value: str) -> str:
-        if value == "agent_context.json":
+        artifact_type = ArtifactType.resolve(value)
+        if artifact_type == ArtifactType.agent_context:
             return "application/json"
         return "text/markdown"
 
