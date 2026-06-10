@@ -1,7 +1,7 @@
 """Add prompt tracking and metadata fingerprint to column_semantics.
 
-Revision ID: 009_add_column_tracking
-Revises: 008_add_artifact_prompt_tracking
+Revision ID: 011_add_column_tracking
+Revises: 010_add_artifact_prompt_tracking
 Create Date: 2026-06-08 00:00:00.000000
 """
 
@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "009_add_column_tracking"
-down_revision = "008_add_artifact_prompt_tracking"
+revision = "011_add_column_tracking"
+down_revision = "010_add_artifact_prompt_tracking"
 branch_labels = None
 depends_on = None
 

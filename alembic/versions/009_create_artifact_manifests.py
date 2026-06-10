@@ -1,7 +1,7 @@
 """Create artifact_manifests table.
 
-Revision ID: 008_create_artifact_manifests
-Revises: 007_add_prompt_tracking
+Revision ID: 009_create_artifact_manifests
+Revises: 008_add_prompt_tracking
 Create Date: 2026-06-05 00:00:00.000000
 """
 
@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "008_create_artifact_manifests"
-down_revision = "007_add_prompt_tracking"
+revision = "009_create_artifact_manifests"
+down_revision = "008_add_prompt_tracking"
 branch_labels = None
 depends_on = None
 

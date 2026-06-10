@@ -1,7 +1,7 @@
 """Add prompt tracking fields to readiness snapshots.
 
-Revision ID: 007_add_prompt_tracking
-Revises: 006_add_readiness_scores
+Revision ID: 008_add_prompt_tracking
+Revises: 007_add_readiness_scores
 Create Date: 2026-06-05 00:00:00.000000
 """
 
@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "007_add_prompt_tracking"
-down_revision = "006_add_readiness_scores"
+revision = "008_add_prompt_tracking"
+down_revision = "007_add_readiness_scores"
 branch_labels = None
 depends_on = None
 

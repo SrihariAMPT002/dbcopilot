@@ -1,7 +1,7 @@
 """Add KPI intelligence tables and readiness snapshot fields.
 
-Revision ID: 012_add_kpi_intelligence
-Revises: 011_add_relationship_columns
+Revision ID: 014_add_kpi_intelligence
+Revises: 013_add_relationship_columns
 Create Date: 2026-06-10
 """
 
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 
-revision = "012_add_kpi_intelligence"
-down_revision = "011_add_relationship_columns"
+revision = "014_add_kpi_intelligence"
+down_revision = "013_add_relationship_columns"
 branch_labels = None
 depends_on = None
 

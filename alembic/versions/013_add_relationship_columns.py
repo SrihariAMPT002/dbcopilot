@@ -1,7 +1,7 @@
 """Add relationship columns to schema_relationship_graph.
 
-Revision ID: 011_add_relationship_columns
-Revises: 010_add_overall_score
+Revision ID: 013_add_relationship_columns
+Revises: 012_add_overall_score
 Create Date: 2026-06-10
 """
 
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = "011_add_relationship_columns"
-down_revision = "010_add_overall_score"
+revision = "013_add_relationship_columns"
+down_revision = "012_add_overall_score"
 branch_labels = None
 depends_on = None
 

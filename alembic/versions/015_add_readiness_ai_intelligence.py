@@ -4,8 +4,8 @@ Migration hygiene note:
 - Historical duplicate numbering patterns exist in 006_* and 008_* migrations.
 - Revision IDs remain unique and chained correctly; do not renumber old revisions.
 
-Revision ID: 013_add_readiness_ai_intelligence
-Revises: 012_add_kpi_intelligence
+Revision ID: 015_add_readiness_ai_intel
+Revises: 014_add_kpi_intelligence
 Create Date: 2026-06-10
 """
 
@@ -16,8 +16,8 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 
-revision = "013_add_readiness_ai_intelligence"
-down_revision = "012_add_kpi_intelligence"
+revision = "015_add_readiness_ai_intelligence"
+down_revision = "014_add_kpi_intelligence"
 branch_labels = None
 depends_on = None
 

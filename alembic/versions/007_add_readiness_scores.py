@@ -1,6 +1,6 @@
 """Add richer category scores to readiness snapshots.
 
-Revision ID: 006_add_readiness_scores
+Revision ID: 007_add_readiness_scores
 Revises: 006_create_readiness_snapshots
 Create Date: 2026-06-05 00:00:00.000000
 """
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "006_add_readiness_scores"
+revision = "007_add_readiness_scores"
 down_revision = "006_create_readiness_snapshots"
 branch_labels = None
 depends_on = None

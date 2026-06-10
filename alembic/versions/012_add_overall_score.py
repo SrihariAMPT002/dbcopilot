@@ -1,7 +1,7 @@
 """Add overall_score to readiness_snapshots.
 
-Revision ID: 010_add_overall_score
-Revises: 009_add_column_tracking
+Revision ID: 012_add_overall_score
+Revises: 011_add_column_tracking
 Create Date: 2026-06-09 00:00:00.000000
 """
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 
-revision = "010_add_overall_score"
+revision = "012_add_overall_score"
 down_revision = "009_add_column_tracking"
 branch_labels = None
 depends_on = None
