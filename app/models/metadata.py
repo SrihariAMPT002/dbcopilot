@@ -640,6 +640,78 @@ class DatabaseSemantic(Base):
         """Serialize suggested_use_cases to JSON string."""
         self._suggested_use_cases = json.dumps(value or [])
 
+
+class KPIIntelligence(Base):
+    """Canonical KPI intelligence records discovered from metadata."""
+
+    __tablename__ = "kpi_intelligence"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    database_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("connected_databases.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    prompt_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    prompt_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    business_meaning: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    formula: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source_tables: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source_columns: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    dimensions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    filters: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    confidence: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    owner: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    lineage_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    discovery_source: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    package_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    confidence_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    metadata_fingerprint: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(64), nullable=False, default="discovered", index=True)
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class KPIArtifact(Base):
+    """Versioned KPI artifact manifest for generated KPI outputs."""
+
+    __tablename__ = "kpi_artifacts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    database_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("connected_databases.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    prompt_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    prompt_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    artifact_type: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    schema_hash: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    confidence_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    metadata_fingerprint: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    artifact_path: Mapped[str] = mapped_column(Text, nullable=False)
+    mime: Mapped[str] = mapped_column(String(128), nullable=False, default="application/json")
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
     def __repr__(self) -> str:
         return f"<DatabaseSemantic id={self.id} source_id={self.source_id} status={self.generation_status}>"
 

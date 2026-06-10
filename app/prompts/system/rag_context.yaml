@@ -40,7 +40,7 @@ user_prompt: |
   - PII Coverage: {{ '%.2f'|format(governance.pii_coverage or 0) }}
   - Prompt Protection: {{ governance.prompt_protection_enabled }}
   - Embedding Protection: {{ governance.embedding_protection_enabled }}
-  - Readiness Signals: {{ readiness | tojson }}
+  - Readiness Signals: {{ readiness | default({}) | tojson }}
 
   ## Governance Requirements
   - Prefer grounded retrieval over broad search.

@@ -24,6 +24,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.config.prompts import get_semantic_prompt
 from app.config.prompts import get_prompt_registry
+from app.config.package_registry import package_is_enabled
 from app.models.metadata import (
     ConnectedDatabase,
     DatabaseColumn,
@@ -273,6 +274,8 @@ class DatabaseSemanticService:
         load metadata -> build summary -> call OpenAI -> parse -> store -> return.
         """
         start_time = time.time()
+        if not package_is_enabled("semantic"):
+            raise ValueError("Semantic package is disabled by registry")
 
         database = await self._fetch_database_with_metadata(source_id)
         if not database:

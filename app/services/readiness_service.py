@@ -6,7 +6,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import json
 from typing import Any
+import logging
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,9 +28,14 @@ from app.models.nosql_metadata import NoSQLCollection, NoSQLRelationship, NoSQLS
 from app.models.readiness_snapshot import ReadinessSnapshot, ReadinessStatus
 from app.core.config import settings
 from app.services.ai_observability_service import AIObservabilityService
+from app.config.package_registry import package_is_enabled
+from app.config.manager import ConfigurationError, get_config_manager
 from app.schema_engine.embeddings import EmbeddingEngine
 from app.services.prompt_studio_service import PromptStudioService
+from app.models.metadata import KPIArtifact, KPIIntelligence
 from app.config.prompts import get_prompt_registry
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -48,36 +55,172 @@ class ReadinessBreakdown:
     relationship_readiness_score: int
     ai_context_readiness_score: int
     governance_readiness_score: int
+    kpi_score: int
+    kpi_readiness_score: int
+    ai_summary: str | None
+    ai_recommendations: list[str]
+    ai_risks: list[str]
+    ai_roadmap: list[str]
+    ai_confidence: float
+    prompt_id: str | None
+    prompt_version: str | None
+    model_name: str | None
     category_scores: dict[str, int]
     missing_stages: list[str]
     remediation_hints: list[str]
     details: dict[str, Any]
 
 
+@dataclass
+class PromptInventoryItem:
+    prompt: str
+    category: str
+    executed: bool
+    loaded_only: bool
+    consumer: str
+
+
 class ReadinessService:
     """Computes deterministic AI-readiness scores from existing metadata."""
-
-    WEIGHTS = {
-        "metadata": 0.24,
-        "semantic": 0.24,
-        "relationship": 0.20,
-        "ai_context": 0.18,
-        "governance": 0.14,
-    }
-
-    REQUIRED_ARTIFACT_TEMPLATES = (
-        "database_context",
-        "system_prompt",
-        "rag_context",
-        "agent_context",
-        "text_to_sql",
-    )
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.registry = get_prompt_registry()
+        self.config = get_config_manager()
+        self.readiness_rules = self._load_readiness_rules()
+
+    def _load_readiness_rules(self) -> dict[str, Any]:
+        rules = self.config.get_readiness_rules()
+        readiness = rules.get("readiness")
+        if not isinstance(readiness, dict):
+            raise ConfigurationError("readiness_rules.yaml must define readiness")
+
+        dimensions = readiness.get("dimensions")
+        weights = readiness.get("weights")
+        thresholds = readiness.get("thresholds")
+        stages = readiness.get("stages")
+        kpi_rules = readiness.get("kpi")
+
+        if not isinstance(dimensions, list) or not dimensions:
+            raise ConfigurationError("readiness.dimensions must be a non-empty list")
+        if not isinstance(weights, dict) or not weights:
+            raise ConfigurationError("readiness.weights must be a non-empty mapping")
+        if not isinstance(thresholds, dict) or not thresholds:
+            raise ConfigurationError("readiness.thresholds must be defined")
+        if not isinstance(stages, list) or not stages:
+            raise ConfigurationError("readiness.stages must be a non-empty list")
+        if not isinstance(kpi_rules, dict) or not kpi_rules:
+            raise ConfigurationError("readiness.kpi must be defined")
+
+        configured_dimensions = self._readiness_packages_from_registry()
+        if not configured_dimensions:
+            raise ConfigurationError("No readiness-enabled packages are configured")
+        configured_dimension_set = set(configured_dimensions)
+        declared_dimension_set = {str(item) for item in dimensions}
+        if declared_dimension_set != configured_dimension_set:
+            raise ConfigurationError(
+                "readiness.dimensions must match readiness-enabled packages in app/config/packages.yaml"
+            )
+
+        missing_weights = [dimension for dimension in configured_dimensions if dimension not in weights]
+        if missing_weights:
+            raise ConfigurationError(f"Missing readiness weights for: {', '.join(missing_weights)}")
+
+        weight_total = round(sum(float(weights[name]) for name in configured_dimensions), 6)
+        if abs(weight_total - 1.0) > 0.001:
+            raise ConfigurationError(f"Readiness weights must sum to 1.0, got {weight_total}")
+
+        return readiness
+
+    def _readiness_dimensions(self) -> list[str]:
+        return self._readiness_packages_from_registry()
+
+    def _readiness_packages_from_registry(self) -> list[str]:
+        package_config = self.config.get_packages().get("packages", {})
+        return [
+            package_name
+            for package_name, package in package_config.items()
+            if bool(package.get("readiness_enabled", False))
+        ]
+
+    def _readiness_weights(self) -> dict[str, float]:
+        return {str(key): float(value) for key, value in (self.readiness_rules.get("weights", {}) or {}).items()}
+
+    def _readiness_rules_thresholds(self) -> dict[str, Any]:
+        return dict(self.readiness_rules.get("thresholds", {}) or {})
+
+    def _kpi_rules(self) -> dict[str, Any]:
+        return dict(self.readiness_rules.get("kpi", {}) or {})
+
+    def _package_enabled(self, package_name: str) -> bool:
+        if package_name == "kpi":
+            return bool(self._kpi_rules().get("enabled", True)) and package_is_enabled(package_name)
+        return package_is_enabled(package_name)
+
+    def _enabled_packages(self) -> list[str]:
+        return [name for name in self._readiness_dimensions() if self._package_enabled(name)]
+
+    def _readiness_prompt_names(self) -> list[str]:
+        return [prompt_path for prompt_path in self.registry.list_prompts() if prompt_path.startswith("readiness/")]
+
+    def _readiness_assessment_prompt(self) -> str:
+        prompts = self._readiness_prompt_names()
+        for prompt_path in prompts:
+            if not prompt_path.endswith("governance_readiness"):
+                return prompt_path
+        if prompts:
+            return prompts[0]
+        raise ConfigurationError("No readiness prompts are registered")
+
+    @staticmethod
+    def _prompt_consumers() -> dict[str, str]:
+        return {
+            "semantic": "app.services.database_semantic_service",
+            "relationship": "app.schema_engine.relationship_graph",
+            "kpi": "app.services.kpi_intelligence_service",
+            "readiness": "app.services.readiness_service",
+            "system": "app.services.prompt_studio_service",
+        }
+
+    def _prompt_inventory(self) -> list[PromptInventoryItem]:
+        consumers = self._prompt_consumers()
+        inventory: list[PromptInventoryItem] = []
+        for entry in self.registry.list_prompts():
+            category, prompt_id = entry.split("/", 1) if "/" in entry else ("", entry)
+            consumer = consumers.get(category, "unknown")
+            if category == "semantic" and prompt_id == "pii_classification":
+                consumer = "app.services.column_semantic_service"
+            elif category == "relationship":
+                consumer = "app.schema_engine.relationship_graph"
+            elif category == "readiness":
+                consumer = "app.services.readiness_service"
+            elif category == "system":
+                consumer = "app.services.prompt_studio_service"
+            elif category == "kpi":
+                consumer = "app.services.kpi_intelligence_service"
+            executed = consumer != "unknown"
+            inventory.append(
+                PromptInventoryItem(
+                    prompt=prompt_id,
+                    category=category,
+                    executed=executed,
+                    loaded_only=not executed,
+                    consumer=consumer,
+                )
+            )
+        return inventory
+
+    def _enabled_artifacts(self) -> list[str]:
+        artifacts: list[str] = []
+        for package_name in self._readiness_dimensions():
+            if not self._package_enabled(package_name):
+                continue
+            artifacts.extend(package_artifacts(package_name))
+        return list(dict.fromkeys(artifacts))
 
     async def get_or_compute(self, database_id: int) -> ReadinessBreakdown:
+        if not self._package_enabled("governance"):
+            raise ValueError("Governance package is disabled by registry")
         snapshot = await self._latest_snapshot(database_id)
         database = await self._fetch_database(database_id)
         if snapshot is None:
@@ -85,23 +228,38 @@ class ReadinessService:
 
         status = snapshot.readiness_status
         if database.last_sync_at and snapshot.generated_at < database.last_sync_at:
-            status = ReadinessStatus.STALE
+            return await self.recompute(database_id)
 
-        return await self._build_breakdown(database_id, status_override=status)
+        return await self._build_breakdown(
+            database_id,
+            status_override=status,
+            snapshot=snapshot,
+        )
 
     async def recompute(self, database_id: int) -> ReadinessBreakdown:
+        if not self._package_enabled("governance"):
+            raise ValueError("Governance package is disabled by registry")
         database = await self._fetch_database(database_id)
         observability = AIObservabilityService()
         breakdown = await self._build_breakdown(database_id)
+        assessment_prompt = self._readiness_assessment_prompt()
+        ai_assessment = {
+            "ai_summary": self._fallback_ai_summary(breakdown),
+            "ai_recommendations": self._fallback_recommendations(breakdown),
+            "ai_risks": self._fallback_risks(breakdown),
+            "ai_roadmap": self._fallback_roadmap(breakdown),
+            "ai_confidence": round(min(1.0, breakdown.overall_score / 100.0), 3),
+        }
         try:
+            ai_assessment = await self._generate_ai_assessment(database, breakdown)
             with observability.observe(
                 module="ai_readiness",
                 artifact_type="readiness_snapshot",
-                prompt_id="readiness_rules",
-                prompt_version="1",
+                prompt_id=assessment_prompt.split("/", 1)[1],
+                prompt_version="registry",
                 database_id=database.id,
                 database_name=database.display_name or database.name,
-                model_name="deterministic",
+                model_name=settings.azure_openai_deployment,
                 completeness_score=breakdown.metadata_readiness_score / 100.0,
                 coverage_score=breakdown.ai_context_readiness_score / 100.0,
                 confidence_score=breakdown.overall_score / 100.0,
@@ -121,20 +279,35 @@ class ReadinessService:
                     relationship_readiness_score=breakdown.relationship_readiness_score,
                     ai_context_readiness_score=breakdown.ai_context_readiness_score,
                     governance_readiness_score=breakdown.governance_readiness_score,
+                    kpi_score=breakdown.kpi_score,
                     overall_score=breakdown.overall_score,
-                    prompt_id="readiness_rules",
-                    prompt_version="1",
-                    model_name="deterministic",
+                    ai_summary=ai_assessment["ai_summary"],
+                    ai_recommendations=json.dumps(ai_assessment["ai_recommendations"], default=str),
+                    ai_risks=json.dumps(ai_assessment["ai_risks"], default=str),
+                    ai_roadmap=json.dumps(ai_assessment["ai_roadmap"], default=str),
+                    ai_confidence=ai_assessment["ai_confidence"],
+                    prompt_id=self._readiness_assessment_prompt().split("/", 1)[1],
+                    prompt_version=rendered.metadata.version,
+                    model_name=settings.azure_openai_deployment,
                     readiness_status=breakdown.readiness_status,
                 )
                 self.db.add(snapshot)
                 await self.db.flush()
                 breakdown.generated_at = snapshot.generated_at
+                breakdown.ai_summary = snapshot.ai_summary
+                breakdown.ai_recommendations = self._parse_snapshot_json(snapshot.ai_recommendations)
+                breakdown.ai_risks = self._parse_snapshot_json(snapshot.ai_risks)
+                breakdown.ai_roadmap = self._parse_snapshot_json(snapshot.ai_roadmap)
+                breakdown.ai_confidence = float(snapshot.ai_confidence)
+                breakdown.prompt_id = snapshot.prompt_id
+                breakdown.prompt_version = snapshot.prompt_version
+                breakdown.model_name = snapshot.model_name
                 if observation is not None:
                     observation.add_outputs(
                         {
                             "overall_score": breakdown.overall_score,
                             "category_scores": breakdown.category_scores,
+                            "ai_summary": ai_assessment["ai_summary"],
                             "readiness_status": breakdown.readiness_status.value,
                         }
                     )
@@ -144,8 +317,8 @@ class ReadinessService:
                             "database_name": database.display_name or database.name,
                             "module": "ai_readiness",
                             "artifact_type": "readiness_snapshot",
-                            "prompt_version": "1",
-                            "model": "deterministic",
+                            "prompt_version": rendered.metadata.version,
+                            "model": settings.azure_openai_deployment,
                             "readiness_category": "overall",
                             "score_generated": breakdown.overall_score,
                             "completeness_score": breakdown.metadata_readiness_score / 100.0,
@@ -173,21 +346,36 @@ class ReadinessService:
                 relationship_readiness_score=breakdown.relationship_readiness_score,
                 ai_context_readiness_score=breakdown.ai_context_readiness_score,
                 governance_readiness_score=breakdown.governance_readiness_score,
+                kpi_score=breakdown.kpi_score,
                 overall_score=breakdown.overall_score,
-                prompt_id="readiness_rules",
-                prompt_version="1",
-                model_name="deterministic",
+                ai_summary=ai_assessment["ai_summary"],
+                ai_recommendations=json.dumps(ai_assessment["ai_recommendations"], default=str),
+                ai_risks=json.dumps(ai_assessment["ai_risks"], default=str),
+                ai_roadmap=json.dumps(ai_assessment["ai_roadmap"], default=str),
+                ai_confidence=ai_assessment["ai_confidence"],
+                prompt_id=self._readiness_assessment_prompt().split("/", 1)[1],
+                prompt_version=rendered.metadata.version,
+                model_name=settings.azure_openai_deployment,
                 readiness_status=breakdown.readiness_status,
             )
             self.db.add(snapshot)
             await self.db.flush()
             breakdown.generated_at = snapshot.generated_at
+            breakdown.ai_summary = snapshot.ai_summary
+            breakdown.ai_recommendations = self._parse_snapshot_json(snapshot.ai_recommendations)
+            breakdown.ai_risks = self._parse_snapshot_json(snapshot.ai_risks)
+            breakdown.ai_roadmap = self._parse_snapshot_json(snapshot.ai_roadmap)
+            breakdown.ai_confidence = float(snapshot.ai_confidence)
+            breakdown.prompt_id = snapshot.prompt_id
+            breakdown.prompt_version = snapshot.prompt_version
+            breakdown.model_name = snapshot.model_name
             return breakdown
 
     async def _build_breakdown(
         self,
         database_id: int,
         status_override: ReadinessStatus | None = None,
+        snapshot: ReadinessSnapshot | None = None,
     ) -> ReadinessBreakdown:
         database = await self._fetch_database(database_id)
         stats = await self._collect_stats(database_id)
@@ -197,12 +385,14 @@ class ReadinessService:
         relationship_score = self._relationship_score(stats)
         ai_context_score = self._ai_context_score(stats)
         governance_score = self._governance_score(stats)
+        kpi_score = self._kpi_score(stats)
         overall_score = self._overall_score(
             metadata_score,
             semantic_score,
             relationship_score,
             ai_context_score,
             governance_score,
+            kpi_score,
         )
 
         category_scores = {
@@ -211,6 +401,7 @@ class ReadinessService:
             "relationship_readiness_score": relationship_score,
             "ai_context_readiness_score": ai_context_score,
             "governance_readiness_score": governance_score,
+            "kpi_readiness_score": kpi_score,
         }
 
         missing_stages, hints = self._build_remediation(stats, category_scores)
@@ -222,12 +413,21 @@ class ReadinessService:
             "relationships": stats["relationships"],
             "ai_context": stats["ai_context"],
             "governance": stats["governance"],
+            "kpi": stats["kpi"],
             "embeddings": stats["embeddings"],
             "nosql": stats["nosql"],
+            "snapshot": self._snapshot_details(snapshot),
         }
 
         # Legacy scores remain available for backward compatibility with older clients.
         legacy_scores = self._legacy_scores(category_scores, stats)
+        hydrated_ai = self._hydrate_ai_snapshot(snapshot, breakdown_fallback={
+            "ai_summary": None,
+            "ai_recommendations": [],
+            "ai_risks": [],
+            "ai_roadmap": [],
+            "ai_confidence": 0.0,
+        })
 
         return ReadinessBreakdown(
             database_id=database.id,
@@ -245,6 +445,16 @@ class ReadinessService:
             relationship_readiness_score=relationship_score,
             ai_context_readiness_score=ai_context_score,
             governance_readiness_score=governance_score,
+            kpi_score=kpi_score,
+            kpi_readiness_score=kpi_score,
+            ai_summary=hydrated_ai["ai_summary"],
+            ai_recommendations=hydrated_ai["ai_recommendations"],
+            ai_risks=hydrated_ai["ai_risks"],
+            ai_roadmap=hydrated_ai["ai_roadmap"],
+            ai_confidence=hydrated_ai["ai_confidence"],
+            prompt_id=hydrated_ai["prompt_id"],
+            prompt_version=hydrated_ai["prompt_version"],
+            model_name=hydrated_ai["model_name"],
             category_scores=category_scores,
             missing_stages=missing_stages,
             remediation_hints=hints,
@@ -268,6 +478,52 @@ class ReadinessService:
             .limit(1)
         )
         return result.scalars().first()
+
+    @staticmethod
+    def _parse_snapshot_json(value: str | None) -> list[str]:
+        if not value:
+            return []
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return [value]
+        if isinstance(parsed, list):
+            return [str(item) for item in parsed]
+        if parsed is None:
+            return []
+        return [str(parsed)]
+
+    @classmethod
+    def _hydrate_ai_snapshot(
+        cls,
+        snapshot: ReadinessSnapshot | None,
+        *,
+        breakdown_fallback: dict[str, Any],
+    ) -> dict[str, Any]:
+        if snapshot is None:
+            return dict(breakdown_fallback)
+        return {
+            "ai_summary": snapshot.ai_summary or breakdown_fallback["ai_summary"],
+            "ai_recommendations": cls._parse_snapshot_json(snapshot.ai_recommendations) or breakdown_fallback["ai_recommendations"],
+            "ai_risks": cls._parse_snapshot_json(snapshot.ai_risks) or breakdown_fallback["ai_risks"],
+            "ai_roadmap": cls._parse_snapshot_json(snapshot.ai_roadmap) or breakdown_fallback["ai_roadmap"],
+            "ai_confidence": float(snapshot.ai_confidence if snapshot.ai_confidence is not None else breakdown_fallback["ai_confidence"]),
+            "prompt_id": snapshot.prompt_id,
+            "prompt_version": snapshot.prompt_version,
+            "model_name": snapshot.model_name,
+        }
+
+    @staticmethod
+    def _snapshot_details(snapshot: ReadinessSnapshot | None) -> dict[str, Any]:
+        if snapshot is None:
+            return {}
+        return {
+            "prompt_id": snapshot.prompt_id,
+            "prompt_version": snapshot.prompt_version,
+            "model_name": snapshot.model_name,
+            "ai_summary": snapshot.ai_summary,
+            "ai_confidence": snapshot.ai_confidence,
+        }
 
     async def _fetch_database_semantic(self, database_id: int) -> DatabaseSemantic | None:
         result = await self.db.execute(
@@ -486,10 +742,12 @@ class ReadinessService:
         prompt_artifact_errors: list[str] = []
         prompt_artifacts_rendered = 0
         prompt_context_length = 0
+        readiness_prompt_names = self._readiness_prompt_names()
+        enabled_artifacts = self._enabled_artifacts()
         if tables > 0:
             try:
                 prompt_context = await PromptStudioService(self.db)._build_context(database_id)
-                for template_id in self.REQUIRED_ARTIFACT_TEMPLATES:
+                for template_id in enabled_artifacts:
                     try:
                         rendered = self.registry.render_prompt(template_id, prompt_context, category="system")
                         if rendered.user_prompt.strip():
@@ -566,6 +824,55 @@ class ReadinessService:
             "pii_coverage": pii_identified_coverage,
         }
 
+        kpi_count = 0
+        kpi_artifacts = 0
+        kpi_artifact_fresh = False
+        kpi_confidence = 0.0
+        if package_is_enabled("kpi"):
+            try:
+                kpi_count = int(
+                    await self.db.scalar(
+                        select(func.count(KPIIntelligence.id)).where(KPIIntelligence.database_id == database_id)
+                    )
+                    or 0
+                )
+                kpi_artifacts = int(
+                    await self.db.scalar(
+                        select(func.count(KPIArtifact.id)).where(KPIArtifact.database_id == database_id)
+                    )
+                    or 0
+                )
+                latest_kpi_artifact = await self.db.execute(
+                    select(KPIArtifact)
+                    .where(KPIArtifact.database_id == database_id)
+                    .order_by(KPIArtifact.generated_at.desc())
+                    .limit(1)
+                )
+                latest_kpi_artifact = latest_kpi_artifact.scalars().first()
+                kpi_artifact_fresh = bool(
+                    latest_kpi_artifact
+                    and (not database.last_sync_at or latest_kpi_artifact.generated_at >= database.last_sync_at)
+                )
+                kpi_confidence = float(
+                    await self.db.scalar(
+                        select(func.coalesce(func.avg(KPIIntelligence.confidence), 0.0)).where(
+                            KPIIntelligence.database_id == database_id
+                        )
+                    )
+                    or 0.0
+                )
+            except Exception:
+                logger.exception("Failed to collect KPI readiness stats for database_id=%s", database_id)
+
+        kpi_stats = {
+            "enabled": package_is_enabled("kpi"),
+            "kpi_count": kpi_count,
+            "artifact_count": kpi_artifacts,
+            "artifact_fresh": kpi_artifact_fresh,
+            "coverage_score": self._ratio_score(kpi_count, max(1, int(columns) // 10 or 1)),
+            "confidence_score": kpi_confidence,
+        }
+
         if tables > 0:
             readiness_context = {
                 "database_name": database.display_name or database.name,
@@ -576,6 +883,7 @@ class ReadinessService:
                 "relationship_intelligence": int(relationship_ai_rows),
                 "ai_context": ai_context_stats,
                 "governance": governance_stats,
+                "kpi": kpi_stats,
                 "embeddings": {
                     "indexed_tables": int(embedding_status.get("indexed_tables", 0)),
                     "completed_tables": int(embedding_status.get("completed_tables", 0)),
@@ -593,9 +901,10 @@ class ReadinessService:
                     "embedding_protection_enabled": governance_stats["embedding_protection_enabled"],
                 },
             }
-            for template_id in ("ai_readiness_assessment", "governance_readiness"):
+            for template_id in readiness_prompt_names:
                 try:
-                    rendered = self.registry.render_prompt(template_id, readiness_context, category="readiness")
+                    category, prompt_id = template_id.split("/", 1)
+                    rendered = self.registry.render_prompt(prompt_id, readiness_context, category=category)
                     if rendered.user_prompt.strip():
                         prompt_artifacts_rendered += 1
                 except Exception as exc:
@@ -603,7 +912,7 @@ class ReadinessService:
 
         ai_context_stats = {
             "prompt_artifacts_rendered": prompt_artifacts_rendered,
-            "prompt_artifacts_expected": len(self.REQUIRED_ARTIFACT_TEMPLATES) + 2,
+            "prompt_artifacts_expected": len(enabled_artifacts) + len(readiness_prompt_names),
             "prompt_context_length": prompt_context_length,
             "prompt_artifact_errors": prompt_artifact_errors,
             "embedding_coverage": self._ratio_score(int(embedding_status.get("completed_tables", 0)), int(max(1, tables))),
@@ -613,7 +922,7 @@ class ReadinessService:
         prompt_protection_enabled = bool(
             settings.pii_prompt_protection_enabled
             and governance_stats["column_semantics"] > 0
-            and prompt_artifacts_rendered >= len(self.REQUIRED_ARTIFACT_TEMPLATES) + 2
+            and prompt_artifacts_rendered >= len(enabled_artifacts) + len(readiness_prompt_names)
             and not prompt_artifact_errors
         )
         embedding_protection_enabled = bool(
@@ -632,6 +941,7 @@ class ReadinessService:
             "relationship_intelligence": int(relationship_ai_rows),
             "ai_context": ai_context_stats,
             "governance": governance_stats,
+            "kpi": kpi_stats,
             "embeddings": {
                 "indexed_tables": int(embedding_status.get("indexed_tables", 0)),
                 "completed_tables": int(embedding_status.get("completed_tables", 0)),
@@ -650,6 +960,139 @@ class ReadinessService:
             },
             "database_semantic": database_semantic,
         }
+
+    async def _generate_ai_assessment(self, database: ConnectedDatabase, breakdown: ReadinessBreakdown) -> dict[str, Any]:
+        context = breakdown.details
+        prompt_context = {
+            "database_name": database.display_name or database.name,
+            "database_type": database.db_type.value,
+            "scores": {
+                "overall_score": breakdown.overall_score,
+                "metadata_score": breakdown.metadata_score,
+                "semantic_score": breakdown.semantic_score,
+                "relationship_score": breakdown.relationship_score,
+                "prompt_score": breakdown.prompt_score,
+                "governance_readiness_score": breakdown.governance_readiness_score,
+                "kpi_readiness_score": breakdown.kpi_readiness_score,
+            },
+            "category_scores": breakdown.category_scores,
+            "metadata": context.get("metadata", {}),
+            "semantic": context.get("semantic", {}),
+            "relationships": context.get("relationships", {}),
+            "governance": context.get("governance", {}),
+            "kpi": context.get("kpi", {}),
+            "ai_context": context.get("ai_context", {}),
+            "package_coverage": {
+                "enabled_packages": self._enabled_packages(),
+                "total_enabled": len(self._enabled_packages()),
+                "expected_packages": len(self._readiness_dimensions()),
+            },
+        }
+
+        try:
+            assessment_prompt = self._readiness_assessment_prompt()
+            category, prompt_id = assessment_prompt.split("/", 1)
+            rendered = self.registry.render_prompt(prompt_id, prompt_context, category=category)
+            observability = AIObservabilityService()
+            ai_result = await observability.generate(
+                operation="chat",
+                module="ai_readiness",
+                artifact_type="readiness_assessment",
+                prompt_id=rendered.metadata.id,
+                prompt_version=rendered.metadata.version,
+                database_id=database.id,
+                database_name=database.display_name or database.name,
+                model_name=settings.azure_openai_deployment,
+                messages=[
+                    {"role": "system", "content": rendered.system_message},
+                    {"role": "user", "content": rendered.user_prompt},
+                ],
+                request_kwargs={
+                    "max_completion_tokens": 1200,
+                    "response_format": {"type": "json_object"},
+                },
+                completeness_score=breakdown.metadata_readiness_score / 100.0,
+                coverage_score=breakdown.ai_context_readiness_score / 100.0,
+                confidence_score=breakdown.overall_score / 100.0,
+                extra_metadata={
+                    "database_id": database.id,
+                    "module": "ai_readiness",
+                    "job_id": None,
+                    "prompt_id": rendered.metadata.id,
+                    "prompt_version": rendered.metadata.version,
+                },
+            )
+            parsed = self._parse_ai_assessment(ai_result.content or "")
+            parsed["ai_confidence"] = float(parsed.get("confidence", 0.0))
+            return {
+                "ai_summary": parsed.get("executive_summary") or "Readiness assessment generated.",
+                "ai_recommendations": parsed.get("recommendations") or [],
+                "ai_risks": parsed.get("risks") or [],
+                "ai_roadmap": parsed.get("readiness_roadmap") or [],
+                "ai_confidence": float(parsed.get("confidence", 0.0) or 0.0),
+            }
+        except Exception:
+            logger.exception("AI readiness assessment generation failed; falling back to deterministic summary")
+            return {
+                "ai_summary": self._fallback_ai_summary(breakdown),
+                "ai_recommendations": self._fallback_recommendations(breakdown),
+                "ai_risks": self._fallback_risks(breakdown),
+                "ai_roadmap": self._fallback_roadmap(breakdown),
+                "ai_confidence": round(min(1.0, breakdown.overall_score / 100.0), 3),
+            }
+
+    @staticmethod
+    def _parse_ai_assessment(text: str) -> dict[str, Any]:
+        payload = text.strip()
+        if payload.startswith("```"):
+            payload = "\n".join(payload.splitlines()[1:-1]).strip()
+        if payload.startswith("{") and payload.endswith("}"):
+            return json.loads(payload)
+        start = payload.find("{")
+        end = payload.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(payload[start : end + 1])
+        return {}
+
+    @staticmethod
+    def _fallback_ai_summary(breakdown: ReadinessBreakdown) -> str:
+        return (
+            f"Overall readiness is {breakdown.overall_score}%. "
+            f"Semantic, relationship, governance, and KPI signals indicate the database is "
+            f"{breakdown.readiness_status.value.lower().replace('_', ' ')} for AI workflows."
+        )
+
+    @staticmethod
+    def _fallback_recommendations(breakdown: ReadinessBreakdown) -> list[str]:
+        stage_scores = {
+            "metadata": breakdown.metadata_readiness_score,
+            "semantic": breakdown.semantic_readiness_score,
+            "relationship": breakdown.relationship_readiness_score,
+            "ai context": breakdown.ai_context_readiness_score,
+            "governance": breakdown.governance_readiness_score,
+            "kpi": breakdown.kpi_readiness_score,
+        }
+        return [
+            f"Focus on the lowest-scoring category: {min(stage_scores, key=stage_scores.get)}.",
+            "Regenerate missing artifacts and refresh the pipeline after schema changes.",
+        ]
+
+    @staticmethod
+    def _fallback_risks(breakdown: ReadinessBreakdown) -> list[str]:
+        risks = []
+        if breakdown.kpi_readiness_score < 85:
+            risks.append("KPI intelligence may be incomplete or stale.")
+        if breakdown.governance_readiness_score < 85:
+            risks.append("Governance signals are not strong enough for safe downstream AI usage.")
+        return risks or ["No critical risks detected from deterministic scoring."]
+
+    @staticmethod
+    def _fallback_roadmap(breakdown: ReadinessBreakdown) -> list[str]:
+        return [
+            "Stabilize metadata and governance coverage.",
+            "Refresh semantic, relationship, and KPI intelligence after the next sync.",
+            "Monitor readiness freshness after each pipeline run.",
+        ]
 
     def _metadata_score(self, stats: dict[str, Any]) -> int:
         metadata = stats["metadata"]
@@ -804,6 +1247,29 @@ class ReadinessService:
             ),
         )
 
+    def _kpi_score(self, stats: dict[str, Any]) -> int:
+        kpi = stats["kpi"]
+        rules = self._kpi_rules()
+        if not kpi["enabled"] or kpi["kpi_count"] < int(rules.get("min_kpi_count", 1)):
+            return 0
+
+        confidence = max(0, min(100, int(round(float(kpi["confidence_score"]) * 100))))
+        freshness = 100 if kpi["artifact_fresh"] else 0
+        weights = rules.get("weights", {})
+        return max(
+            0,
+            min(
+                100,
+                int(
+                    round(
+                        float(weights.get("coverage", 0.40)) * kpi["coverage_score"]
+                        + float(weights.get("freshness", 0.35)) * freshness
+                        + float(weights.get("confidence", 0.25)) * confidence
+                    )
+                ),
+            ),
+        )
+
     def _overall_score(
         self,
         metadata_score: int,
@@ -811,15 +1277,30 @@ class ReadinessService:
         relationship_score: int,
         ai_context_score: int,
         governance_score: int,
+        kpi_score: int,
     ) -> int:
+        weights = self._readiness_weights()
         weighted = (
-            metadata_score * self.WEIGHTS["metadata"]
-            + semantic_score * self.WEIGHTS["semantic"]
-            + relationship_score * self.WEIGHTS["relationship"]
-            + ai_context_score * self.WEIGHTS["ai_context"]
-            + governance_score * self.WEIGHTS["governance"]
+            metadata_score * weights["metadata"]
+            + semantic_score * weights["semantic"]
+            + relationship_score * weights["relationship"]
+            + ai_context_score * weights["ai_context"]
+            + governance_score * weights["governance"]
+            + kpi_score * weights["kpi"]
         )
         return max(0, min(100, int(round(weighted))))
+
+    def readiness_prompt_inventory(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "prompt": item.prompt,
+                "category": item.category,
+                "executed": item.executed,
+                "loaded_only": item.loaded_only,
+                "consumer": item.consumer,
+            }
+            for item in self._prompt_inventory()
+        ]
 
     def _status_from_score(
         self,
@@ -827,9 +1308,17 @@ class ReadinessService:
         category_scores: dict[str, int],
         missing_stages: list[str],
     ) -> ReadinessStatus:
-        if overall_score >= 85 and not missing_stages and min(category_scores.values() or [0]) >= 70:
+        thresholds = self._readiness_rules_thresholds()
+        ready = thresholds.get("ready", {})
+        partial = thresholds.get("partial", {})
+        not_ready = thresholds.get("not_ready", {})
+        ready_min = int(ready.get("min_score", 85))
+        partial_min = int(partial.get("min_score", 40))
+        ready_missing_allowed = int(ready.get("missing_stages_allowed", 0))
+        ready_min_category = int(ready.get("min_category_score", 70))
+        if overall_score >= ready_min and len(missing_stages) <= ready_missing_allowed and min(category_scores.values() or [0]) >= ready_min_category:
             return ReadinessStatus.READY
-        if overall_score >= 40:
+        if overall_score >= partial_min and overall_score >= int(not_ready.get("max_score", 40)):
             return ReadinessStatus.PARTIAL
         return ReadinessStatus.NOT_READY
 
@@ -912,6 +1401,15 @@ class ReadinessService:
                 hints.append("Enable prompt protection to redact PII from generated prompt artifacts.")
             if not governance["embedding_protection_enabled"]:
                 hints.append("Enable embedding protection to exclude PII column details from vector indexes.")
+
+        if category_scores.get("kpi_readiness_score", 0) < 85:
+            missing.append("kpi")
+            if not stats["kpi"]["enabled"]:
+                hints.append("Enable the KPI package in the registry to generate KPI intelligence.")
+            elif stats["kpi"]["kpi_count"] == 0:
+                hints.append("Generate KPI intelligence to populate the KPI catalog and lineage artifacts.")
+            elif not stats["kpi"]["artifact_fresh"]:
+                hints.append("Refresh KPI artifacts after the latest schema sync.")
 
         if governance["pii_risk_tagged_columns"] == 0 and governance["pii_columns"] > 0:
             hints.append("PII records exist, but risk labels are not populated for all sensitive fields.")

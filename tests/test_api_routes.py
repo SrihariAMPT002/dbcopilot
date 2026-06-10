@@ -13,6 +13,8 @@ from types import SimpleNamespace
 
 from app.main import app
 from app.db.session import get_db
+from app.services.prompt_studio_service import PromptStudioService
+from app.schema_engine.embeddings import EmbeddingEngine
 
 
 # ── Override the DB dependency ────────────────────────────────────────────────
@@ -217,12 +219,23 @@ def test_readiness_endpoint_includes_category_scores(client):
         relationship_readiness_score=90,
         ai_context_readiness_score=88,
         governance_readiness_score=85,
+        kpi_score=80,
+        kpi_readiness_score=80,
+        ai_summary="Persisted AI summary",
+        ai_recommendations=["Improve semantic coverage"],
+        ai_risks=["KPI freshness is stale"],
+        ai_roadmap=["Refresh KPI artifacts"],
+        ai_confidence=0.87,
+        prompt_id="readiness_assessment",
+        prompt_version="2.0",
+        model_name="gpt-5-nano",
         category_scores={
             "metadata_readiness_score": 95,
             "semantic_readiness_score": 92,
             "relationship_readiness_score": 90,
             "ai_context_readiness_score": 88,
             "governance_readiness_score": 85,
+            "kpi_readiness_score": 80,
             "overall_score": 92,
         },
         missing_stages=[],
@@ -242,6 +255,52 @@ def test_readiness_endpoint_includes_category_scores(client):
     assert "category_scores" in body
     assert body["category_scores"]["ai_context_readiness_score"] == 88
     assert body["scores"]["overall_score"] == 92
+    assert body["prompt_id"] == "readiness_assessment"
+    assert body["model_name"] == "gpt-5-nano"
+
+
+def test_prompt_inventory_report(client):
+    with patch(
+        "app.services.prompt_studio_service.PromptStudioService.prompt_inventory_report",
+        return_value=[
+            {
+                "prompt": "readiness_assessment",
+                "category": "readiness",
+                "executed": True,
+                "loaded_only": False,
+                "consumer": "app.services.readiness_service",
+            }
+        ],
+    ):
+        r = client.get("/api/v1/prompt-studio/inventory")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["prompts"][0]["prompt"] == "readiness_assessment"
+
+
+def test_prompt_redaction_for_sensitive_columns():
+    service = PromptStudioService(AsyncMock())
+    context = {
+        "semantic": {"business_summary": "Customer data"},
+        "columns": [
+            {"name": "email_address", "description": "Customer email", "is_pii": True, "pii_type": "Email", "risk_level": "high"},
+            {"name": "customer_name", "description": "Customer name", "is_pii": False, "risk_level": "low"},
+        ],
+    }
+    redacted = service._redact_context(context)
+    assert redacted["columns"][0]["name"] == "[PII REDACTED]"
+    assert redacted["columns"][0]["description"] == "[PII REDACTED]"
+    assert redacted["semantic"]["business_summary"] == "Customer data"
+
+
+def test_embedding_masking_respects_flag(monkeypatch):
+    engine = EmbeddingEngine(AsyncMock())
+    pii_map = {1: SimpleNamespace(is_pii=True, risk_level="high", pii_type="Email")}
+    monkeypatch.setattr("app.schema_engine.embeddings.settings.pii_embedding_protection_enabled", True)
+    assert engine._should_mask_column(1, pii_map) is True
+    monkeypatch.setattr("app.schema_engine.embeddings.settings.pii_embedding_protection_enabled", False)
+    assert engine._should_mask_column(1, pii_map) is False
 
 
 # ── OpenAPI docs ──────────────────────────────────────────────────────────────

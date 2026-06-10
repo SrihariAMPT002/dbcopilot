@@ -103,6 +103,9 @@ class Settings(BaseSettings):
     langfuse_secret_key: Optional[str] = Field(default=None)
     langfuse_host: Optional[str] = Field(default=None)
 
+    # Intelligence Package Registry
+    intelligence_packages_enabled: bool = Field(default=True)
+
     @field_validator("log_level")
     @classmethod
     def validate_log_level(cls, v: str) -> str:

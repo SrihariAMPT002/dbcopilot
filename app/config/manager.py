@@ -175,6 +175,10 @@ class ConfigurationManager:
         """Get feature flags."""
         return self.load_config("feature_flags")
 
+    def get_packages(self) -> Dict[str, Any]:
+        """Get intelligence package registry."""
+        return self.load_config("packages")
+
     def get_retry_policies(self) -> Dict[str, Any]:
         """Get retry and resilience policies."""
         return self.load_config("retry_policies")
@@ -280,6 +284,7 @@ class ConfigurationManager:
             self.get_semantic_rules()
             self.get_governance_rulebook()
             self.get_feature_flags()
+            self.get_packages()
             self.get_retry_policies()
             logger.info("All configurations reloaded successfully")
         except Exception as e:
@@ -330,3 +335,8 @@ def get_model_config(model_key: str) -> Dict[str, Any]:
 def get_retry_policy(service_name: str) -> Dict[str, Any]:
     """Get retry policy for a service."""
     return config_manager.get_retry_policy(service_name)
+
+
+def get_packages() -> Dict[str, Any]:
+    """Get intelligence package registry."""
+    return config_manager.get_packages()

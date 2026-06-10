@@ -9,6 +9,7 @@ from app.api.routes import (
     semantics,
     column_semantics,
     prompt_studio,
+    kpi_intelligence,
     embeddings,
     relationship_graph,
     exports,
@@ -27,6 +28,7 @@ api_router.include_router(semantic.router)
 api_router.include_router(semantics.router)
 api_router.include_router(column_semantics.router)
 api_router.include_router(prompt_studio.router)
+api_router.include_router(kpi_intelligence.router)
 api_router.include_router(embeddings.router)
 api_router.include_router(relationship_graph.router)
 api_router.include_router(exports.router)

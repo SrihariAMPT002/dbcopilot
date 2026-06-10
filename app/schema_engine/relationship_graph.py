@@ -33,6 +33,7 @@ from app.models.metadata import (
 from app.services.ai_observability_service import AIObservabilityService
 from app.utils import safe_flush
 from app.config.prompts import get_prompt_registry
+from app.config.package_registry import package_is_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -527,6 +528,8 @@ class RelationshipGraphEngine:
         database_semantic: Optional[DatabaseSemantic],
         table_semantics: list[tuple[SchemaSemantic, DatabaseTable]],
     ) -> dict[str, Any]:
+        if not package_is_enabled("relationship"):
+            raise ValueError("Relationship package is disabled by registry")
         prompt_context = self._build_cluster_payload(
             database,
             tables,
@@ -592,6 +595,8 @@ class RelationshipGraphEngine:
         tables: list[DatabaseTable],
         edges: list[GraphEdgeRecord],
     ) -> dict[str, Any]:
+        if not package_is_enabled("relationship"):
+            raise ValueError("Relationship package is disabled by registry")
         database_semantic, table_semantics = await self._fetch_semantics(database.id)
         cluster_ids = self._cluster_tables(tables, edges)
         cluster_payloads = [
@@ -689,6 +694,8 @@ class RelationshipGraphEngine:
         return payload
 
     async def build_relationship_graph(self, database_id: int, persist: bool = True) -> RelationshipGraphSnapshot:
+        if not package_is_enabled("relationship"):
+            raise ValueError("Relationship package is disabled by registry")
         database = await self._fetch_database(database_id)
         tables = await self._fetch_tables(database_id)
         if not tables:

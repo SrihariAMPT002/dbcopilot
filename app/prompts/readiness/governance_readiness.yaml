@@ -16,13 +16,13 @@ user_prompt: |
   Database: {{ database_name }}
   Database type: {{ database_type }}
   Column semantics:
-  {{ column_semantics | tojson }}
+  {{ column_semantics | default([]) | tojson }}
 
   Governance settings:
-  {{ governance_settings | tojson }}
+  {{ governance_settings | default({}) | tojson }}
 
   Semantic context:
-  {{ semantic | tojson }}
+  {{ semantic | default({}) | tojson }}
 
   Return JSON only with:
   {

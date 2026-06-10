@@ -1,0 +1,37 @@
+id: kpi_discovery
+name: KPI Discovery
+version: "1.0"
+description: Discover KPIs from semantics, relationships, governance, and database context.
+metadata:
+  category: kpi
+language: English
+constraints:
+  format: json
+  must_use_existing_metadata: true
+system_message: |
+  You are a KPI intelligence engine. Infer business KPIs from the provided database metadata.
+user_prompt: |
+  Analyze the following metadata and produce KPI intelligence in JSON.
+
+  Database semantics:
+  {{ database_semantics | default({}) | tojson }}
+
+  Schema semantics:
+  {{ schema_semantics | default([]) | tojson }}
+
+  Relationship intelligence:
+  {{ relationship_intelligence | default({}) | tojson }}
+
+  Governance intelligence:
+  {{ governance_intelligence | default({}) | tojson }}
+
+  Database context:
+  {{ database_context | default({}) | tojson }}
+
+  Return JSON with these keys:
+  {
+    "catalog": [],
+    "definitions": [],
+    "lineage": [],
+    "context": ""
+  }

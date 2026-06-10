@@ -26,6 +26,7 @@ from app.models.metadata import (
     SemanticGenerationStatus,
 )
 from app.config.manager import get_config_manager
+from app.config.package_registry import package_is_enabled
 from app.services.ai_observability_service import AIObservabilityService
 from app.config.prompts import get_prompt_registry
 
@@ -144,6 +145,12 @@ class ColumnSemanticService:
             "business_domain": semantic.business_domain if semantic else "",
             "analysis_notes": semantic.analysis_notes if semantic else "",
             "existing_business_glossary": semantic.business_glossary if semantic else [],
+            "governance_rulebook": self._governance_rulebook(),
+            "table_columns": [
+                {"name": item.name, "data_type": item.data_type, "description": item.description or ""}
+                for item in table.columns or []
+            ],
+            "unresolved_columns": [],
         }
 
     def _table_classification_context(
@@ -163,6 +170,7 @@ class ColumnSemanticService:
             "semantic_summary": semantic.business_summary if semantic else "",
             "analysis_notes": semantic.analysis_notes if semantic else "",
             "existing_business_glossary": semantic.business_glossary if semantic else [],
+            "governance_rulebook": self._governance_rulebook(),
             "table_columns": [
                 {"name": column.name, "data_type": column.data_type, "description": column.description or ""}
                 for column in table.columns or []
@@ -212,6 +220,8 @@ class ColumnSemanticService:
         return existing.metadata_fingerprint != fingerprint
 
     async def classify_column(self, column_id: int, force: bool = False) -> ColumnSemantic:
+        if not package_is_enabled("governance"):
+            raise ValueError("Governance package is disabled by registry")
         stage_start = time.monotonic()
         column, table, database = await self._fetch_table_with_column(column_id)
         existing = await self.get_by_column_id(column_id)
@@ -367,6 +377,8 @@ class ColumnSemanticService:
         return row
 
     async def _classify_table(self, table: DatabaseTable, database: ConnectedDatabase, force: bool = False) -> list[ColumnSemantic]:
+        if not package_is_enabled("governance"):
+            raise ValueError("Governance package is disabled by registry")
         semantic = await self._fetch_database_semantic(database.id)
         existing_rows = {row.column_id: row for row in await self.get_by_database_id(database.id)}
         unresolved: list[DatabaseColumn] = []
@@ -469,6 +481,8 @@ class ColumnSemanticService:
     async def generate_for_database(self, database_id: int, force: bool = False) -> list[ColumnSemantic]:
         """Governance engine: rule-first, table-batched AI, then targeted column fallback."""
         stage_start = time.monotonic()
+        if not package_is_enabled("governance"):
+            raise ValueError("Governance package is disabled by registry")
         database = await self._fetch_database(database_id)
         semantic = await self._fetch_database_semantic(database_id)
         if semantic is None or semantic.generation_status != SemanticGenerationStatus.completed:

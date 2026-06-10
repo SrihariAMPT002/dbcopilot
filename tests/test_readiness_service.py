@@ -194,6 +194,7 @@ async def test_readiness_breakdown_reports_category_scores():
         "relationship_readiness_score": 100,
         "ai_context_readiness_score": 100,
         "governance_readiness_score": 100,
+        "kpi_readiness_score": 0,
     }
     assert breakdown.overall_score >= 90
     assert breakdown.missing_stages == []
@@ -225,3 +226,45 @@ async def test_readiness_breakdown_surfaces_missing_stages():
     assert "governance" in breakdown.missing_stages
     assert any("PII intelligence" in hint for hint in breakdown.remediation_hints)
     assert any("Ownership metadata" in hint for hint in breakdown.remediation_hints)
+
+
+@pytest.mark.asyncio
+async def test_get_or_compute_hydrates_snapshot_ai_fields():
+    session = AsyncMock()
+    service = ReadinessService(session)
+
+    snapshot = SimpleNamespace(
+        readiness_status=ReadinessStatus.READY,
+        generated_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+        ai_summary="Persisted AI summary",
+        ai_recommendations='["Improve semantic coverage"]',
+        ai_risks='["KPI freshness is stale"]',
+        ai_roadmap='["Refresh KPI artifacts"]',
+        ai_confidence=0.87,
+        prompt_id="readiness_assessment",
+        prompt_version="2.0",
+        model_name="gpt-5-nano",
+    )
+
+    service._latest_snapshot = AsyncMock(return_value=snapshot)
+    service._fetch_database = AsyncMock(
+        return_value=SimpleNamespace(
+            id=1,
+            name="demo_db",
+            display_name="Demo DB",
+            last_sync_at=None,
+        )
+    )
+    service._collect_stats = AsyncMock(return_value=_good_stats())
+
+    breakdown = await service.get_or_compute(1)
+
+    assert breakdown.ai_summary == "Persisted AI summary"
+    assert breakdown.ai_recommendations == ["Improve semantic coverage"]
+    assert breakdown.ai_risks == ["KPI freshness is stale"]
+    assert breakdown.ai_roadmap == ["Refresh KPI artifacts"]
+    assert breakdown.ai_confidence == 0.87
+    assert breakdown.prompt_id == "readiness_assessment"
+    assert breakdown.prompt_version == "2.0"
+    assert breakdown.model_name == "gpt-5-nano"
+    assert service._collect_stats.await_count == 1

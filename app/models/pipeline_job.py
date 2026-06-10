@@ -25,6 +25,7 @@ class JobType(str, enum.Enum):
     artifact_packaging = "ARTIFACT_PACKAGING"
     readiness = "READINESS"
     relationship_graph = "RELATIONSHIP_GRAPH"
+    kpi = "KPI_INTELLIGENCE"
 
 
 class JobStatus(str, enum.Enum):

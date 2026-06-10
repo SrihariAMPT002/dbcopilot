@@ -7,7 +7,7 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.metadata import Base
@@ -40,6 +40,13 @@ class ReadinessSnapshot(Base):
     relationship_readiness_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     ai_context_readiness_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     governance_readiness_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    kpi_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    kpi_readiness_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_recommendations: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_risks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_roadmap: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_confidence: Mapped[float] = mapped_column(nullable=False, default=0.0)
     overall_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     prompt_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)

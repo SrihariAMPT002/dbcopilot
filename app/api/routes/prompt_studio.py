@@ -13,6 +13,7 @@ from app.db import get_db
 from app.schemas.api_schemas import (
     PromptStudioArtifactResponse,
     PromptStudioBundleResponse,
+    PromptInventoryReportResponse,
     PromptStudioTemplateListResponse,
 )
 from app.services.prompt_studio_service import PromptStudioService
@@ -23,6 +24,20 @@ logger = logging.getLogger(__name__)
 _VALID_ARTIFACT_TYPES = {member.value for member in PromptStudioService._artifact_order()} | {
     member.name for member in PromptStudioService._artifact_order()
 }
+
+
+@router.get(
+    "/inventory",
+    response_model=PromptInventoryReportResponse,
+    summary="Get prompt inventory and consumer report",
+)
+async def prompt_inventory(db: AsyncSession = Depends(get_db)) -> PromptInventoryReportResponse:
+    service = PromptStudioService(db)
+    try:
+        return PromptInventoryReportResponse(prompts=service.prompt_inventory_report())
+    except Exception as exc:
+        logger.error("Prompt inventory report failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to build prompt inventory report")
 
 
 @router.get(

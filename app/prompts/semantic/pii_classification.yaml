@@ -22,10 +22,10 @@ user_prompt: |
   Business domain: {{ business_domain }}
   Semantic summary: {{ semantic_summary }}
   Analysis notes: {{ analysis_notes }}
-  Business glossary: {{ existing_business_glossary | tojson }}
-  Governance rulebook: {{ governance_rulebook | tojson }}
-  Table columns: {{ table_columns | tojson }}
-  Unresolved columns: {{ unresolved_columns | tojson }}
+  Business glossary: {{ existing_business_glossary | default([]) | tojson }}
+  Governance rulebook: {{ governance_rulebook | default({}) | tojson }}
+  Table columns: {{ table_columns | default([]) | tojson }}
+  Unresolved columns: {{ unresolved_columns | default([]) | tojson }}
 
   Return JSON only with:
   {

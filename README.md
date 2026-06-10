@@ -2,85 +2,97 @@
 
 ## Overview
 
-DB Copilot is an AI Context Engineering Platform that transforms enterprise databases into AI-ready business context.
+DB Copilot is an AI context engineering platform that transforms enterprise databases into AI-ready business context.
 
-The platform connects to enterprise databases, discovers metadata, builds semantic understanding, generates retrieval-ready knowledge, and produces reusable AI context artifacts for chatbots, AI agents, RAG systems, copilots, and Text-to-SQL applications.
-
----
-
-# Key Capabilities
-
-* Database Connectivity
-* Metadata Discovery
-* Schema Exploration
-* Relationship Graph Generation
-* Semantic Intelligence
-* Embeddings & Retrieval
-* Prompt Studio
-* AI Readiness Assessment
-* Artifact Export Framework
+It connects to enterprise databases, discovers metadata, builds semantic understanding, generates retrieval-ready knowledge, and produces reusable AI context artifacts for chatbots, AI agents, RAG systems, copilots, and Text-to-SQL applications.
 
 ---
 
-# High-Level Architecture
+## Key Capabilities
 
+- Database Connectivity
+- Metadata Discovery
+- Schema Exploration
+- Relationship Graph Generation
+- Jobs Dashboard and Pipeline Monitoring
+- Semantic Intelligence
+- PII Classification and Governance Scoring
+- Embeddings & Retrieval
+- Prompt Studio
+- AI Readiness Assessment
+- Artifact Export Framework
+- AI Observability and Token Logging
+
+---
+
+## High-Level Architecture
+
+```text
 External Databases
-↓
+  ↓
 Metadata Discovery
-↓
+  ↓
 Schema Explorer
-↓
+  ↓
 Relationship Graph
-↓
+  ↓
+Relationship Clustering and Targeted AI Calls
+  ↓
 Semantic Intelligence
-↓
+  ↓
+PII Governance Classification
+  ↓
 Embeddings & Retrieval
-↓
+  ↓
 Prompt Studio
-↓
+  ↓
+Jobs Dashboard
+  ↓
 AI Context Artifacts
+```
 
 ---
 
-# Technology Stack
+## Technology Stack
 
-## Backend
+### Backend
 
-* FastAPI
-* Python 3.11
-* SQLAlchemy
-* Alembic
-* Pydantic
+- FastAPI
+- Python 3.11
+- SQLAlchemy
+- Alembic
+- Pydantic
 
-## Frontend
+### Frontend
 
-* Streamlit
+- Streamlit
 
-## Databases
+### Databases
 
-* PostgreSQL
-* MySQL
-* SQL Server
-* MongoDB
+- PostgreSQL
+- MySQL
+- SQL Server
+- MongoDB
 
-## AI & Semantic Layer
+### AI & Semantic Layer
 
-* Azure OpenAI
-* OpenAI SDK
-* Qdrant
-* Vector Embeddings
+- Azure OpenAI
+- OpenAI SDK
+- Qdrant
+- Vector Embeddings
+- LangSmith-compatible observability
 
-## Infrastructure
+### Infrastructure
 
-* Docker
-* Docker Compose
+- Docker
+- Docker Compose
 
 ---
 
-# Repository Structure
+## Repository Structure
 
+```text
 dbcopilot/
-
 app/
 ├── api/
 ├── config/
@@ -103,70 +115,91 @@ alembic/
 docker/
 scripts/
 tests/
+```
 
 ---
 
-# Core Modules
+## Core Modules
 
-## Connect Database
+### Connect Database
 
 Responsible for secure database connectivity and metadata synchronization.
 
-## Schema Explorer
+### Jobs Dashboard
+
+Provides pipeline visibility for queued, running, failed, and completed jobs.
+
+Supports retries, cancellation, and monitoring for the core AI stages.
+
+### Schema Explorer
 
 Provides visibility into schemas, tables, columns, and relationships.
 
-## Relationship Graph
+### Relationship Graph
 
 Builds entity relationships and dependency mapping.
 
-## Semantic Intelligence
+Relationship intelligence now uses clustered, targeted AI calls instead of sending the entire schema to one prompt.
+
+### Semantic Intelligence
 
 Generates business summaries, glossary terms, business entities, and use cases from metadata.
 
-## Embeddings & Retrieval
+Also powers governance-aware PII classification with rule-first and table-level fallback processing.
+
+### Embeddings & Retrieval
 
 Creates vector-searchable schema intelligence and semantic search capabilities.
 
-## Prompt Studio
+### Prompt Studio
 
 Generates AI-ready artifacts:
 
-* Database Context
-* System Prompt
-* RAG Context
-* Agent Context
-* Text-to-SQL Context
+- Database Context
+- System Prompt
+- RAG Context
+- Agent Context
+- Text-to-SQL Context
+- Database Intelligence Package
 
-## AI Readiness
+### AI Readiness
 
 Evaluates how prepared a database is for AI-driven applications.
 
----
+### Observability
 
-# Prerequisites
+AI calls now log estimated input tokens, prompt tokens, completion tokens, output size, and latency.
 
-Required:
+This improves visibility for semantic generation, PII classification, relationship intelligence, and embeddings.
 
-* Docker 24+
-* Docker Compose 2+
-* Python 3.11+
+### Governance
 
-Optional:
+Prompt templates now use defensive defaults for `tojson` fields so missing values do not break rendering.
 
-* Azure OpenAI Account
-* Qdrant Instance
+Readiness, relationship, system, and semantic prompts are safer to render with partial context.
 
 ---
 
-# Environment Setup
+## Prerequisites
 
-Create:
+### Required
 
-.env
+- Docker 24+
+- Docker Compose 2+
+- Python 3.11+
 
-Required variables:
+### Optional
 
+- Azure OpenAI Account
+- Qdrant Instance
+
+---
+
+## Environment Setup
+
+Create `.env` from `.env.example` and configure:
+
+```env
 DATABASE_URL=
 POSTGRES_USER=
 POSTGRES_PASSWORD=
@@ -180,100 +213,74 @@ QDRANT_HOST=
 QDRANT_PORT=
 
 ENCRYPTION_KEY=
+```
 
 ---
 
-# Running Locally
+## Running Locally
 
-Clone repository:
-
+```bash
 git clone <repo-url>
-
 cd dbcopilot
-
-Create environment file:
-
 cp .env.example .env
-
-Start services:
-
 docker compose up --build
+```
 
 ---
 
-# Access URLs
+## Access URLs
 
-Frontend
-
-http://localhost:8501
-
-Backend API
-
-http://localhost:8000
-
-Swagger Documentation
-
-http://localhost:8000/docs
-
-Health Endpoint
-
-http://localhost:8000/health
+- Frontend: `http://localhost:8501`
+- Backend API: `http://localhost:8000`
+- Swagger Documentation: `http://localhost:8000/docs`
+- Health Endpoint: `http://localhost:8000/health`
 
 ---
 
-# Development Workflow
+## Development Workflow
 
-Create Migration
+### Create Migration
 
+```bash
 alembic revision --autogenerate -m "message"
+```
 
-Apply Migration
+### Apply Migration
 
+```bash
 alembic upgrade head
+```
 
-Rollback Migration
+### Rollback Migration
 
+```bash
 alembic downgrade -1
+```
 
-Run Tests
+### Run Tests
 
+```bash
 pytest tests/
+```
 
 ---
 
-# Security
+## Security
 
-* Credentials encrypted at rest
-* Secrets stored in environment variables
-* No secrets committed to Git
-* No secrets baked into Docker images
-* Read-only metadata extraction
+- Credentials encrypted at rest
+- Secrets stored in environment variables
+- No secrets committed to Git
+- No secrets baked into Docker images
+- Read-only metadata extraction
 
 ---
 
-# Troubleshooting
+## Troubleshooting
 
-Common Issues
+Common issue:
 
-Migration Failures
+### Migration failures
 
+```bash
 alembic upgrade head
-
-Docker Rebuild
-
-docker compose down -v
-
-docker compose build --no-cache
-
-docker compose up
-
-Container Logs
-
-docker compose logs -f
-
----
-
-# License
-
-Internal Project
-Confidential
+```

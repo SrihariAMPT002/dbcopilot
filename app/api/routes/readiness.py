@@ -34,6 +34,7 @@ def _to_readiness_response(data: ReadinessBreakdown) -> ReadinessResponse:
             embeddings_score=data.embeddings_score,
             relationship_score=data.relationship_score,
             prompt_score=data.prompt_score,
+            kpi_score=data.kpi_readiness_score,
             overall_score=data.overall_score,
         ),
         category_scores=ReadinessCategoryScore(
@@ -42,16 +43,28 @@ def _to_readiness_response(data: ReadinessBreakdown) -> ReadinessResponse:
             relationship_readiness_score=data.relationship_readiness_score,
             ai_context_readiness_score=data.ai_context_readiness_score,
             governance_readiness_score=data.governance_readiness_score,
+            kpi_readiness_score=data.kpi_readiness_score,
             overall_score=data.overall_score,
         ),
         missing_stages=data.missing_stages,
         remediation_hints=data.remediation_hints,
+        prompt_id=data.prompt_id,
+        prompt_version=data.prompt_version,
+        model_name=data.model_name,
     )
 
 
 def _to_breakdown_response(data: ReadinessBreakdown) -> ReadinessBreakdownResponse:
     response = _to_readiness_response(data)
-    return ReadinessBreakdownResponse(**response.model_dump(), details=data.details)
+    return ReadinessBreakdownResponse(
+        **response.model_dump(),
+        details=data.details,
+        ai_summary=data.ai_summary,
+        ai_recommendations=data.ai_recommendations,
+        ai_risks=data.ai_risks,
+        ai_roadmap=data.ai_roadmap,
+        ai_confidence=data.ai_confidence,
+    )
 
 
 @router.get(

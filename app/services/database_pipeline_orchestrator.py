@@ -19,6 +19,7 @@ from app.models.pipeline_job import JobStatus, JobType
 from app.schema_engine.embeddings import EmbeddingEngine
 from app.schema_engine.enricher import SchemaEnricher
 from app.services.artifact_service import ArtifactService
+from app.services.kpi_intelligence_service import KPIIntelligenceService
 from app.services.mongodb_service import MongoDBService
 from app.services.pipeline_service import PipelineService
 from app.services.readiness_service import ReadinessService
@@ -78,6 +79,12 @@ class DatabasePipelineOrchestrator:
         )
         await self.pipeline.create_job(
             database_id=database_id,
+            job_type=JobType.kpi,
+            triggered_by=triggered_by,
+            parent_job_id=parent.id,
+        )
+        await self.pipeline.create_job(
+            database_id=database_id,
             job_type=JobType.prompt,
             triggered_by=triggered_by,
             parent_job_id=parent.id,
@@ -119,7 +126,7 @@ class DatabasePipelineOrchestrator:
                 logger.warning("Mongo registry refresh failed: %s", exc, exc_info=True)
 
         entities = await self._fetch_entities(database_id)
-        total_units = max(1, len(entities) * 2 + 4)  # semantic+embedding per entity + db stages
+        total_units = max(1, len(entities) * 2 + 5)  # semantic+embedding per entity + db stages
         completed_units = 0
 
         # Run per-entity semantic then embeddings
@@ -177,6 +184,20 @@ class DatabasePipelineOrchestrator:
         except Exception as exc:
             if rel_job_id:
                 await self.pipeline.update_status(rel_job_id, JobStatus.failed, failure_reason=str(exc), progress_percentage=0)
+        completed_units += 1
+        await self._update_parent_progress(parent_job_id, completed_units, total_units)
+
+        # KPI intelligence (db-level)
+        kpi_job_id = await self._db_stage_job_id(parent_job_id, JobType.kpi)
+        if kpi_job_id:
+            await self.pipeline.update_status(kpi_job_id, JobStatus.running, progress_percentage=10)
+        try:
+            await KPIIntelligenceService(self.db).generate_for_database(database_id, job_id=kpi_job_id)
+            if kpi_job_id:
+                await self.pipeline.update_status(kpi_job_id, JobStatus.completed, progress_percentage=100)
+        except Exception as exc:
+            if kpi_job_id:
+                await self.pipeline.update_status(kpi_job_id, JobStatus.failed, failure_reason=str(exc), progress_percentage=0)
         completed_units += 1
         await self._update_parent_progress(parent_job_id, completed_units, total_units)
 

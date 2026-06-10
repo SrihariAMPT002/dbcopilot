@@ -1,30 +1,21 @@
-"""
-AI Readiness page.
-"""
+"""AI Readiness page."""
 
 from __future__ import annotations
 
+import json
+
 import streamlit as st
 
-from components.api_client import (
-    get_connections,
-    get_readiness_breakdown,
-    recompute_readiness,
-)
+from components.api_client import get_connections, get_readiness_breakdown, recompute_readiness
 from components.sidebar import render_sidebar
 from components.source_terms import source_family
 
 
-st.set_page_config(
-    page_title="AI Readiness",
-    page_icon="",
-    layout="wide",
-)
-
+st.set_page_config(page_title="AI Readiness", page_icon="", layout="wide")
 render_sidebar()
 
 st.markdown("## AI Readiness")
-st.markdown("Deterministic orchestration intelligence for AI schema infrastructure.")
+st.markdown("Executive view of AI readiness across metadata, semantics, relationships, governance, and KPI intelligence.")
 st.markdown("---")
 
 ok, conns = get_connections()
@@ -62,7 +53,7 @@ with action_cols[0]:
             st.rerun()
         st.error(payload.get("error", "Readiness recompute failed"))
 with action_cols[1]:
-    st.info("Readiness checks metadata, semantics, embeddings, relationships, and prompt context.")
+    st.info("This page blends deterministic scores with an AI-written assessment and roadmap.")
 
 ok_breakdown, breakdown = get_readiness_breakdown(db_id)
 if not ok_breakdown:
@@ -77,11 +68,17 @@ if not category_scores:
         "semantic_readiness_score": int(scores.get("semantic_score", 0)),
         "relationship_readiness_score": int(scores.get("relationship_score", 0)),
         "ai_context_readiness_score": int(scores.get("prompt_score", 0)),
-        "governance_readiness_score": int(scores.get("embeddings_score", 0)),
+        "governance_readiness_score": int(scores.get("governance_score", scores.get("embeddings_score", 0))),
+        "kpi_readiness_score": int(scores.get("kpi_score", 0)),
         "overall_score": int(scores.get("overall_score", 0)),
     }
 status = breakdown.get("readiness_status", "NOT_READY")
 overall = int(category_scores.get("overall_score", scores.get("overall_score", 0)))
+ai_summary = breakdown.get("ai_summary") or "No AI assessment has been generated yet."
+ai_recommendations = breakdown.get("ai_recommendations", [])
+ai_risks = breakdown.get("ai_risks", [])
+ai_roadmap = breakdown.get("ai_roadmap", [])
+ai_confidence = float(breakdown.get("ai_confidence", 0.0))
 
 status_color = {
     "READY": "green",
@@ -91,101 +88,104 @@ status_color = {
 }.get(status, "gray")
 
 st.markdown(f"### Status: :{status_color}[{status}]")
-top = st.columns(6)
-top[0].metric("Overall", f"{overall}%")
-top[1].metric("Metadata", f"{int(category_scores.get('metadata_readiness_score', 0))}%")
-top[2].metric("Semantic", f"{int(category_scores.get('semantic_readiness_score', 0))}%")
-top[3].metric("Relationship", f"{int(category_scores.get('relationship_readiness_score', 0))}%")
-top[4].metric("AI Context", f"{int(category_scores.get('ai_context_readiness_score', 0))}%")
-top[5].metric("Governance", f"{int(category_scores.get('governance_readiness_score', 0))}%")
+score_cards = st.columns(6)
+score_cards[0].metric("Overall", f"{overall}%")
+score_cards[1].metric("Metadata", f"{int(category_scores.get('metadata_readiness_score', 0))}%")
+score_cards[2].metric("Semantic", f"{int(category_scores.get('semantic_readiness_score', 0))}%")
+score_cards[3].metric("Relationships", f"{int(category_scores.get('relationship_readiness_score', 0))}%")
+score_cards[4].metric("KPI", f"{int(category_scores.get('kpi_readiness_score', 0))}%")
+score_cards[5].metric("Confidence", f"{int(round(ai_confidence * 100))}%")
 
 st.progress(overall / 100.0, text=f"Overall Readiness: {overall}%")
 
-st.markdown("### Stage Progress")
-stage_cols = st.columns(5)
-stage_scores = [
+left, right = st.columns([1.2, 0.8])
+with left:
+    st.markdown("### Executive Assessment")
+    st.success(ai_summary)
+    st.markdown("#### Strengths")
+    strengths = breakdown.get("details", {}).get("ai_context", {})
+    st.write(
+        [
+            "Metadata, semantic, relationship, governance, and KPI signals are computed from current catalogued intelligence.",
+            "The deterministic score remains the primary readiness baseline.",
+            "AI assessment summarizes the state for leadership review.",
+        ]
+    )
+with right:
+    st.markdown("### Readiness Snapshot")
+    st.metric("Governance", f"{int(category_scores.get('governance_readiness_score', 0))}%")
+    st.metric("AI Context", f"{int(category_scores.get('ai_context_readiness_score', 0))}%")
+    st.metric("KPI", f"{int(category_scores.get('kpi_readiness_score', 0))}%")
+    st.metric("Status", status)
+
+domain_rows = [
     ("Metadata", int(category_scores.get("metadata_readiness_score", 0))),
     ("Semantic", int(category_scores.get("semantic_readiness_score", 0))),
     ("Relationship", int(category_scores.get("relationship_readiness_score", 0))),
     ("AI Context", int(category_scores.get("ai_context_readiness_score", 0))),
     ("Governance", int(category_scores.get("governance_readiness_score", 0))),
+    ("KPI", int(category_scores.get("kpi_readiness_score", 0))),
 ]
-for idx, (name, value) in enumerate(stage_scores):
-    with stage_cols[idx]:
-        st.markdown(f"**{name}**")
-        st.progress(value / 100.0)
-        st.caption(f"{value}%")
 
+st.markdown("### Domain Score Table")
+for name, value in domain_rows:
+    cols = st.columns([2, 1, 4])
+    cols[0].write(name)
+    cols[1].write(f"{value}%")
+    cols[2].progress(value / 100.0)
+
+details = breakdown.get("details", {})
 missing = breakdown.get("missing_stages", [])
 hints = breakdown.get("remediation_hints", [])
-details = breakdown.get("details", {})
 
-st.markdown("---")
-left, right = st.columns([1, 1])
-with left:
-    st.markdown("### Missing Stages")
-    if missing:
-        for item in missing:
-            st.warning(item.replace("_", " ").title())
+panel_left, panel_right = st.columns([1, 1])
+with panel_left:
+    st.markdown("### AI Assessment Panel")
+    st.markdown("**Risks**")
+    if ai_risks:
+        for item in ai_risks:
+            st.warning(item)
     else:
-        st.success("No missing stages detected.")
-
-with right:
-    st.markdown("### Remediation Actions")
-    if hints:
-        for hint in hints:
-            st.info(hint)
+        st.info("No major AI risks identified.")
+    st.markdown("**Recommendations**")
+    if ai_recommendations:
+        for item in ai_recommendations:
+            st.info(item)
     else:
-        st.success("No remediation required.")
+        st.info("No AI recommendations returned.")
+with panel_right:
+    st.markdown("### Readiness Roadmap Panel")
+    if ai_roadmap:
+        for item in ai_roadmap:
+            st.write(f"- {item}")
+    else:
+        st.info("No roadmap returned yet.")
+    st.caption("Roadmap is guided by deterministic coverage gaps and AI-written prioritization.")
 
-st.markdown("### Pipeline Coverage Details")
-detail_cols = st.columns(4)
-metadata_details = details.get("metadata", {})
-semantic_details = details.get("semantic", {})
-relationship_details = details.get("relationships", {})
-ai_context_details = details.get("ai_context", {})
-governance_details = details.get("governance", {})
-embedding_details = details.get("embeddings", {})
+st.markdown("### Remediation Recommendations")
+if hints:
+    for hint in hints:
+        st.info(hint)
+else:
+    st.success("No remediation required.")
 
-detail_cols[0].metric("Schemas", metadata_details.get("schemas", 0))
-detail_cols[1].metric("Tables/Entities", metadata_details.get("tables", 0))
-detail_cols[2].metric("Columns/Fields", metadata_details.get("columns", 0))
-detail_cols[3].metric("Relationships", metadata_details.get("relationships", 0))
+st.markdown("### Missing Stages")
+if missing:
+    for item in missing:
+        st.warning(item.replace("_", " ").title())
+else:
+    st.success("No missing stages detected.")
 
-detail_cols2 = st.columns(3)
-detail_cols2[0].metric("Schema Docs", metadata_details.get("schemas_with_description", 0))
-detail_cols2[1].metric("Table Docs", metadata_details.get("tables_with_description", 0))
-detail_cols2[2].metric("Column Docs", metadata_details.get("columns_with_description", 0))
-
-st.markdown("### Coverage Signals")
-signal_cols = st.columns(4)
-signal_cols[0].metric("Semantic Tables", semantic_details.get("schema_semantics", 0))
-signal_cols[1].metric("Graph Edges", relationship_details.get("graph_edges", 0))
-signal_cols[2].metric("Prompt Artifacts", ai_context_details.get("prompt_artifacts_rendered", 0))
-signal_cols[3].metric("Column Semantics", governance_details.get("column_semantics", 0))
-
-st.markdown("### Governance & AI Context")
-governance_cols = st.columns(6)
-governance_cols[0].metric("PII Identified", f"{governance_details.get('pii_identified_coverage', governance_details.get('pii_coverage', 0))}%")
-governance_cols[1].metric("PII Classified", f"{governance_details.get('pii_classified_coverage', 0)}%")
-governance_cols[2].metric("PII Columns", governance_details.get("pii_columns", 0))
-governance_cols[3].metric("Prompt Protection", "On" if governance_details.get("prompt_protection_enabled") else "Off")
-governance_cols[4].metric("Embedding Protection", "On" if governance_details.get("embedding_protection_enabled") else "Off")
-governance_cols[5].metric("PII Risk Tagged", governance_details.get("pii_risk_tagged_columns", 0))
-
-detail_cols3 = st.columns(2)
-detail_cols3[0].metric("Prompt Context Len", ai_context_details.get("prompt_context_length", 0))
-detail_cols3[1].metric("Embedding Coverage", embedding_details.get("completed_tables", 0))
-
-st.markdown("### Coverage Breakdown")
-coverage_cols = st.columns(2)
-with coverage_cols[0]:
-    st.markdown("#### Metadata")
-    st.json(metadata_details)
-with coverage_cols[1]:
-    st.markdown("#### Semantic / AI Context")
-    st.json({
-        "semantic": semantic_details,
-        "ai_context": ai_context_details,
-        "governance": governance_details,
-    })
+st.markdown("### Raw Snapshot Preview")
+st.code(
+    json.dumps(
+        {
+            "database_id": db_id,
+            "overall_score": overall,
+            "ai_confidence": ai_confidence,
+            "status": status,
+        },
+        indent=2,
+    ),
+    language="json",
+)

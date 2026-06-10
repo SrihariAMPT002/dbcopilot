@@ -1,0 +1,48 @@
+packages:
+  governance:
+    enabled: true
+    ui_visibility: true
+    readiness_enabled: true
+    artifacts:
+      - column_semantics
+      - database_semantic
+      - governance_readiness
+  semantic:
+    enabled: true
+    ui_visibility: true
+    readiness_enabled: true
+    artifacts:
+      - semantic_summary
+      - database_context
+      - system_prompt
+  relationship:
+    enabled: true
+    ui_visibility: true
+    readiness_enabled: true
+    artifacts:
+      - relationship_graph
+      - relationship_intelligence
+  rag:
+    enabled: true
+    ui_visibility: true
+    readiness_enabled: true
+    artifacts:
+      - rag_context
+      - embeddings
+  agent:
+    enabled: true
+    ui_visibility: true
+    readiness_enabled: true
+    artifacts:
+      - agent_context
+  text_to_sql:
+    enabled: true
+    ui_visibility: true
+    readiness_enabled: true
+    artifacts:
+      - text_to_sql_context
+  kpi:
+    enabled: true
+    ui_visibility: true
+    readiness_enabled: true
+    artifacts: []

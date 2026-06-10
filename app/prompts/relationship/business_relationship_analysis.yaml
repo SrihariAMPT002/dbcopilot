@@ -15,10 +15,10 @@ user_prompt: |
   Database: {{ database_name }}
   Database type: {{ database_type }}
   Relationship graph:
-  {{ relationship_graph | tojson }}
+  {{ relationship_graph | default({}) | tojson }}
 
   Semantic context:
-  {{ semantic | tojson }}
+  {{ semantic | default({}) | tojson }}
 
   Return JSON only with:
   {

@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config.prompts import PromptRegistry, get_prompt_registry
+from app.config.package_registry import package_artifacts, package_is_enabled
 from app.core.config import settings
 from app.models.artifact_manifest import ArtifactType
 from app.models.column_semantic import ColumnSemantic
@@ -229,7 +230,39 @@ class PromptStudioService:
             )
         return templates
 
+    def prompt_inventory_report(self) -> list[dict[str, Any]]:
+        consumers = {
+            "semantic/database_analysis": "app.services.database_semantic_service",
+            "semantic/pii_classification": "app.services.column_semantic_service",
+            "relationship/relationship_discovery": "app.schema_engine.relationship_graph",
+            "relationship/business_relationship_analysis": "app.schema_engine.relationship_graph",
+            "kpi/kpi_discovery": "app.services.kpi_intelligence_service",
+            "readiness/readiness_assessment": "app.services.readiness_service",
+            "readiness/governance_readiness": "app.services.readiness_service",
+            "system/database_context": "app.services.prompt_studio_service",
+            "system/rag_context": "app.services.prompt_studio_service",
+            "system/system_prompt": "app.services.prompt_studio_service",
+            "system/agent_context": "app.services.prompt_studio_service",
+            "system/text_to_sql": "app.services.prompt_studio_service",
+        }
+        inventory: list[dict[str, Any]] = []
+        for prompt_path in self.registry.list_prompts():
+            category, prompt_id = prompt_path.split("/", 1) if "/" in prompt_path else ("", prompt_path)
+            consumer = consumers.get(prompt_path) or consumers.get(prompt_id) or "unknown"
+            inventory.append(
+                {
+                    "prompt": prompt_id,
+                    "category": category,
+                    "executed": consumer != "unknown",
+                    "loaded_only": consumer == "unknown",
+                    "consumer": consumer,
+                }
+            )
+        return inventory
+
     async def preview_artifact(self, database_id: int, artifact_type: str) -> PromptStudioArtifact:
+        if not package_is_enabled("agent"):
+            raise ValueError("Prompt Studio package is disabled by registry")
         context = await self._build_context(database_id)
         package = await self._generate_context_package(artifact_type, context)
         return PromptStudioArtifact(
@@ -245,6 +278,8 @@ class PromptStudioService:
         )
 
     async def generate_artifacts(self, database_id: int) -> list[dict[str, Any]]:
+        if not package_is_enabled("agent"):
+            raise ValueError("Prompt Studio package is disabled by registry")
         context = await self._build_context(database_id)
         generated: list[dict[str, Any]] = []
 
@@ -271,6 +306,8 @@ class PromptStudioService:
         return generated
 
     async def download_artifact(self, database_id: int, artifact_type: str) -> PromptStudioArtifact:
+        if not package_is_enabled("agent"):
+            raise ValueError("Prompt Studio package is disabled by registry")
         latest = await self._latest_manifest(database_id, artifact_type)
         if latest:
             content = Path(latest.artifact_path).read_text(encoding="utf-8")
@@ -288,6 +325,8 @@ class PromptStudioService:
         return await self.preview_artifact(database_id, artifact_type)
 
     async def download_bundle(self, database_id: int) -> dict[str, Any]:
+        if not package_is_enabled("agent"):
+            raise ValueError("Prompt Studio package is disabled by registry")
         artifacts = []
         artifact_payloads = []
         for artifact_type in self._artifact_order():
@@ -602,13 +641,16 @@ class PromptStudioService:
 
     @staticmethod
     def _artifact_order() -> list[ArtifactType]:
-        return [
+        enabled_artifacts = set(package_artifacts("semantic")) | set(package_artifacts("rag")) | set(package_artifacts("agent")) | set(package_artifacts("text_to_sql"))
+        ordered = [ArtifactType.resolve(name) for name in dict.fromkeys(enabled_artifacts) if name]
+        preferred = [
             ArtifactType.database_context,
             ArtifactType.system_prompt,
             ArtifactType.rag_context,
             ArtifactType.agent_context,
             ArtifactType.text_to_sql_context,
         ]
+        return [artifact for artifact in preferred if artifact.value in enabled_artifacts or artifact.name in enabled_artifacts] or ordered
 
     @staticmethod
     def _artifact_enum(value: str | ArtifactType) -> ArtifactType:

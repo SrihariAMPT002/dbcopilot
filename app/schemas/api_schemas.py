@@ -443,6 +443,7 @@ class ReadinessCapabilityScore(BaseModel):
     embeddings_score: int
     relationship_score: int
     prompt_score: int
+    kpi_score: int = 0
     overall_score: int
 
 
@@ -452,6 +453,7 @@ class ReadinessCategoryScore(BaseModel):
     relationship_readiness_score: int
     ai_context_readiness_score: int
     governance_readiness_score: int
+    kpi_readiness_score: int = 0
     overall_score: int
 
 
@@ -464,10 +466,18 @@ class ReadinessResponse(BaseModel):
     category_scores: ReadinessCategoryScore
     missing_stages: List[str] = Field(default_factory=list)
     remediation_hints: List[str] = Field(default_factory=list)
+    prompt_id: Optional[str] = None
+    prompt_version: Optional[str] = None
+    model_name: Optional[str] = None
 
 
 class ReadinessBreakdownResponse(ReadinessResponse):
     details: Dict[str, Any] = Field(default_factory=dict)
+    ai_summary: Optional[str] = None
+    ai_recommendations: List[str] = Field(default_factory=list)
+    ai_risks: List[str] = Field(default_factory=list)
+    ai_roadmap: List[str] = Field(default_factory=list)
+    ai_confidence: float = 0.0
 
 
 # ── Pipeline Operations ────────────────────────────────────────────────────────
@@ -616,6 +626,18 @@ class PromptStudioTemplateItem(BaseModel):
 
 class PromptStudioTemplateListResponse(BaseModel):
     templates: List[PromptStudioTemplateItem] = Field(default_factory=list)
+
+
+class PromptInventoryItemResponse(BaseModel):
+    prompt: str
+    category: str
+    executed: bool
+    loaded_only: bool
+    consumer: str
+
+
+class PromptInventoryReportResponse(BaseModel):
+    prompts: List[PromptInventoryItemResponse] = Field(default_factory=list)
 
 
 class PromptStudioArtifactItem(BaseModel):

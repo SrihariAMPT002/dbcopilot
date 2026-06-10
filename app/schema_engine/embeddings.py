@@ -36,6 +36,7 @@ from app.models.metadata import (
 )
 from app.services.ai_observability_service import AIObservabilityService
 from app.utils import safe_flush, truncate
+from app.config.package_registry import package_is_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -496,6 +497,8 @@ class EmbeddingEngine:
     @_traceable("generate_database_embeddings", run_type="chain")
     async def generate_database_embeddings(self, database_id: int) -> EmbeddingBatchResult:
         start = time.perf_counter()
+        if not package_is_enabled("rag"):
+            raise ValueError("RAG package is disabled by registry")
         database = await self._fetch_database(database_id)
         tables = await self._fetch_tables(database_id)
 
@@ -564,6 +567,8 @@ class EmbeddingEngine:
     @_traceable("generate_table_embeddings", run_type="chain")
     async def generate_table_embeddings(self, database_id: int, table_id: int) -> EmbeddingBatchResult:
         start = time.perf_counter()
+        if not package_is_enabled("rag"):
+            raise ValueError("RAG package is disabled by registry")
         database = await self._fetch_database(database_id)
         table = await self._fetch_table(table_id)
         semantic = await self._fetch_semantic_summary(table_id)

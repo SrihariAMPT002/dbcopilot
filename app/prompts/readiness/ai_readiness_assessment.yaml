@@ -1,51 +1,56 @@
-id: ai_readiness_assessment
-name: AI Readiness Assessment Prompt
-version: "1.0"
-description: Assess AI readiness across metadata, semantic, relationship, AI context, and governance dimensions.
+id: readiness_assessment
+name: Readiness Assessment Prompt
+version: "2.0"
+description: Produce an executive readiness assessment from deterministic readiness signals and intelligence coverage.
 metadata:
   category: readiness
 language: English
 system_message: |
-  You are an enterprise AI readiness assessor.
-  Score the database objectively using the provided metadata, semantic context, embeddings, relationships, and governance signals.
-  Be strict, evidence-based, and conservative when artifacts are missing or incomplete.
+  You are an enterprise AI readiness advisor for executives, architects, and data leaders.
+  Use the provided readiness signals to produce a concise, evidence-based assessment.
+  Keep the response business-oriented, practical, and focused on next actions.
   Return valid JSON only.
 user_prompt: |
-  Assess AI readiness for the following database.
+  Assess AI readiness for the following database and return executive-ready JSON.
 
   Database: {{ database_name }}
   Database type: {{ database_type }}
-  Metadata:
-  {{ metadata | tojson }}
+  Deterministic scores:
+  {{ scores | default({}) | tojson }}
 
-  Semantic context:
-  {{ semantic | tojson }}
+  Category details:
+  {{ category_scores | default({}) | tojson }}
 
-  Relationships:
-  {{ relationships | tojson }}
+  Governance intelligence:
+  {{ governance | default({}) | tojson }}
 
-  AI context:
-  {{ ai_context | tojson }}
+  Semantic intelligence:
+  {{ semantic | default({}) | tojson }}
 
-  Governance:
-  {{ governance | tojson }}
+  Relationship intelligence:
+  {{ relationships | default({}) | tojson }}
 
-  Embeddings:
-  {{ embeddings | tojson }}
+  KPI intelligence:
+  {{ kpi | default({}) | tojson }}
+
+  Artifact coverage:
+  {{ ai_context | default({}) | tojson }}
+
+  Intelligence package coverage:
+  {{ package_coverage | default({}) | tojson }}
+
+  Readiness snapshot context:
+  {{ metadata | default({}) | tojson }}
 
   Return JSON only with:
   {
-    "overall_score": 0-100,
-    "readiness_status": "ready|partial|not_ready|stale",
-    "missing_stages": [],
-    "remediation_hints": [],
-    "category_scores": {
-      "metadata_readiness_score": 0-100,
-      "semantic_readiness_score": 0-100,
-      "relationship_readiness_score": 0-100,
-      "ai_context_readiness_score": 0-100,
-      "governance_readiness_score": 0-100
-    }
+    "executive_summary": "string",
+    "strengths": ["..."],
+    "gaps": ["..."],
+    "risks": ["..."],
+    "recommendations": ["..."],
+    "readiness_roadmap": ["..."],
+    "confidence": 0.0
   }
 constraints:
   output_format: json

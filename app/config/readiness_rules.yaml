@@ -1,21 +1,57 @@
 # Readiness Scoring & Assessment Rules
-# Defines how databases are scored for AI readiness across 5 dimensions
-# Legacy compatibility: older "embeddings" and "prompt" labels are now folded
-# into the richer AI Context and Governance readiness categories.
-# Version: 1.0.0
-# Last Updated: 2026-06-01
+# Single source of truth for readiness dimensions, weights, stages, and KPI rules.
+# Version: 2.0.0
+# Last Updated: 2026-06-10
 
-scoring:
-  # Component weights must sum to 1.0
+readiness:
+  dimensions:
+    - metadata
+    - semantic
+    - relationship
+    - ai_context
+    - governance
+    - kpi
+
+  stages:
+    - metadata
+    - semantic
+    - relationships
+    - ai_context
+    - governance
+    - kpi
+
   weights:
-    metadata: 0.24        # Schema/table/column documentation completeness (24%)
-    semantic: 0.24        # Database semantic intelligence coverage (24%)
-    relationship: 0.20    # Relationship graph discovery coverage (20%)
-    ai_context: 0.18      # Prompt package and context artifact readiness (18%)
-    governance: 0.14      # PII, documentation, and ownership readiness (14%)
+    metadata: 0.24
+    semantic: 0.24
+    relationship: 0.20
+    ai_context: 0.18
+    governance: 0.10
+    kpi: 0.04
 
-  # Each component is independently scored 0-100
-  # Then combined using weights to get overall_score: 0-100
+  thresholds:
+    ready:
+      min_score: 85
+      missing_stages_allowed: 0
+      description: "Database is AI-ready for production use"
+    partial:
+      min_score: 40
+      missing_stages_allowed: 1
+      description: "Database has some AI readiness but gaps remain"
+    not_ready:
+      min_score: 0
+      max_score: 40
+      missing_stages_allowed: 2
+      description: "Database needs significant work before AI use"
+
+  kpi:
+    enabled: true
+    min_kpi_count: 1
+    freshness_required: true
+    coverage_target_per_10_columns: 1
+    weights:
+      coverage: 0.40
+      freshness: 0.35
+      confidence: 0.25
 
 # Status thresholds based on overall score
 status_thresholds:

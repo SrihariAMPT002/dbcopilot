@@ -181,6 +181,14 @@ def generate_prompt_artifacts(db_id: int) -> Tuple[bool, Any]:
     return _post(f"/prompt-studio/generate/{db_id}", {}, timeout=PROMPT_STUDIO_TIMEOUT)
 
 
+def generate_kpi_intelligence(db_id: int) -> Tuple[bool, Any]:
+    return _post(f"/kpi-intelligence/generate/{db_id}", {}, timeout=SYNC_TIMEOUT)
+
+
+def get_kpi_intelligence(db_id: int) -> Tuple[bool, Any]:
+    return _get(f"/kpi-intelligence/{db_id}")
+
+
 def preview_prompt_artifact(db_id: int, artifact_type: str) -> Tuple[bool, Any]:
     return _get(f"/prompt-studio/preview/{db_id}/{artifact_type}")
 

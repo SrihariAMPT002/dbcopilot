@@ -15,13 +15,13 @@ user_prompt: |
   Database: {{ database_name }}
   Database type: {{ database_type }}
   Schemas and tables:
-  {{ schema_summary | tojson }}
+  {{ schema_summary | default([]) | tojson }}
 
   Existing relationships:
-  {{ relationships | tojson }}
+  {{ relationships | default([]) | tojson }}
 
   Column context:
-  {{ columns | tojson }}
+  {{ columns | default([]) | tojson }}
 
   Return JSON only with:
   {
