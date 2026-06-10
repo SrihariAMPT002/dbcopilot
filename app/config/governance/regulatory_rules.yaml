@@ -1,0 +1,82 @@
+version: "1.1"
+category: regulatory
+description: "Regulatory mappings for governance and downstream redaction controls."
+frameworks:
+  gdpr:
+    enabled: true
+    scope:
+      - identity
+      - contact
+      - government
+      - location
+      - behavioral
+    principles:
+      - data_minimization
+      - purpose_limitation
+      - storage_limitation
+      - privacy_by_design
+    sensitive_categories:
+      - pii
+      - health
+      - financial_operations
+      - credentials_and_access
+  ccpa:
+    enabled: true
+    scope:
+      - identity
+      - contact
+      - customer
+      - behavioral
+      - location
+    principles:
+      - notice_at_collection
+      - right_to_know
+      - right_to_delete
+      - do_not_sell
+  hipaa:
+    enabled: true
+    scope:
+      - healthcare
+      - health_and_wellbeing
+    principles:
+      - minimum_necessary
+      - safeguard_information
+      - access_control
+      - audit_control
+  pci_dss:
+    enabled: true
+    scope:
+      - financial
+      - credentials_and_access
+    principles:
+      - protect_cardholder_data
+      - restrict_access
+      - encrypt_transmission
+  sox:
+    enabled: true
+    scope:
+      - financial_operations
+      - strategic_information
+      - operational_sensitivity
+    principles:
+      - integrity_of_reporting
+      - access_logging
+      - change_control
+  iso_27001:
+    enabled: true
+    scope:
+      - identity
+      - financial
+      - healthcare
+      - credentials_and_access
+      - strategic_information
+      - operational_sensitivity
+    principles:
+      - confidentiality
+      - integrity
+      - availability
+      - risk_management
+      - supplier_security
+mapping_notes:
+  - "Regulatory categories may overlap and should be evaluated cumulatively."
+  - "A column can map to multiple frameworks and retain the highest risk level."

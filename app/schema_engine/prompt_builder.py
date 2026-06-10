@@ -22,6 +22,8 @@ from app.models.metadata import (
     DatabaseTable,
 )
 
+from app.services.prompt_studio_service import PromptStudioService
+
 logger = logging.getLogger(__name__)
 
 

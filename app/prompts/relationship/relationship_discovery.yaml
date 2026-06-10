@@ -1,0 +1,34 @@
+id: relationship_discovery
+name: Relationship Discovery Prompt
+version: "1.0"
+description: Infer and validate database table relationships from schema metadata.
+metadata:
+  category: relationship
+language: English
+system_message: |
+  You are a relationship discovery engine.
+  Analyze table, column, and foreign key metadata to identify reliable joins and relationship structure.
+  Prefer explicit relationships over inferred ones and return JSON only.
+user_prompt: |
+  Analyze the following database relationship metadata.
+
+  Database: {{ database_name }}
+  Database type: {{ database_type }}
+  Schemas and tables:
+  {{ schema_summary | tojson }}
+
+  Existing relationships:
+  {{ relationships | tojson }}
+
+  Column context:
+  {{ columns | tojson }}
+
+  Return JSON only with:
+  {
+    "relationship_candidates": [],
+    "validated_relationships": [],
+    "isolated_tables": [],
+    "notes": ""
+  }
+constraints:
+  output_format: json

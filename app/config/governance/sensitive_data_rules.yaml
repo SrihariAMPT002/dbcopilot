@@ -1,0 +1,112 @@
+version: "1.1"
+category: sensitive_data
+description: "Enterprise sensitive data taxonomy beyond direct PII."
+categories:
+  financial_operations:
+    label: "Financial Operations"
+    risk_level: high
+    examples:
+      - salary
+      - revenue
+      - margin
+      - pricing
+      - contract_value
+      - contract_values
+      - vendor_rate
+      - vendor_rates
+      - procurement_spend
+      - forecast
+      - forecasts
+      - strategic_plan
+      - strategic_plans
+    synonyms:
+      - comp
+      - compensation
+      - bill_rate
+      - rate_card
+      - cost_basis
+  commercial_terms:
+    label: "Commercial Terms"
+    risk_level: medium
+    examples:
+      - discount
+      - rebate
+      - pricing
+      - quote_amount
+      - proposal_value
+      - deal_value
+    synonyms:
+      - rate
+      - markup
+      - margin_percent
+  strategic_information:
+    label: "Strategic Information"
+    risk_level: high
+    examples:
+      - strategic_plan
+      - roadmap
+      - acquisition_target
+      - merger_plan
+      - board_pack
+      - budget_forecast
+    synonyms:
+      - roadmap
+      - planning_doc
+      - initiative_tracker
+  operational_sensitivity:
+    label: "Operational Sensitivity"
+    risk_level: medium
+    examples:
+      - vendor_rate
+      - supplier_rate
+      - procurement_spend
+      - inventory_cost
+      - internal_score
+      - risk_score
+    synonyms:
+      - op_rate
+      - internal_metric
+      - confidential_metric
+  credentials_and_access:
+    label: "Credentials and Access"
+    risk_level: critical
+    examples:
+      - api_key
+      - secret
+      - token
+      - password
+      - refresh_token
+      - oauth_token
+    synonyms:
+      - auth_key
+      - bearer_token
+      - access_token
+      - session_secret
+  health_and_wellbeing:
+    label: "Health and Wellbeing"
+    risk_level: critical
+    examples:
+      - diagnosis
+      - treatment
+      - prescription
+      - medical_record
+      - patient_condition
+    synonyms:
+      - clinical_note
+      - health_status
+  geo_behavioral:
+    label: "Geo and Behavioral"
+    risk_level: medium
+    examples:
+      - geo_coordinates
+      - browsing_history
+      - clickstream
+      - device_id
+      - session_id
+      - location_trace
+    synonyms:
+      - lat_lon
+      - activity_log
+      - telemetry
+defaults:
+  risk_level: medium

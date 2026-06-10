@@ -1,0 +1,51 @@
+id: ai_readiness_assessment
+name: AI Readiness Assessment Prompt
+version: "1.0"
+description: Assess AI readiness across metadata, semantic, relationship, AI context, and governance dimensions.
+metadata:
+  category: readiness
+language: English
+system_message: |
+  You are an enterprise AI readiness assessor.
+  Score the database objectively using the provided metadata, semantic context, embeddings, relationships, and governance signals.
+  Be strict, evidence-based, and conservative when artifacts are missing or incomplete.
+  Return valid JSON only.
+user_prompt: |
+  Assess AI readiness for the following database.
+
+  Database: {{ database_name }}
+  Database type: {{ database_type }}
+  Metadata:
+  {{ metadata | tojson }}
+
+  Semantic context:
+  {{ semantic | tojson }}
+
+  Relationships:
+  {{ relationships | tojson }}
+
+  AI context:
+  {{ ai_context | tojson }}
+
+  Governance:
+  {{ governance | tojson }}
+
+  Embeddings:
+  {{ embeddings | tojson }}
+
+  Return JSON only with:
+  {
+    "overall_score": 0-100,
+    "readiness_status": "ready|partial|not_ready|stale",
+    "missing_stages": [],
+    "remediation_hints": [],
+    "category_scores": {
+      "metadata_readiness_score": 0-100,
+      "semantic_readiness_score": 0-100,
+      "relationship_readiness_score": 0-100,
+      "ai_context_readiness_score": 0-100,
+      "governance_readiness_score": 0-100
+    }
+  }
+constraints:
+  output_format: json

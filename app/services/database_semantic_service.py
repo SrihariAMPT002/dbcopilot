@@ -23,6 +23,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.config.prompts import get_semantic_prompt
+from app.config.prompts import get_prompt_registry
 from app.models.metadata import (
     ConnectedDatabase,
     DatabaseColumn,
@@ -325,12 +326,15 @@ class DatabaseSemanticService:
             select(ConnectedDatabase)
             .where(ConnectedDatabase.id == source_id)
             .options(
-                selectinload(ConnectedDatabase.schemas).selectinload(DatabaseSchema.tables).selectinload(
-                    DatabaseTable.columns
-                ),
+                selectinload(ConnectedDatabase.schemas)
+                .selectinload(DatabaseSchema.tables)
+                .selectinload(DatabaseTable.columns),
                 selectinload(ConnectedDatabase.schemas)
                 .selectinload(DatabaseSchema.tables)
                 .selectinload(DatabaseTable.relationships_from),
+                selectinload(ConnectedDatabase.schemas)
+                .selectinload(DatabaseSchema.tables)
+                .selectinload(DatabaseTable.schema),
             )
         )
         return result.scalars().unique().first()
@@ -613,6 +617,11 @@ class DatabaseSemanticService:
         rendered_prompt = get_semantic_prompt(prompt_variables)
 
         observability = AIObservabilityService()
+        system_prompt = get_prompt_registry().render_prompt(
+            "system_prompt",
+            {"database_name": database.display_name or database.name},
+            category="system",
+        ).system_message
         ai_result = await observability.generate(
             operation="chat",
             module="semantic_intelligence",
@@ -625,12 +634,7 @@ class DatabaseSemanticService:
             messages=[
                 {
                     "role": "system",
-                    "content": rendered_prompt.system_message
-                    or (
-                        "You are an Enterprise Data Architect specializing in semantic analysis. "
-                        "Analyze database metadata and provide business insights. "
-                        "ALWAYS respond with valid JSON only, no markdown, no explanations."
-                    ),
+                    "content": rendered_prompt.system_message or system_prompt,
                 },
                 {"role": "user", "content": rendered_prompt.user_prompt},
             ],

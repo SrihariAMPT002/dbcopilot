@@ -1,9 +1,9 @@
 """
 Centralized AI observability wrapper for Azure OpenAI calls.
 
-This service keeps Langfuse instrumentation lightweight and optional:
-- If Langfuse is configured and installed, traces are emitted.
-- If Langfuse is unavailable, the underlying AI call still runs normally.
+This service keeps LangSmith instrumentation lightweight and optional:
+- If LangSmith is configured and installed, traces are emitted.
+- If LangSmith is unavailable, the underlying AI call still runs normally.
 
 The wrapper is intentionally framework-agnostic and does not introduce any
 agent libraries or alternate LLM stacks.
@@ -12,6 +12,7 @@ agent libraries or alternate LLM stacks.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from contextlib import nullcontext
@@ -29,9 +30,11 @@ except Exception:  # pragma: no cover - optional dependency.
     AzureOpenAI = None
 
 try:  # Optional dependency.
-    from langfuse import Langfuse
+    from langsmith.run_helpers import trace as langsmith_trace
+    from langsmith.run_helpers import tracing_context as langsmith_tracing_context
 except Exception:  # pragma: no cover - optional dependency.
-    Langfuse = None
+    langsmith_trace = None
+    langsmith_tracing_context = None
 
 
 OperationType = Literal["chat", "embeddings"]
@@ -57,14 +60,13 @@ class AIObservationResult:
 
 
 class AIObservabilityService:
-    """Lightweight wrapper around Azure OpenAI with optional Langfuse tracing."""
+    """Lightweight wrapper around Azure OpenAI with optional LangSmith tracing."""
 
     _chat_client: Optional[Any] = None
     _embedding_client: Optional[Any] = None
-    _langfuse: Optional[Any] = None
 
     def __init__(self) -> None:
-        self._langfuse_client = self._get_langfuse_client()
+        self._langsmith_enabled = bool(settings.langsmith_tracing and langsmith_trace is not None)
 
     @classmethod
     def _resolve_openai_client(
@@ -103,41 +105,6 @@ class AIObservabilityService:
         logger.debug("Initialized Azure OpenAI %s client for deployment %s", "embedding" if embedding else "chat", deployment)
         return client
 
-    @classmethod
-    def _get_langfuse_client(cls) -> Optional[Any]:
-        """Return a cached Langfuse client when credentials are configured."""
-        if cls._langfuse is not None:
-            return cls._langfuse
-
-        if Langfuse is None:
-            return None
-
-        if not (
-            settings.langfuse_public_key
-            and settings.langfuse_secret_key
-            and settings.langfuse_host
-        ):
-            return None
-
-        try:
-            cls._langfuse = Langfuse(
-                public_key=settings.langfuse_public_key,
-                secret_key=settings.langfuse_secret_key,
-                host=settings.langfuse_host,
-            )
-        except TypeError:
-            cls._langfuse = Langfuse(
-                public_key=settings.langfuse_public_key,
-                secret_key=settings.langfuse_secret_key,
-                base_url=settings.langfuse_host,
-            )
-        except Exception as exc:  # pragma: no cover - best-effort instrumentation.
-            logger.warning("Langfuse initialization failed: %s", exc)
-            cls._langfuse = None
-            return None
-
-        return cls._langfuse
-
     @staticmethod
     def _usage_from_response(response: Any) -> dict[str, int]:
         usage = getattr(response, "usage", None)
@@ -168,7 +135,7 @@ class AIObservabilityService:
 
     @staticmethod
     def _sanitize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-        """Keep metadata compact and serializable for Langfuse."""
+        """Keep metadata compact and serializable for LangSmith."""
         cleaned: dict[str, Any] = {}
         for key, value in metadata.items():
             if value is None:
@@ -178,6 +145,44 @@ class AIObservabilityService:
             else:
                 cleaned[key] = str(value)
         return cleaned
+
+    @staticmethod
+    def _estimate_text_tokens(text: str) -> int:
+        # Rough fallback when tokenizer metadata is not available.
+        if not text:
+            return 0
+        return max(1, int(len(text) / 4))
+
+    @classmethod
+    def _estimate_message_tokens(cls, messages: list[dict[str, Any]]) -> int:
+        total = 0
+        for message in messages:
+            total += cls._estimate_text_tokens(str(message.get("role", "")))
+            content = message.get("content", "")
+            if isinstance(content, str):
+                total += cls._estimate_text_tokens(content)
+            else:
+                total += cls._estimate_text_tokens(json.dumps(content, default=str))
+        return total
+
+    @classmethod
+    def _estimate_input_tokens(cls, operation: OperationType, trace_input: dict[str, Any]) -> int:
+        if operation == "embeddings":
+            texts = trace_input.get("texts") or []
+            return sum(cls._estimate_text_tokens(str(text)) for text in texts)
+        messages = trace_input.get("messages") or []
+        return cls._estimate_message_tokens(messages)
+
+    @staticmethod
+    def _safe_trace_call(trace_obj: Any, method_name: str, *args: Any, **kwargs: Any) -> None:
+        if trace_obj is None:
+            return
+        try:
+            method = getattr(trace_obj, method_name, None)
+            if callable(method):
+                method(*args, **kwargs)
+        except Exception:
+            logger.debug("LangSmith trace call failed: %s", method_name, exc_info=True)
 
     def _build_trace_metadata(
         self,
@@ -199,6 +204,8 @@ class AIObservabilityService:
             "database_name": database_name,
             "module": module,
             "artifact_type": artifact_type,
+            "feature": (extra_metadata or {}).get("feature", module),
+            "prompt_name": prompt_id,
             "prompt_version": prompt_version,
             "model": model_name,
             "prompt_id": prompt_id,
@@ -229,7 +236,7 @@ class AIObservabilityService:
         confidence_score: Optional[float] = None,
         extra_metadata: Optional[dict[str, Any]] = None,
     ) -> AIObservationResult:
-        """Execute an Azure OpenAI call under an optional Langfuse trace."""
+        """Execute an Azure OpenAI call under an optional LangSmith trace."""
         request_kwargs = dict(request_kwargs or {})
         model = model_name or (
             settings.azure_openai_embedding_deployment if operation == "embeddings" else settings.azure_openai_deployment
@@ -260,22 +267,20 @@ class AIObservabilityService:
             extra_metadata=extra_metadata,
         )
 
-        langfuse_client = self._langfuse_client
         trace_ctx = (
-            langfuse_client.start_as_current_observation(
-                name=self._trace_name(module, artifact_type, "trace"),
-                as_type="span",
-                input=trace_input,
+            langsmith_tracing_context(
+                project_name=settings.langsmith_project,
                 metadata=metadata,
-                version=prompt_version,
+                enabled=True,
             )
-            if langfuse_client is not None
+            if self._langsmith_enabled and langsmith_tracing_context is not None
             else nullcontext()
         )
 
         start = time.perf_counter()
         try:
             with trace_ctx as trace:
+                self._safe_trace_call(trace, "add_inputs", trace_input)
                 if operation == "embeddings":
                     return await self._generate_embeddings(
                         trace=trace,
@@ -290,8 +295,8 @@ class AIObservabilityService:
                         request_kwargs=request_kwargs,
                         metadata=metadata,
                         start=start,
-                        langfuse_client=langfuse_client,
-                    )
+                        trace_input=trace_input,
+                        )
 
                 return await self._generate_chat(
                     trace=trace,
@@ -306,7 +311,7 @@ class AIObservabilityService:
                     request_kwargs=request_kwargs,
                     metadata=metadata,
                     start=start,
-                    langfuse_client=langfuse_client,
+                    trace_input=trace_input,
                     )
         except Exception:
             logger.exception(
@@ -332,7 +337,7 @@ class AIObservabilityService:
         request_kwargs: dict[str, Any],
         metadata: dict[str, Any],
         start: float,
-        langfuse_client: Optional[Any],
+        trace_input: dict[str, Any],
     ) -> AIObservationResult:
         client = self._resolve_openai_client(embedding=False)
 
@@ -345,14 +350,14 @@ class AIObservabilityService:
             return client.chat.completions.create(**kwargs)
 
         observation = (
-            trace.start_as_current_generation(
+            langsmith_trace(
                 name=self._trace_name(module, artifact_type, "generation"),
-                model=model_name,
-                input=messages,
+                run_type="llm",
+                inputs=trace_input,
                 metadata=metadata,
-                version=prompt_version,
+                project_name=settings.langsmith_project,
             )
-            if trace is not None and hasattr(trace, "start_as_current_generation")
+            if self._langsmith_enabled and langsmith_trace is not None
             else nullcontext()
         )
 
@@ -363,23 +368,27 @@ class AIObservabilityService:
                 content = self._chat_content_from_response(response)
                 usage = self._usage_from_response(response)
                 if generation is not None:
-                    generation.update(
-                        output=content,
-                        usage_details=usage,
-                        metadata=metadata,
-                        model=model_name,
-                        version=prompt_version,
+                    self._safe_trace_call(generation, "add_outputs", {"content": content})
+                    self._safe_trace_call(
+                        generation,
+                        "add_metadata",
+                        {**metadata, "token_usage": usage, "latency_ms": latency_ms},
                     )
+                    self._safe_trace_call(generation, "end", outputs={"content": content})
 
-                if trace is not None:
-                    trace.update(
-                        output=content,
-                        metadata=metadata,
-                        version=prompt_version,
-                    )
-
-                trace_id = getattr(langfuse_client, "get_current_trace_id", lambda: None)()
-                trace_url = getattr(langfuse_client, "get_trace_url", lambda trace_id=None: None)(trace_id=trace_id)
+                estimated_input_tokens = self._estimate_input_tokens("chat", trace_input)
+                logger.info(
+                    "AI chat complete | module=%s artifact_type=%s model=%s input_tokens_est=%d prompt_tokens=%d completion_tokens=%d total_tokens=%d output_chars=%d latency_ms=%.2f",
+                    module,
+                    artifact_type,
+                    model_name,
+                    estimated_input_tokens,
+                    usage.get("prompt_tokens", 0),
+                    usage.get("completion_tokens", 0),
+                    usage.get("total_tokens", 0),
+                    len(content),
+                    latency_ms,
+                )
 
                 return AIObservationResult(
                     operation="chat",
@@ -390,24 +399,14 @@ class AIObservabilityService:
                     token_usage=usage,
                     content=content,
                     raw_response=response,
-                    trace_id=trace_id,
-                    trace_url=trace_url,
+                    trace_id=getattr(generation, "id", None),
+                    trace_url=None,
                     metadata=metadata,
                 )
             except Exception as exc:
                 if generation is not None:
-                    generation.update(
-                        output=None,
-                        metadata={**metadata, "error": str(exc)},
-                        model=model_name,
-                        version=prompt_version,
-                    )
-                if trace is not None:
-                    trace.update(
-                        output=None,
-                        metadata={**metadata, "error": str(exc)},
-                        version=prompt_version,
-                    )
+                    self._safe_trace_call(generation, "add_metadata", {**metadata, "error": str(exc)})
+                    self._safe_trace_call(generation, "end", error=str(exc))
                 logger.exception(
                     "Azure OpenAI chat generation failed | module=%s artifact_type=%s model=%s",
                     module,
@@ -431,7 +430,7 @@ class AIObservabilityService:
         request_kwargs: dict[str, Any],
         metadata: dict[str, Any],
         start: float,
-        langfuse_client: Optional[Any],
+        trace_input: dict[str, Any],
     ) -> AIObservationResult:
         client = self._resolve_openai_client(embedding=True)
 
@@ -444,15 +443,14 @@ class AIObservabilityService:
             return client.embeddings.create(**kwargs)
 
         observation = (
-            trace.start_as_current_observation(
+            langsmith_trace(
                 name=self._trace_name(module, artifact_type, "embedding"),
-                as_type="embedding",
-                input=input_texts,
+                run_type="llm",
+                inputs=trace_input,
                 metadata=metadata,
-                model=model_name,
-                version=prompt_version,
+                project_name=settings.langsmith_project,
             )
-            if trace is not None and hasattr(trace, "start_as_current_observation")
+            if self._langsmith_enabled and langsmith_trace is not None
             else nullcontext()
         )
 
@@ -463,23 +461,27 @@ class AIObservabilityService:
                 vectors = self._embeddings_from_response(response)
                 usage = self._usage_from_response(response)
                 if embedding_obs is not None:
-                    embedding_obs.update(
-                        output=vectors,
-                        usage_details=usage,
-                        metadata=metadata,
-                        model=model_name,
-                        version=prompt_version,
+                    self._safe_trace_call(embedding_obs, "add_outputs", {"vector_count": len(vectors)})
+                    self._safe_trace_call(
+                        embedding_obs,
+                        "add_metadata",
+                        {**metadata, "token_usage": usage, "latency_ms": latency_ms},
                     )
+                    self._safe_trace_call(embedding_obs, "end", outputs={"vector_count": len(vectors)})
 
-                if trace is not None:
-                    trace.update(
-                        output={"vector_count": len(vectors), "model": model_name},
-                        metadata=metadata,
-                        version=prompt_version,
-                    )
-
-                trace_id = getattr(langfuse_client, "get_current_trace_id", lambda: None)()
-                trace_url = getattr(langfuse_client, "get_trace_url", lambda trace_id=None: None)(trace_id=trace_id)
+                estimated_input_tokens = self._estimate_input_tokens("embeddings", trace_input)
+                logger.info(
+                    "AI embeddings complete | module=%s artifact_type=%s model=%s input_tokens_est=%d prompt_tokens=%d completion_tokens=%d total_tokens=%d vectors=%d latency_ms=%.2f",
+                    module,
+                    artifact_type,
+                    model_name,
+                    estimated_input_tokens,
+                    usage.get("prompt_tokens", 0),
+                    usage.get("completion_tokens", 0),
+                    usage.get("total_tokens", 0),
+                    len(vectors),
+                    latency_ms,
+                )
 
                 return AIObservationResult(
                     operation="embeddings",
@@ -490,24 +492,14 @@ class AIObservabilityService:
                     token_usage=usage,
                     embeddings=vectors,
                     raw_response=response,
-                    trace_id=trace_id,
-                    trace_url=trace_url,
+                    trace_id=getattr(embedding_obs, "id", None),
+                    trace_url=None,
                     metadata=metadata,
                 )
             except Exception as exc:
                 if embedding_obs is not None:
-                    embedding_obs.update(
-                        output=None,
-                        metadata={**metadata, "error": str(exc)},
-                        model=model_name,
-                        version=prompt_version,
-                    )
-                if trace is not None:
-                    trace.update(
-                        output=None,
-                        metadata={**metadata, "error": str(exc)},
-                        version=prompt_version,
-                    )
+                    self._safe_trace_call(embedding_obs, "add_metadata", {**metadata, "error": str(exc)})
+                    self._safe_trace_call(embedding_obs, "end", error=str(exc))
                 logger.exception(
                     "Azure OpenAI embeddings failed | module=%s artifact_type=%s model=%s",
                     module,
@@ -545,21 +537,16 @@ class AIObservabilityService:
             confidence_score=confidence_score,
             extra_metadata=extra_metadata,
         )
-        if self._langfuse_client is None:
+        if not self._langsmith_enabled or langsmith_trace is None:
             return nullcontext()
-        return self._langfuse_client.start_as_current_observation(
+        return langsmith_trace(
             name=self._trace_name(module, artifact_type, "span"),
-            as_type="span",
-            input=metadata,
+            run_type="chain",
+            inputs=metadata,
             metadata=metadata,
-            version=prompt_version,
+            project_name=settings.langsmith_project,
         )
 
     def flush(self) -> None:
-        """Flush buffered Langfuse events when the SDK is available."""
-        if self._langfuse_client is None:
-            return
-        try:
-            self._langfuse_client.flush()
-        except Exception as exc:  # pragma: no cover - best effort only.
-            logger.debug("Langfuse flush failed: %s", exc)
+        """Flush is a no-op for LangSmith in this wrapper."""
+        return

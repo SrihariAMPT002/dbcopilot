@@ -14,20 +14,24 @@ import json
 import logging
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
+from app.db.session import db_session
 from app.models.metadata import ConnectedDatabase, DatabaseSemantic
+from app.models.pipeline_job import JobStatus, JobType
 from app.schemas.api_schemas import (
     DatabaseSemanticExportResponse,
     DatabaseSemanticGenerateResponse,
     DatabaseSemanticResponse,
+    JobQueueResponse,
 )
 from app.services.column_semantic_service import ColumnSemanticService
 from app.services.database_semantic_service import DatabaseSemanticService
-from app.schema_engine.embeddings import _traceable
+from app.services.pipeline_service import PipelineService
 from app.utils import now_utc
 
 logger = logging.getLogger(__name__)
@@ -54,66 +58,55 @@ def _semantic_response(db_semantic: DatabaseSemantic) -> DatabaseSemanticRespons
 
 @router.post(
     "/generate/{source_id}",
-    response_model=DatabaseSemanticGenerateResponse,
+    response_model=JobQueueResponse,
     summary="Generate semantic intelligence for a database",
     status_code=status.HTTP_202_ACCEPTED,
 )
-@_traceable("api_generate_semantics", run_type="chain")
 async def generate_semantics(
     source_id: int,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-) -> DatabaseSemanticGenerateResponse:
+) -> JobQueueResponse:
     result = await db.execute(select(ConnectedDatabase).where(ConnectedDatabase.id == source_id))
     database = result.scalars().first()
     if not database:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Database {source_id} not found")
 
-    start = time.perf_counter()
-    service = DatabaseSemanticService(db)
-
     try:
-        db_semantic, duration_ms = await service.generate_and_store_semantics(source_id)
-        status_value = db_semantic.generation_status.value
+        pipeline = PipelineService(db)
+        job = await pipeline.create_job(source_id, JobType.semantic, triggered_by="api")
 
-        if status_value == "completed":
-            pii_service = ColumnSemanticService(db)
-            try:
-                await pii_service.generate_for_database(source_id, force=False)
-            except Exception as pii_exc:
-                logger.error(
-                    "PII intelligence generation failed after semantics for database %d: %s",
-                    source_id,
-                    pii_exc,
-                    exc_info=True,
-                )
+        async def _runner(job_id: int) -> None:
+            async with db_session() as session:
+                service = DatabaseSemanticService(session)
+                job_service = PipelineService(session)
+                try:
+                    db_semantic, _duration_ms = await service.generate_and_store_semantics(source_id)
+                    if db_semantic.generation_status.value == "completed":
+                        try:
+                            await ColumnSemanticService(session).generate_for_database(source_id, force=False)
+                        except Exception:
+                            logger.exception("PII intelligence generation failed after semantics for database %d", source_id)
+                    await session.commit()
+                    await job_service.update_status(job_id, JobStatus.completed, progress_percentage=100)
+                except Exception as exc:
+                    logger.exception("Background semantic job failed for database %d job_id=%s", source_id, job_id)
+                    await session.rollback()
+                    await job_service.update_status(job_id, JobStatus.failed, progress_percentage=0, failure_reason=str(exc))
 
-        await db.commit()
-        status_value = db_semantic.generation_status.value
-
-        if status_value == "completed":
-            message = (
-                f"Semantic intelligence and PII classification generated for "
-                f"{database.display_name or database.name}"
-            )
-        elif status_value == "no_metadata":
-            message = "Cannot generate semantics until the database has synced metadata."
-        else:
-            message = f"Semantic generation finished with status {status_value}"
-
-        return DatabaseSemanticGenerateResponse(
-            source_id=source_id,
-            status=status_value,
-            message=message,
-            generated_at=db_semantic.generated_at,
-            duration_ms=round(duration_ms or ((time.perf_counter() - start) * 1000), 2),
+        background_tasks.add_task(_runner, job.id)
+        return JobQueueResponse(
+            database_id=source_id,
+            job_id=job.id,
+            job_type=JobType.semantic.value,
+            status=job.status.value,
+            message=f"Semantic intelligence queued for {database.display_name or database.name}. Poll /pipeline/jobs/{job.id} for progress.",
         )
     except ValueError as exc:
-        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     except HTTPException:
         raise
     except Exception as exc:
-        await db.rollback()
         logger.error("Semantic generation failed for database %d: %s", source_id, exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

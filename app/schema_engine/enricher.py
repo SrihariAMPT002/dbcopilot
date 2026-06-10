@@ -258,7 +258,7 @@ class SchemaEnricher:
         """
         Call Azure OpenAI GPT-4o to generate semantic enrichment.
 
-        Uses the shared observability wrapper so the call is traced in Langfuse.
+        Uses the shared observability wrapper so the call is traced in LangSmith.
         """
         rendered_prompt = get_enrichment_prompt(
             {

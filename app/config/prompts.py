@@ -258,12 +258,11 @@ class PromptRegistry:
             if category_dir.exists():
                 prompts = [f.stem for f in category_dir.glob("*.yaml")]
         else:
-            prompts = [f.stem for f in self.prompts_dir.glob("*.yaml")]
-            # Add category/prompt pairs
-            for subdir in self.prompts_dir.iterdir():
-                if subdir.is_dir():
-                    for prompt_file in subdir.glob("*.yaml"):
-                        prompts.append(f"{subdir.name}/{prompt_file.stem}")
+            for prompt_file in self.prompts_dir.rglob("*.yaml"):
+                if prompt_file.parent == self.prompts_dir:
+                    prompts.append(prompt_file.stem)
+                else:
+                    prompts.append(f"{prompt_file.parent.name}/{prompt_file.stem}")
 
         return sorted(prompts)
 

@@ -6,13 +6,11 @@ metadata:
   category: semantic
 language: English
 system_message: |
-  You are a governance classification engine.
-  Classify database columns for personally identifiable information (PII) and sensitivity risk.
-  Use column name, table name, schema name, semantic description, and business context only.
-  Never expose raw sensitive values.
-  Do not rely on fixed keyword lists; reason from metadata and business meaning.
+  You are a governance reasoning engine.
+  Use the supplied governance rulebook and metadata to classify columns for PII and sensitivity risk.
+  Do not invent policy, categories, or thresholds beyond the supplied rules.
 user_prompt: |
-  Classify the following database column for privacy and governance risk.
+  Classify PII and governance risk using the supplied governance rulebook and metadata.
 
   Database: {{ database_name }}
   Schema: {{ schema_name }}
@@ -25,6 +23,9 @@ user_prompt: |
   Semantic summary: {{ semantic_summary }}
   Analysis notes: {{ analysis_notes }}
   Business glossary: {{ existing_business_glossary | tojson }}
+  Governance rulebook: {{ governance_rulebook | tojson }}
+  Table columns: {{ table_columns | tojson }}
+  Unresolved columns: {{ unresolved_columns | tojson }}
 
   Return JSON only with:
   {
@@ -32,9 +33,18 @@ user_prompt: |
     "pii_type": "short label or null",
     "risk_level": "low|medium|high|critical",
     "confidence_score": 0.0-1.0,
-    "classification_source": "llm",
+    "classification_source": "rule|llm",
     "review_status": "auto_approved|needs_review",
     "notes": "short explanation",
+    "resolved_columns": [
+      {
+        "column_name": "name",
+        "is_pii": true|false,
+        "pii_type": "short label or null",
+        "risk_level": "low|medium|high|critical",
+        "confidence_score": 0.0-1.0
+      }
+    ],
     "model_name": "model used",
     "prompt_id": "pii_classification",
     "prompt_version": "1.0"

@@ -38,6 +38,11 @@ from app.utils import normalize_column_max_length, safe_flush
 logger = logging.getLogger(__name__)
 
 
+def _log_stage_duration(stage: str, start: float, **fields) -> None:
+    elapsed = time.monotonic() - start
+    logger.info("%s completed in %.2fs | %s", stage, elapsed, ", ".join(f"{k}={v}" for k, v in fields.items()))
+
+
 class SyncService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
@@ -53,6 +58,7 @@ class SyncService:
         conn = await self.db.get(ConnectedDatabase, db_id)
         if not conn:
             return SyncResponse(success=False, message=f"Connection id={db_id} not found")
+        conn_db_type = conn.db_type.value
 
         # Create a pending sync log
         sync_log = SyncLog(
@@ -70,33 +76,47 @@ class SyncService:
 
         start = time.monotonic()
         try:
+            stage_start = time.monotonic()
             schemas = await self._run_introspection(conn)
+            _log_stage_duration("schema sync / introspection", stage_start, db_id=db_id, schemas=len(schemas))
+            stage_start = time.monotonic()
             counts = await self._persist_schemas(db_id, schemas)
+            _log_stage_duration(
+                "schema sync / persistence",
+                stage_start,
+                db_id=db_id,
+                schemas=counts["schemas"],
+                tables=counts["tables"],
+                columns=counts["columns"],
+                relationships=counts["relationships"],
+            )
 
             try:
                 from app.schema_engine.relationship_graph import RelationshipGraphEngine
 
                 graph_engine = RelationshipGraphEngine(self.db)
+                graph_start = time.monotonic()
                 await graph_engine.build_relationship_graph(db_id, persist=True)
+                _log_stage_duration("relationship graph build", graph_start, db_id=db_id)
             except Exception as graph_exc:
-                logger.warning(
+                logger.exception(
                     "Relationship graph build failed for db_id=%s: %s",
                     db_id,
                     graph_exc,
-                    exc_info=True,
                 )
 
-            if conn.db_type.value == "mongodb":
+            if conn_db_type == "mongodb":
                 try:
                     from app.services.mongodb_service import MongoDBService
 
+                    mongo_start = time.monotonic()
                     await MongoDBService(self.db).ensure_collection_registry(db_id)
+                    _log_stage_duration("mongodb collection registry", mongo_start, db_id=db_id)
                 except Exception as nosql_exc:
-                    logger.warning(
+                    logger.exception(
                         "NoSQL collection registry update failed for db_id=%s: %s",
                         db_id,
                         nosql_exc,
-                        exc_info=True,
                     )
 
             elapsed = time.monotonic() - start
@@ -123,13 +143,14 @@ class SyncService:
             try:
                 from app.services.column_semantic_service import ColumnSemanticService
 
+                pii_start = time.monotonic()
                 await ColumnSemanticService(self.db).generate_for_database(db_id, force=False)
+                _log_stage_duration("pii classification", pii_start, db_id=db_id)
             except Exception as pii_exc:
-                logger.warning(
+                logger.exception(
                     "Incremental PII rescan after metadata sync failed for db_id=%s: %s",
                     db_id,
                     pii_exc,
-                    exc_info=True,
                 )
 
             # Convert to DTO inside session before returning
@@ -166,16 +187,25 @@ class SyncService:
                 error_message=sync_log.error_message,
             )
 
-            conn.status = ConnectionStatus.error
-            conn.last_error = error_msg[:500]
             try:
                 await safe_flush(self.db)
             except Exception:
-                logger.warning(
+                logger.exception(
                     "Failed to flush sync failure state for db_id=%s; session rolled back",
                     db_id,
-                    exc_info=True,
                 )
+
+            conn = await self.db.get(ConnectedDatabase, db_id)
+            if conn:
+                conn.status = ConnectionStatus.error
+                conn.last_error = error_msg[:500]
+                try:
+                    await safe_flush(self.db)
+                except Exception:
+                    logger.exception(
+                        "Failed to persist sync failure state for db_id=%s after rollback",
+                        db_id,
+                    )
 
             return SyncResponse(
                 success=False,

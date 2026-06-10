@@ -11,9 +11,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import inspect
 import time
 import uuid
 from dataclasses import dataclass, field
+from functools import wraps
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
@@ -36,6 +38,11 @@ from app.services.ai_observability_service import AIObservabilityService
 from app.utils import safe_flush, truncate
 
 logger = logging.getLogger(__name__)
+
+
+def _log_stage_duration(stage: str, start: float, **fields) -> None:
+    elapsed = time.monotonic() - start
+    logger.info("%s completed in %.2fs | %s", stage, elapsed, ", ".join(f"{k}={v}" for k, v in fields.items()))
 
 COLLECTION_SCHEMA_TABLES = "schema_tables"
 COLLECTION_SCHEMA_RELATIONSHIPS = "schema_relationships"
@@ -89,7 +96,15 @@ def _traceable(name: str, run_type: str = "chain"):
 
     def decorator(fn):
         if not settings.langsmith_tracing or traceable is None:
-            return fn
+            if inspect.iscoroutinefunction(fn):
+                @wraps(fn)
+                async def passthrough(*args, **kwargs):
+                    return await fn(*args, **kwargs)
+            else:
+                @wraps(fn)
+                def passthrough(*args, **kwargs):
+                    return fn(*args, **kwargs)
+            return passthrough
         return traceable(name=name, run_type=run_type)(fn)
 
     return decorator
@@ -153,6 +168,7 @@ class EmbeddingEngine:
 
         dimensions = settings.azure_openai_embedding_dimensions
         observability = AIObservabilityService()
+        ai_start = time.monotonic()
         result = await observability.generate(
             operation="embeddings",
             module="semantic_intelligence",
@@ -174,6 +190,15 @@ class EmbeddingEngine:
         )
         vectors = result.embeddings or []
         usage = result.token_usage
+        _log_stage_duration(
+            "embedding generation / azure openai",
+            ai_start,
+            database_id=database_id,
+            database_name=database_name,
+            table_name=table_name,
+            artifact_type=artifact_type,
+            text_count=len(texts),
+        )
         logger.info(
             "Embedded %d text(s) | model=%s dim=%d in %.2fms",
             len(texts),
@@ -489,15 +514,22 @@ class EmbeddingEngine:
         aggregated_usage: Dict[str, int] = {}
 
         for table in tables:
+            table_start = time.monotonic()
             try:
                 table_result = await self.generate_table_embeddings(database_id, table.id)
+                _log_stage_duration(
+                    "embedding generation / table",
+                    table_start,
+                    database_id=database_id,
+                    table_id=table.id,
+                    table_name=table.name,
+                )
             except Exception as exc:
-                logger.error(
+                logger.exception(
                     "Failed to index table_id=%s for db_id=%s: %s",
                     table.id,
                     database_id,
                     exc,
-                    exc_info=True,
                 )
                 await self._sync_embedding_row(
                     table_id=table.id,
@@ -550,6 +582,7 @@ class EmbeddingEngine:
             artifact_type="schema_embedding",
         )
         self._ensure_collections(len(vectors[0]))
+        qdrant_stage_start = time.monotonic()
 
         point_ids = {
             COLLECTION_SCHEMA_TABLES: self._point_id(COLLECTION_SCHEMA_TABLES, database_id, table_id),
@@ -565,6 +598,7 @@ class EmbeddingEngine:
         )
 
         self._delete_vectors_for_table(database_id, table_id)
+        _log_stage_duration("qdrant upsert / delete previous vectors", qdrant_stage_start, database_id=database_id, table_id=table_id)
 
         artifacts = [
             EmbeddingArtifact(
@@ -616,7 +650,15 @@ class EmbeddingEngine:
         ]
 
         for artifact in artifacts:
+            artifact_start = time.monotonic()
             await self._upsert_document(artifact)
+            _log_stage_duration(
+                "qdrant upsert / document",
+                artifact_start,
+                database_id=database_id,
+                table_id=table_id,
+                collection=artifact.collection_name,
+            )
 
         await self._sync_embedding_row(
             table_id=table_id,

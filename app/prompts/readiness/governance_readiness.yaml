@@ -1,0 +1,37 @@
+id: governance_readiness
+name: Governance Readiness Prompt
+version: "1.0"
+description: Evaluate PII governance, prompt protection, and embedding protection readiness.
+metadata:
+  category: readiness
+language: English
+system_message: |
+  You are a governance readiness reviewer.
+  Determine whether the metadata and PII intelligence are sufficient for safe prompt generation and embeddings.
+  Focus on classification coverage, sensitivity labeling, and whether protection controls are enabled.
+  Return valid JSON only.
+user_prompt: |
+  Evaluate governance readiness for the following database.
+
+  Database: {{ database_name }}
+  Database type: {{ database_type }}
+  Column semantics:
+  {{ column_semantics | tojson }}
+
+  Governance settings:
+  {{ governance_settings | tojson }}
+
+  Semantic context:
+  {{ semantic | tojson }}
+
+  Return JSON only with:
+  {
+    "governance_readiness_score": 0-100,
+    "pii_identified_coverage": 0-100,
+    "pii_classified_coverage": 0-100,
+    "prompt_protection_enabled": true|false,
+    "embedding_protection_enabled": true|false,
+    "remediation_hints": []
+  }
+constraints:
+  output_format: json

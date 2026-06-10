@@ -1,0 +1,234 @@
+version: "1.1"
+category: pii
+description: "Enterprise PII taxonomy with aliases, abbreviations, legacy names, and detection hints."
+taxonomy:
+  identity:
+    label: "Identity"
+    risk_level: high
+    confidence_threshold: 0.88
+    fields:
+      first_name:
+        synonyms: ["first_name", "fname", "given_name", "forename", "firstnm", "first"]
+        legacy_names: ["givenname", "cust_first", "emp_first"]
+      last_name:
+        synonyms: ["last_name", "lname", "surname", "family_name", "lastname"]
+        legacy_names: ["cust_last", "emp_last"]
+      full_name:
+        synonyms: ["full_name", "name", "legal_name", "display_name", "customer_name"]
+        legacy_names: ["cust_nm", "fullnm", "legalnm"]
+      legal_name:
+        synonyms: ["legal_name", "registered_name", "business_name", "entity_name"]
+        legacy_names: ["legalnm", "reg_name"]
+      alias:
+        synonyms: ["alias", "aka", "nickname", "preferred_name", "moniker"]
+        legacy_names: ["alias_nm", "nick"]
+      maiden_name:
+        synonyms: ["maiden_name", "birth_name", "former_name", "previous_name"]
+        legacy_names: ["maiden_nm"]
+      nickname:
+        synonyms: ["nickname", "nick_name", "screen_name", "handle"]
+        legacy_names: ["nick", "nicknm"]
+  contact:
+    label: "Contact"
+    risk_level: high
+    confidence_threshold: 0.85
+    fields:
+      email:
+        synonyms: ["email", "e-mail", "email_address", "mail", "eml"]
+        abbreviations: ["eml", "eaddr"]
+        misspellings: ["emial", "mailid"]
+      phone:
+        synonyms: ["phone", "phone_number", "telephone", "tel", "ph_no"]
+        abbreviations: ["ph_no", "ph", "tel_no"]
+        misspellings: ["fone", "phne"]
+      mobile:
+        synonyms: ["mobile", "cell", "cell_phone", "cellphone", "mobile_no"]
+        abbreviations: ["mob", "mob_no"]
+        misspellings: ["moblie"]
+      contact_number:
+        synonyms: ["contact_number", "contact_no", "contact", "phone_contact"]
+        abbreviations: ["cnt_no"]
+      emergency_contact:
+        synonyms: ["emergency_contact", "emergency_phone", "emergency_number", "next_of_kin"]
+        abbreviations: ["emg_contact"]
+  government:
+    label: "Government"
+    risk_level: critical
+    confidence_threshold: 0.95
+    fields:
+      passport:
+        synonyms: ["passport", "passport_no", "passport_number", "passport_id"]
+        abbreviations: ["ppt", "pspt"]
+      ssn:
+        synonyms: ["ssn", "social_security", "social_security_number", "socialsecuritynumber"]
+        abbreviations: ["ssn", "soc_sec"]
+      aadhaar:
+        synonyms: ["aadhaar", "aadhar", "aadhaar_number", "uidai_id"]
+        abbreviations: ["uid", "uidai"]
+      national_id:
+        synonyms: ["national_id", "national_identifier", "citizen_id", "id_number"]
+        abbreviations: ["nid", "nat_id"]
+      tax_id:
+        synonyms: ["tax_id", "taxid", "tin", "pan", "vat", "ein"]
+        abbreviations: ["taxref", "govt_ref"]
+      driver_license:
+        synonyms: ["driver_license", "drivers_license", "dl_no", "license_number"]
+        abbreviations: ["dl", "lic_no"]
+      voter_id:
+        synonyms: ["voter_id", "voter_number", "election_id", "elector_id"]
+        abbreviations: ["vid"]
+  financial:
+    label: "Financial"
+    risk_level: critical
+    confidence_threshold: 0.92
+    fields:
+      account_number:
+        synonyms: ["account_number", "acct_no", "acct_num", "account_no", "bank_account"]
+        abbreviations: ["acct_ref", "acct", "acc_no"]
+      iban:
+        synonyms: ["iban", "international_bank_account_number"]
+        abbreviations: ["ibn"]
+      swift:
+        synonyms: ["swift", "bic", "bank_identifier_code"]
+        abbreviations: ["swft"]
+      routing_number:
+        synonyms: ["routing_number", "routing_no", "aba", "bank_routing"]
+        abbreviations: ["rtg_no"]
+      card_number:
+        synonyms: ["card_number", "credit_card", "debit_card", "cc_no", "payment_card"]
+        abbreviations: ["ccn", "card_no"]
+      cvv:
+        synonyms: ["cvv", "cvc", "card_verification_value", "security_code"]
+        abbreviations: ["sec_code"]
+      bank_account:
+        synonyms: ["bank_account", "bank_acct", "checking_account", "savings_account"]
+        abbreviations: ["bank_acct", "acct_ref"]
+  employment:
+    label: "Employment"
+    risk_level: high
+    confidence_threshold: 0.85
+    fields:
+      employee_id:
+        synonyms: ["employee_id", "emp_id", "employee_number", "staff_id", "empl_id"]
+        abbreviations: ["emp_no", "empid", "eid"]
+      payroll_id:
+        synonyms: ["payroll_id", "pay_id", "salary_id", "payroll_number"]
+        abbreviations: ["pr_id", "pay_no"]
+      salary:
+        synonyms: ["salary", "base_salary", "annual_salary", "compensation"]
+        abbreviations: ["sal", "comp", "pay_rate"]
+      compensation:
+        synonyms: ["compensation", "total_comp", "package", "remuneration"]
+        abbreviations: ["comp"]
+      performance_rating:
+        synonyms: ["performance_rating", "rating", "review_score", "appraisal_score"]
+        abbreviations: ["perf_rating"]
+  healthcare:
+    label: "Healthcare"
+    risk_level: critical
+    confidence_threshold: 0.9
+    fields:
+      patient_id:
+        synonyms: ["patient_id", "patient_no", "medical_id", "mrn"]
+        abbreviations: ["pt_id", "pid"]
+      medical_record:
+        synonyms: ["medical_record", "health_record", "chart_id", "record_number"]
+        abbreviations: ["mrn", "med_rec"]
+      diagnosis:
+        synonyms: ["diagnosis", "diagnostic_code", "icd_code", "condition"]
+        abbreviations: ["dx"]
+      treatment:
+        synonyms: ["treatment", "therapy", "procedure", "care_plan"]
+        abbreviations: ["tx"]
+      prescription:
+        synonyms: ["prescription", "rx", "medication", "drug_order"]
+        abbreviations: ["rx"]
+  education:
+    label: "Education"
+    risk_level: high
+    confidence_threshold: 0.82
+    fields:
+      student_id:
+        synonyms: ["student_id", "student_no", "scholar_id", "learner_id"]
+        abbreviations: ["stud_id", "sid"]
+      enrollment_id:
+        synonyms: ["enrollment_id", "enrolment_id", "registration_id", "enroll_no"]
+        abbreviations: ["enr_id"]
+      grades:
+        synonyms: ["grades", "grade_point", "gpa", "mark"]
+        abbreviations: ["gpa"]
+      transcript:
+        synonyms: ["transcript", "academic_record", "report_card", "scorecard"]
+        abbreviations: ["transcript_no"]
+  customer:
+    label: "Customer"
+    risk_level: high
+    confidence_threshold: 0.8
+    fields:
+      customer_id:
+        synonyms: ["customer_id", "cust_id", "client_id", "account_id", "consumer_id"]
+        abbreviations: ["cust_no", "cid"]
+      loyalty_id:
+        synonyms: ["loyalty_id", "rewards_id", "membership_number", "points_id"]
+        abbreviations: ["loyalty_no"]
+      membership_id:
+        synonyms: ["membership_id", "member_id", "membership_no", "subscription_id"]
+        abbreviations: ["mem_id"]
+  biometric:
+    label: "Biometric"
+    risk_level: critical
+    confidence_threshold: 0.96
+    fields:
+      fingerprint:
+        synonyms: ["fingerprint", "finger_print", "biometric_print"]
+        abbreviations: ["fp"]
+      retina:
+        synonyms: ["retina", "retinal_scan", "iris_scan"]
+        abbreviations: ["ret_scan"]
+      face_scan:
+        synonyms: ["face_scan", "facial_scan", "face_id", "facial_recognition"]
+        abbreviations: ["faceid"]
+      voice_print:
+        synonyms: ["voice_print", "voiceprint", "voice_biometrics", "vocal_signature"]
+        abbreviations: ["vp"]
+  location:
+    label: "Location"
+    risk_level: high
+    confidence_threshold: 0.85
+    fields:
+      address:
+        synonyms: ["address", "street_address", "mailing_address", "billing_address"]
+        abbreviations: ["addr", "addr1"]
+      postal_code:
+        synonyms: ["postal_code", "zip", "zip_code", "postcode", "pin_code"]
+        abbreviations: ["zip", "pincode"]
+      geo_coordinates:
+        synonyms: ["geo_coordinates", "gps", "latitude", "longitude", "location"]
+        abbreviations: ["latlon", "geo"]
+  behavioral:
+    label: "Behavioral"
+    risk_level: medium
+    confidence_threshold: 0.78
+    fields:
+      browsing_history:
+        synonyms: ["browsing_history", "web_history", "page_history", "click_history"]
+        abbreviations: ["hist"]
+      clickstream:
+        synonyms: ["clickstream", "event_stream", "user_events", "interaction_log"]
+        abbreviations: ["clkstrm"]
+      device_id:
+        synonyms: ["device_id", "device_identifier", "advertising_id", "ad_id"]
+        abbreviations: ["did", "devid"]
+      session_id:
+        synonyms: ["session_id", "sess_id", "session_token", "visitor_session"]
+        abbreviations: ["sid", "sess"]
+defaults:
+  unknown_risk_level: low
+  default_confidence_threshold: 0.75
+  misspellings:
+    email: ["emial", "mailid"]
+    phone: ["fone", "phne"]
+    mobile: ["moblie"]
+    address: ["adress"]
+    salary: ["salery", "sallary"]
+    customer: ["custmer", "custromer"]

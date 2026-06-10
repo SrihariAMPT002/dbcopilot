@@ -12,6 +12,7 @@ from components.api_client import (
     get_embedding_status,
     semantic_search,
 )
+from components.job_utils import render_job_status
 from components.sidebar import render_sidebar
 from components.source_terms import source_family, terminology
 
@@ -154,7 +155,12 @@ with action_cols[0]:
         with st.spinner("Generating embeddings for semantic schema intelligence..."):
             ok_gen, result_gen = generate_embeddings(db_id)
         if ok_gen:
-            st.success(result_gen.get("message", "Embeddings generated successfully."))
+            status = str(result_gen.get("status", "")).upper()
+            if status == "QUEUED":
+                st.success(result_gen.get("message", "Embedding generation queued."))
+                render_job_status(result_gen.get("job_id"), label="Embedding Job")
+            else:
+                st.success(result_gen.get("message", "Embeddings generated successfully."))
             st.rerun()
         else:
             st.error(result_gen.get("error", "Embedding generation failed"))

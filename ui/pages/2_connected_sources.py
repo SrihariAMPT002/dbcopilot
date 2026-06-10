@@ -18,6 +18,7 @@ from components.api_client import (
     regenerate_semantics,
     sync_schema,
 )
+from components.job_utils import render_job_status
 from components.sidebar import render_sidebar
 from components.source_terms import badge_label, source_family, source_mode_text, terminology
 
@@ -218,11 +219,16 @@ for conn in connections:
         if st.button("Resync", key=f"sync_{db_id}", use_container_width=True):
             with st.spinner(f"Syncing {name}..."):
                 ok_sync, sync_result = sync_schema(db_id)
-            if ok_sync and sync_result.get("success"):
-                st.success(
-                    f"Sync complete: {sync_result.get('schemas_discovered', 0)} schemas, "
-                    f"{sync_result.get('tables_discovered', 0)} entities"
-                )
+            if ok_sync:
+                status = str(sync_result.get("status", "")).upper()
+                if status == "QUEUED":
+                    st.success(sync_result.get("message", "Schema sync queued."))
+                    render_job_status(sync_result.get("job_id"), label="Sync Job")
+                else:
+                    st.success(
+                        f"Sync complete: {sync_result.get('schemas_discovered', 0)} schemas, "
+                        f"{sync_result.get('tables_discovered', 0)} entities"
+                    )
                 st.rerun()
             else:
                 msg = sync_result.get("message") or sync_result.get("error") or "Sync failed"
@@ -244,7 +250,7 @@ for conn in connections:
                 ok_ctx, ctx_payload = generate_ai_context(db_id, triggered_by="streamlit-connected-sources")
             if ok_ctx:
                 st.success(ctx_payload.get("message", "AI context pipeline queued."))
-                st.caption(f"Parent job: {ctx_payload.get('parent_job_id')}")
+                render_job_status(ctx_payload.get("parent_job_id"), label="AI Context Run")
                 st.rerun()
             else:
                 st.error(ctx_payload.get("error", "Failed to queue AI context pipeline"))

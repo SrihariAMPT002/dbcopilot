@@ -23,6 +23,7 @@ from app.core.config import settings
 from app.models.artifact_manifest import ArtifactType
 from app.models.column_semantic import ColumnSemantic
 from app.models.metadata import ConnectedDatabase, DatabaseSchema, DatabaseSemantic, DatabaseTable
+from app.models.metadata import SchemaRelationshipGraph
 from app.services.ai_observability_service import AIObservabilityService
 from app.schema_engine.embeddings import EmbeddingEngine
 from app.schema_engine.relationship_graph import RelationshipGraphEngine
@@ -41,6 +42,22 @@ class PromptStudioArtifact:
     filename: str
     mime: str
     content: str
+    generated_at: datetime
+    manifest: Optional[dict[str, Any]] = None
+
+
+@dataclass
+class ContextPackageResult:
+    artifact_type: ArtifactType
+    prompt_id: str
+    prompt_version: str
+    model_name: str
+    content: str
+    mime: str
+    filename: str
+    context_quality_score: float
+    governance_coverage: float
+    pii_coverage: float
     generated_at: datetime
     manifest: Optional[dict[str, Any]] = None
 
@@ -106,6 +123,59 @@ class PromptStudioService:
         return context
 
     @staticmethod
+    def _safe_json(value: Any) -> str:
+        return json.dumps(value, indent=2, default=str, ensure_ascii=False)
+
+    @staticmethod
+    def _compute_quality(context: dict[str, Any]) -> dict[str, float]:
+        semantic = context.get("semantic") or {}
+        governance = context.get("governance") or {}
+        relationship_intel = context.get("relationship_intelligence") or {}
+        embeddings = context.get("embeddings") or {}
+        columns = context.get("columns") or []
+        column_count = max(1, len(columns))
+        pii_count = sum(1 for col in columns if col.get("is_pii"))
+        quality = min(
+            1.0,
+            0.20 * bool(semantic.get("business_summary"))
+            + 0.20 * bool(relationship_intel.get("ai_summary"))
+            + 0.20 * min(1.0, len(semantic.get("key_entities", [])) / 5.0)
+            + 0.20 * min(1.0, pii_count / column_count)
+            + 0.20 * min(1.0, float(embeddings.get("indexed_tables", 0)) / max(1, float(context.get("table_count", 1))))
+        )
+        return {
+            "context_quality_score": round(quality, 3),
+            "governance_coverage": round(
+                min(1.0, 0.5 * float(governance.get("prompt_protection_enabled", False)) + 0.5 * float(governance.get("embedding_protection_enabled", False))),
+                3,
+            ),
+            "pii_coverage": round(min(1.0, pii_count / column_count), 3),
+        }
+
+    def _assemble_context_payload(self, artifact_type: ArtifactType, context: dict[str, Any]) -> dict[str, Any]:
+        payload = {
+            "database_id": context["database_id"],
+            "database_name": context["database_name"],
+            "database_type": context["database_type"],
+            "generated_at": context["generated_at"],
+            "artifact_type": artifact_type.value,
+            "semantic": context.get("semantic", {}),
+            "relationship_intelligence": context.get("relationship_intelligence", {}),
+            "embeddings": context.get("embeddings", {}),
+            "governance": context.get("governance", {}),
+            "readiness": context.get("readiness", {}),
+            "business_glossary": (context.get("semantic") or {}).get("business_glossary", []),
+            "tables": context.get("tables", []),
+            "columns": context.get("columns", []),
+            "schema_count": context.get("schema_count", 0),
+            "table_count": context.get("table_count", 0),
+            "column_count": context.get("column_count", 0),
+            "relationship_count": context.get("relationship_count", 0),
+            "relationships": (context.get("relationship_graph") or {}).edges if getattr(context.get("relationship_graph"), "edges", None) else [],
+        }
+        return self._prompt_context_for_artifact(artifact_type.value, payload)
+
+    @staticmethod
     def _evaluation_metrics(context: dict[str, Any], artifact_content: str) -> dict[str, float]:
         """Compute simple trace metrics for generated prompt artifacts."""
         semantic = context.get("semantic") or {}
@@ -140,8 +210,12 @@ class PromptStudioService:
 
     async def list_templates(self) -> list[dict[str, Any]]:
         templates = []
-        for prompt_id in self.registry.list_prompts("system"):
-            template = self.registry.load_prompt(prompt_id, category="system")
+        for prompt_path in self.registry.list_prompts():
+            if "/" in prompt_path:
+                category, prompt_id = prompt_path.split("/", 1)
+            else:
+                category, prompt_id = None, prompt_path
+            template = self.registry.load_prompt(prompt_id, category=category)
             templates.append(
                 {
                     "id": template.get("id", prompt_id),
@@ -150,74 +224,47 @@ class PromptStudioService:
                     "category": template.get("metadata", {}).get("category", "system"),
                     "version": str(template.get("version", "1.0")),
                     "language": template.get("language", "English"),
-                    "path": f"app/prompts/system/{prompt_id}.yml",
+                    "path": f"app/prompts/{category + '/' if category else ''}{prompt_id}.yaml",
                 }
             )
         return templates
 
     async def preview_artifact(self, database_id: int, artifact_type: str) -> PromptStudioArtifact:
         context = await self._build_context(database_id)
-        return self._render_artifact(artifact_type, context)
+        package = await self._generate_context_package(artifact_type, context)
+        return PromptStudioArtifact(
+            artifact_type=package.artifact_type,
+            template_id=package.prompt_id,
+            prompt_version=package.prompt_version,
+            model_name=package.model_name,
+            filename=package.filename,
+            mime=package.mime,
+            content=package.content,
+            generated_at=package.generated_at,
+            manifest=package.manifest,
+        )
 
     async def generate_artifacts(self, database_id: int) -> list[dict[str, Any]]:
         context = await self._build_context(database_id)
         generated: list[dict[str, Any]] = []
-        observability = AIObservabilityService()
 
         for artifact_type in self._artifact_order():
-            logger.info(
-                "artifact_type=%s value=%s type=%s",
-                artifact_type,
-                getattr(artifact_type, "value", None),
-                type(artifact_type),
-            )
-            artifact = self._render_artifact(artifact_type.value, context)
-            metrics = self._evaluation_metrics(context, artifact.content)
-            with observability.observe(
-                module="prompt_studio",
-                artifact_type=artifact.artifact_type.value,
-                prompt_id=artifact.template_id,
-                prompt_version=artifact.prompt_version,
-                database_id=database_id,
-                database_name=context["database_name"],
-                model_name=artifact.model_name,
-                completeness_score=metrics["completeness_score"],
-                coverage_score=metrics["coverage_score"],
-                confidence_score=metrics["confidence_score"],
-                extra_metadata={
-                    "template_used": artifact.template_id,
-                    "artifact_type": artifact.artifact_type.value,
-                    "prompt_version": artifact.prompt_version,
-                },
-            ):
-                saved = await self.artifact_service.record_artifact(
-                    database_id,
-                    artifact.artifact_type,
-                    artifact.content,
-                    mime=artifact.mime,
-                    extension=self._extension_for(artifact.artifact_type),
-                    schema_hash_payload={
-                        "artifact_type": artifact.artifact_type.value,
-                        "content": artifact.content,
-                        "database_id": database_id,
-                    },
-                    prompt_id=artifact.template_id,
-                    prompt_version=artifact.prompt_version,
-                    model_name=artifact.model_name,
-                )
-            artifact.manifest = saved
+            package = await self._generate_context_package(artifact_type.value, context)
             generated.append(
                 {
-                    "artifact_type": artifact.artifact_type.value,
-                    "template_id": artifact.template_id,
-                    "prompt_id": artifact.template_id,
-                    "prompt_version": artifact.prompt_version,
-                    "model_name": artifact.model_name,
-                    "filename": saved.get("filename", artifact.filename),
-                    "mime": artifact.mime,
-                    "content": artifact.content,
-                    "generated_at": artifact.generated_at,
-                    "manifest": saved,
+                    "artifact_type": package.artifact_type.value,
+                    "template_id": package.prompt_id,
+                    "prompt_id": package.prompt_id,
+                    "prompt_version": package.prompt_version,
+                    "model_name": package.model_name,
+                    "filename": package.manifest.get("filename", package.filename) if package.manifest else package.filename,
+                    "mime": package.mime,
+                    "content": package.content,
+                    "generated_at": package.generated_at,
+                    "context_quality_score": package.context_quality_score,
+                    "governance_coverage": package.governance_coverage,
+                    "pii_coverage": package.pii_coverage,
+                    "manifest": package.manifest,
                 }
             )
 
@@ -298,6 +345,9 @@ class PromptStudioService:
             relationship_graph = await RelationshipGraphEngine(self.db).get_relationship_graph(database_id)
         except Exception:
             relationship_graph = None
+        relationship_intelligence = {}
+        if relationship_graph and relationship_graph.edges:
+            relationship_intelligence = self._relationship_intelligence_from_graph(relationship_graph)
         try:
             embedding_status = await EmbeddingEngine(self.db).get_embedding_status(database_id)
         except Exception:
@@ -308,6 +358,19 @@ class PromptStudioService:
                 "qdrant_health": False,
                 "collections": [],
             }
+        try:
+            from app.services.readiness_service import ReadinessService
+
+            readiness = await ReadinessService(self.db).get_or_compute(database_id)
+            readiness_payload = {
+                "overall_score": readiness.overall_score,
+                "category_scores": readiness.category_scores,
+                "readiness_status": readiness.readiness_status.value,
+                "missing_stages": readiness.missing_stages,
+                "remediation_hints": readiness.remediation_hints,
+            }
+        except Exception:
+            readiness_payload = {}
 
         schema_count = len(database.schemas or [])
         table_count = len(tables)
@@ -377,6 +440,8 @@ class PromptStudioService:
             "relationship_count": relationship_count,
             "semantic": semantic_payload,
             "relationship_graph": relationship_graph,
+            "relationship_intelligence": relationship_intelligence,
+            "readiness": readiness_payload,
             "embeddings": embeddings_payload,
             "tables": table_payloads,
             "columns": column_payloads,
@@ -386,7 +451,17 @@ class PromptStudioService:
         result = await self.db.execute(
             select(ConnectedDatabase)
             .where(ConnectedDatabase.id == database_id)
-            .options(selectinload(ConnectedDatabase.schemas))
+            .options(
+                selectinload(ConnectedDatabase.schemas).selectinload(DatabaseSchema.tables).selectinload(
+                    DatabaseTable.columns
+                ),
+                selectinload(ConnectedDatabase.schemas).selectinload(DatabaseSchema.tables).selectinload(
+                    DatabaseTable.embedding
+                ),
+                selectinload(ConnectedDatabase.schemas).selectinload(DatabaseSchema.tables).selectinload(
+                    DatabaseTable.relationships_from
+                ),
+            )
         )
         database = result.scalars().first()
         if not database:
@@ -405,6 +480,24 @@ class PromptStudioService:
         )
         return {row.column_id: row for row in result.scalars().all()}
 
+    @staticmethod
+    def _relationship_intelligence_from_graph(graph) -> dict[str, Any]:
+        if not graph.edges:
+            return {}
+        first = graph.edges[0]
+        return {
+            "business_entity_graph": first.business_entity_graph or "[]",
+            "business_process_flows": first.business_process_flows or "[]",
+            "upstream_dependencies": first.upstream_dependencies or "[]",
+            "downstream_dependencies": first.downstream_dependencies or "[]",
+            "entity_lifecycle_descriptions": first.entity_lifecycle_descriptions or "[]",
+            "ai_summary": first.ai_summary or "",
+            "ai_confidence": first.ai_confidence or 0.0,
+            "ai_model_name": first.ai_model_name or "",
+            "ai_prompt_id": first.ai_prompt_id or "",
+            "ai_prompt_version": first.ai_prompt_version or "",
+        }
+
     async def _fetch_tables(self, database_id: int) -> list[DatabaseTable]:
         result = await self.db.execute(
             select(DatabaseTable)
@@ -420,21 +513,76 @@ class PromptStudioService:
         )
         return result.scalars().unique().all()
 
-    def _render_artifact(self, artifact_type: str, context: dict[str, Any]) -> PromptStudioArtifact:
-        template_id = self._template_id_for(artifact_type)
-        template = self.registry.load_prompt(template_id, category="system")
-        rendered = self.registry.render_prompt(template_id, context, category="system")
-        content = rendered.user_prompt.strip()
-        mime = self._mime_for(artifact_type)
-        return PromptStudioArtifact(
-            artifact_type=self._artifact_enum(artifact_type),
-            template_id=template_id,
-            prompt_version=str(template.get("version", rendered.metadata.version or "1.0")),
-            model_name="template-engine",
-            filename=artifact_type,
+    async def _generate_context_package(self, artifact_type: str, context: dict[str, Any]) -> ContextPackageResult:
+        artifact = self._artifact_enum(artifact_type)
+        payload = self._assemble_context_payload(artifact, context)
+        quality = self._compute_quality(payload)
+        prompt_id = self._template_id_for(artifact_type)
+        prompt_version = "1.0"
+        model_name = settings.azure_openai_deployment or "azure_openai"
+        rendered = self.registry.render_prompt(prompt_id, payload, category="system")
+        observability = AIObservabilityService()
+        result = await observability.generate(
+            operation="chat",
+            module="prompt_studio",
+            artifact_type=artifact.value,
+            prompt_id=prompt_id,
+            prompt_version=prompt_version,
+            database_id=context["database_id"],
+            database_name=context["database_name"],
+            model_name=model_name,
+            messages=[
+                {"role": "system", "content": rendered.system_message},
+                {"role": "user", "content": rendered.user_prompt},
+            ],
+            request_kwargs={"max_completion_tokens": 1800},
+            completeness_score=quality["context_quality_score"],
+            coverage_score=quality["governance_coverage"],
+            confidence_score=quality["pii_coverage"],
+            extra_metadata={
+                "feature": "prompt_studio",
+                "prompt_name": prompt_id,
+                "artifact_type": artifact.value,
+                "database_id": context["database_id"],
+                "model_name": model_name,
+            },
+        )
+        content = (result.content or "").strip()
+        if not content:
+            raise ValueError(f"Azure OpenAI returned empty content for {artifact.value}")
+        mime = self._mime_for(artifact)
+        filename = self._filename_for(artifact)
+        saved = await self.artifact_service.record_artifact(
+            context["database_id"],
+            artifact,
+            content,
             mime=mime,
+            extension=self._extension_for(artifact),
+            schema_hash_payload={
+                "artifact_type": artifact.value,
+                "content": content,
+                "database_id": context["database_id"],
+                "prompt_id": prompt_id,
+                "prompt_version": prompt_version,
+                "model_name": result.model_name,
+            },
+            prompt_id=prompt_id,
+            prompt_version=prompt_version,
+            model_name=result.model_name,
+        )
+        return ContextPackageResult(
+            artifact_type=artifact,
+            prompt_id=prompt_id,
+            prompt_version=prompt_version,
+            model_name=result.model_name,
             content=content,
-            generated_at=now_utc(),
+            mime=mime,
+            filename=filename,
+            context_quality_score=quality["context_quality_score"],
+            governance_coverage=quality["governance_coverage"],
+            pii_coverage=quality["pii_coverage"],
+            generated_at=result.generated_at,
+            manifest=saved,
         )
 
     async def _latest_manifest(self, database_id: int, artifact_type: str):
@@ -490,6 +638,10 @@ class PromptStudioService:
         if artifact_type == ArtifactType.agent_context:
             return ".json"
         return ".md"
+
+    @staticmethod
+    def _filename_for(artifact_type: ArtifactType) -> str:
+        return artifact_type.value
 
     @staticmethod
     def _manifest_dict(item) -> dict[str, Any]:

@@ -75,6 +75,7 @@ class ReadinessService:
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+        self.registry = get_prompt_registry()
 
     async def get_or_compute(self, database_id: int) -> ReadinessBreakdown:
         snapshot = await self._latest_snapshot(database_id)
@@ -92,21 +93,74 @@ class ReadinessService:
         database = await self._fetch_database(database_id)
         observability = AIObservabilityService()
         breakdown = await self._build_breakdown(database_id)
-        with observability.observe(
-            module="ai_readiness",
-            artifact_type="readiness_snapshot",
-            prompt_id="readiness_rules",
-            prompt_version="1",
-            database_id=database.id,
-            database_name=database.display_name or database.name,
-            model_name="deterministic",
-            completeness_score=breakdown.metadata_readiness_score / 100.0,
-            coverage_score=breakdown.ai_context_readiness_score / 100.0,
-            confidence_score=breakdown.overall_score / 100.0,
-            extra_metadata={
-                "readiness_category": "overall",
-            },
-        ) as observation:
+        try:
+            with observability.observe(
+                module="ai_readiness",
+                artifact_type="readiness_snapshot",
+                prompt_id="readiness_rules",
+                prompt_version="1",
+                database_id=database.id,
+                database_name=database.display_name or database.name,
+                model_name="deterministic",
+                completeness_score=breakdown.metadata_readiness_score / 100.0,
+                coverage_score=breakdown.ai_context_readiness_score / 100.0,
+                confidence_score=breakdown.overall_score / 100.0,
+                extra_metadata={
+                    "readiness_category": "overall",
+                },
+            ) as observation:
+                snapshot = ReadinessSnapshot(
+                    database_id=database_id,
+                    metadata_score=breakdown.metadata_score,
+                    semantic_score=breakdown.semantic_score,
+                    embeddings_score=breakdown.embeddings_score,
+                    relationship_score=breakdown.relationship_score,
+                    prompt_score=breakdown.prompt_score,
+                    metadata_readiness_score=breakdown.metadata_readiness_score,
+                    semantic_readiness_score=breakdown.semantic_readiness_score,
+                    relationship_readiness_score=breakdown.relationship_readiness_score,
+                    ai_context_readiness_score=breakdown.ai_context_readiness_score,
+                    governance_readiness_score=breakdown.governance_readiness_score,
+                    overall_score=breakdown.overall_score,
+                    prompt_id="readiness_rules",
+                    prompt_version="1",
+                    model_name="deterministic",
+                    readiness_status=breakdown.readiness_status,
+                )
+                self.db.add(snapshot)
+                await self.db.flush()
+                breakdown.generated_at = snapshot.generated_at
+                if observation is not None:
+                    observation.add_outputs(
+                        {
+                            "overall_score": breakdown.overall_score,
+                            "category_scores": breakdown.category_scores,
+                            "readiness_status": breakdown.readiness_status.value,
+                        }
+                    )
+                    observation.add_metadata(
+                        {
+                            "database_id": database.id,
+                            "database_name": database.display_name or database.name,
+                            "module": "ai_readiness",
+                            "artifact_type": "readiness_snapshot",
+                            "prompt_version": "1",
+                            "model": "deterministic",
+                            "readiness_category": "overall",
+                            "score_generated": breakdown.overall_score,
+                            "completeness_score": breakdown.metadata_readiness_score / 100.0,
+                            "coverage_score": breakdown.ai_context_readiness_score / 100.0,
+                            "confidence_score": breakdown.overall_score / 100.0,
+                        }
+                    )
+                    observation.end(outputs={
+                        "overall_score": breakdown.overall_score,
+                        "category_scores": breakdown.category_scores,
+                        "readiness_status": breakdown.readiness_status.value,
+                    })
+                return breakdown
+        except Exception:
+            logger.exception("Readiness tracing failed; continuing without LangSmith update")
             snapshot = ReadinessSnapshot(
                 database_id=database_id,
                 metadata_score=breakdown.metadata_score,
@@ -128,27 +182,6 @@ class ReadinessService:
             self.db.add(snapshot)
             await self.db.flush()
             breakdown.generated_at = snapshot.generated_at
-            if observation is not None:
-                observation.update(
-                    output={
-                        "overall_score": breakdown.overall_score,
-                        "category_scores": breakdown.category_scores,
-                        "readiness_status": breakdown.readiness_status.value,
-                    },
-                    metadata={
-                        "database_id": database.id,
-                        "database_name": database.display_name or database.name,
-                        "module": "ai_readiness",
-                        "artifact_type": "readiness_snapshot",
-                        "prompt_version": "1",
-                        "model": "deterministic",
-                        "readiness_category": "overall",
-                        "score_generated": breakdown.overall_score,
-                        "completeness_score": breakdown.metadata_readiness_score / 100.0,
-                        "coverage_score": breakdown.ai_context_readiness_score / 100.0,
-                        "confidence_score": breakdown.overall_score / 100.0,
-                    },
-                )
             return breakdown
 
     async def _build_breakdown(
@@ -400,6 +433,13 @@ class ReadinessService:
                 SchemaRelationshipGraph.is_circular.is_(True),
             )
         ) or 0
+        relationship_ai_rows = await self.db.scalar(
+            select(func.count(SchemaRelationshipGraph.id))
+            .where(
+                SchemaRelationshipGraph.database_id == database_id,
+                SchemaRelationshipGraph.ai_summary.is_not(None),
+            )
+        ) or 0
 
         # NoSQL tables may not exist yet on older deployments; keep readiness resilient.
         try:
@@ -449,10 +489,9 @@ class ReadinessService:
         if tables > 0:
             try:
                 prompt_context = await PromptStudioService(self.db)._build_context(database_id)
-                registry = get_prompt_registry()
                 for template_id in self.REQUIRED_ARTIFACT_TEMPLATES:
                     try:
-                        rendered = registry.render_prompt(template_id, prompt_context, category="system")
+                        rendered = self.registry.render_prompt(template_id, prompt_context, category="system")
                         if rendered.user_prompt.strip():
                             prompt_artifacts_rendered += 1
                         if template_id == "rag_context":
@@ -499,27 +538,13 @@ class ReadinessService:
             "graph_table_coverage": self._ratio_score(len(graph_table_ids), int(tables)),
             "graph_density": self._relationship_density(int(graph_edge_count), int(tables)),
             "graph_cycles": int(graph_cycles),
+            "relationship_intelligence": int(relationship_ai_rows),
             "isolated_tables": max(0, int(tables) - len(graph_table_ids)),
             "graph_table_ids": len(graph_table_ids),
         }
 
-        ai_context_stats = {
-            "prompt_artifacts_rendered": prompt_artifacts_rendered,
-            "prompt_artifacts_expected": len(self.REQUIRED_ARTIFACT_TEMPLATES),
-            "prompt_context_length": prompt_context_length,
-            "prompt_artifact_errors": prompt_artifact_errors,
-            "embedding_coverage": self._ratio_score(int(embedding_status.get("completed_tables", 0)), int(max(1, tables))),
-            "semantic_dependency_coverage": semantic_stats["semantic_table_coverage"],
-        }
-
         pii_identified_coverage = self._ratio_score(int(column_semantics), int(columns))
         pii_classified_coverage = self._ratio_score(int(pii_typed_columns), max(1, int(pii_columns)))
-        prompt_protection_enabled = bool(
-            settings.pii_prompt_protection_enabled and int(column_semantics) > 0
-        )
-        embedding_protection_enabled = bool(
-            settings.pii_embedding_protection_enabled and int(column_semantics) > 0
-        )
 
         governance_stats = {
             "column_semantics": int(column_semantics),
@@ -528,8 +553,6 @@ class ReadinessService:
             "pii_risk_tagged_columns": int(pii_risk_tagged_columns),
             "pii_identified_coverage": pii_identified_coverage,
             "pii_classified_coverage": pii_classified_coverage,
-            "prompt_protection_enabled": prompt_protection_enabled,
-            "embedding_protection_enabled": embedding_protection_enabled,
             "documentation_coverage": self._documentation_coverage(
                 int(schemas),
                 int(tables),
@@ -543,10 +566,70 @@ class ReadinessService:
             "pii_coverage": pii_identified_coverage,
         }
 
+        if tables > 0:
+            readiness_context = {
+                "database_name": database.display_name or database.name,
+                "database_type": database.db_type.value,
+                "metadata": metadata_stats,
+                "semantic": semantic_stats,
+                "relationships": relationship_stats,
+                "relationship_intelligence": int(relationship_ai_rows),
+                "ai_context": ai_context_stats,
+                "governance": governance_stats,
+                "embeddings": {
+                    "indexed_tables": int(embedding_status.get("indexed_tables", 0)),
+                    "completed_tables": int(embedding_status.get("completed_tables", 0)),
+                    "failed_tables": int(embedding_status.get("failed_tables", 0)),
+                    "vectors_total": int(embedding_status.get("vectors_total", 0)),
+                    "qdrant_health": bool(embedding_status.get("qdrant_health", False)),
+                    "embedding_health": bool(embedding_status.get("embedding_health", False)),
+                    "total_tables": int(embedding_status.get("total_tables", tables)),
+                    "collections": embedding_status.get("collections", []),
+                    "vector_counts": embedding_status.get("vector_counts", {}),
+                },
+                "column_semantics": governance_stats["column_semantics"],
+                "governance_settings": {
+                    "prompt_protection_enabled": governance_stats["prompt_protection_enabled"],
+                    "embedding_protection_enabled": governance_stats["embedding_protection_enabled"],
+                },
+            }
+            for template_id in ("ai_readiness_assessment", "governance_readiness"):
+                try:
+                    rendered = self.registry.render_prompt(template_id, readiness_context, category="readiness")
+                    if rendered.user_prompt.strip():
+                        prompt_artifacts_rendered += 1
+                except Exception as exc:
+                    prompt_artifact_errors.append(f"{template_id}: {exc}")
+
+        ai_context_stats = {
+            "prompt_artifacts_rendered": prompt_artifacts_rendered,
+            "prompt_artifacts_expected": len(self.REQUIRED_ARTIFACT_TEMPLATES) + 2,
+            "prompt_context_length": prompt_context_length,
+            "prompt_artifact_errors": prompt_artifact_errors,
+            "embedding_coverage": self._ratio_score(int(embedding_status.get("completed_tables", 0)), int(max(1, tables))),
+            "semantic_dependency_coverage": semantic_stats["semantic_table_coverage"],
+        }
+
+        prompt_protection_enabled = bool(
+            settings.pii_prompt_protection_enabled
+            and governance_stats["column_semantics"] > 0
+            and prompt_artifacts_rendered >= len(self.REQUIRED_ARTIFACT_TEMPLATES) + 2
+            and not prompt_artifact_errors
+        )
+        embedding_protection_enabled = bool(
+            settings.pii_embedding_protection_enabled
+            and governance_stats["column_semantics"] > 0
+            and governance_stats["pii_columns"] > 0
+            and int(embedding_status.get("completed_tables", 0)) > 0
+        )
+        governance_stats["prompt_protection_enabled"] = prompt_protection_enabled
+        governance_stats["embedding_protection_enabled"] = embedding_protection_enabled
+
         return {
             "metadata": metadata_stats,
             "semantic": semantic_stats,
             "relationships": relationship_stats,
+            "relationship_intelligence": int(relationship_ai_rows),
             "ai_context": ai_context_stats,
             "governance": governance_stats,
             "embeddings": {

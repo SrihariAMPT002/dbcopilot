@@ -161,7 +161,7 @@ async def cancel_pipeline_job(
 )
 async def generate_ai_context(
     db_id: int,
-    background: BackgroundTasks,
+    background_tasks: BackgroundTasks,
     triggered_by: Optional[str] = Query(default="ui"),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -173,7 +173,7 @@ async def generate_ai_context(
             async with db_session() as session:
                 await DatabasePipelineOrchestrator(session).execute_run(parent_job_id)
 
-        background.add_task(_runner, result.parent_job_id)
+        background_tasks.add_task(_runner, result.parent_job_id)
 
         return {
             "database_id": db_id,

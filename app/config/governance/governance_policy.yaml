@@ -1,0 +1,66 @@
+version: "1.1"
+category: policy
+description: "Enterprise governance policy for redaction, embeddings, prompts, RAG, and agents."
+policy:
+  rule_first: true
+  ai_only_for_ambiguous: true
+  store_results_immediately: true
+  system_of_record: "column_semantics"
+  allow_multi_category_classification: true
+risk_levels:
+  critical:
+    confidence_threshold: 0.95
+    action: "redact"
+    redaction_behavior: "hard_redact"
+    embedding_restriction: "exclude_from_embeddings"
+    prompt_restriction: "do_not_emit_raw_value"
+    rag_restriction: "do_not_retrieve_raw_value"
+    agent_restriction: "do_not_surface_raw_value"
+  high:
+    confidence_threshold: 0.85
+    action: "redact"
+    redaction_behavior: "mask_last4_or_label"
+    embedding_restriction: "exclude_sensitive_tokens"
+    prompt_restriction: "summarize_only"
+    rag_restriction: "metadata_only"
+    agent_restriction: "summary_only"
+  medium:
+    confidence_threshold: 0.7
+    action: "mask"
+    redaction_behavior: "partial_mask"
+    embedding_restriction: "token_filter"
+    prompt_restriction: "context_only"
+    rag_restriction: "allow_high_level_context"
+    agent_restriction: "context_only"
+  low:
+    confidence_threshold: 0.0
+    action: "allow"
+    redaction_behavior: "no_redaction"
+    embedding_restriction: "allow"
+    prompt_restriction: "allow"
+    rag_restriction: "allow"
+    agent_restriction: "allow"
+thresholds:
+  auto_approve: 0.8
+  manual_review: 0.6
+  ambiguous_lower_bound: 0.45
+module_controls:
+  prompt_studio:
+    use_redacted_context: true
+    ban_raw_pii: true
+  embeddings:
+    index_sensitive_fields: false
+    store_sensitive_values: false
+  rag:
+    allow_sensitive_retrieval: false
+    allow_summary_retrieval: true
+  agents:
+    allow_sensitive_tool_output: false
+    require_sanitized_context: true
+examples:
+  - category: email
+    behavior: "mask or redact"
+  - category: salary
+    behavior: "treat as sensitive financial data"
+  - category: diagnosis
+    behavior: "treat as regulated health data"

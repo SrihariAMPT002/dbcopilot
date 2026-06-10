@@ -362,6 +362,16 @@ class GraphEdgeResponse(BaseModel):
     relationship_strength: float
     path_depth: int
     is_circular: bool
+    business_entity_graph: Optional[str] = None
+    business_process_flows: Optional[str] = None
+    upstream_dependencies: Optional[str] = None
+    downstream_dependencies: Optional[str] = None
+    entity_lifecycle_descriptions: Optional[str] = None
+    ai_summary: Optional[str] = None
+    ai_confidence: Optional[float] = None
+    ai_model_name: Optional[str] = None
+    ai_prompt_id: Optional[str] = None
+    ai_prompt_version: Optional[str] = None
 
 
 class GraphMetricsResponse(BaseModel):
@@ -383,6 +393,7 @@ class RelationshipGraphResponse(BaseModel):
     edges: List[GraphEdgeResponse] = Field(default_factory=list)
     metrics: GraphMetricsResponse
     cycles: List[List[str]] = Field(default_factory=list)
+    relationship_intelligence: Dict[str, Any] = Field(default_factory=dict)
 
 
 class TableNeighborsResponse(BaseModel):
@@ -479,6 +490,14 @@ class PipelineJobResponse(BaseModel):
 class PipelineRunResponse(BaseModel):
     database_id: int
     created_job_ids: List[int] = Field(default_factory=list)
+    message: str
+
+
+class JobQueueResponse(BaseModel):
+    database_id: int
+    job_id: int
+    job_type: str
+    status: str
     message: str
 
 

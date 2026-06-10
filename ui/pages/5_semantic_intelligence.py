@@ -17,6 +17,7 @@ from components.api_client import (
     get_connections,
     get_semantic_profile,
 )
+from components.job_utils import render_job_status
 from components.sidebar import render_sidebar
 
 
@@ -233,14 +234,19 @@ with action_cols[0]:
         st.session_state.semantic_generate_busy = False
 
         if ok_generate:
+            status = str(result.get("status", "")).upper()
             st.session_state.semantic_last_duration_ms = result.get("duration_ms")
             _load_profile(db_id, force=True)
-            st.success(
-                result.get(
-                    "message",
-                    "Semantic profile generated. PII intelligence runs automatically after semantic generation.",
+            if status == "QUEUED":
+                st.success(result.get("message", "Semantic generation queued."))
+                render_job_status(result.get("job_id"), label="Semantic Job")
+            else:
+                st.success(
+                    result.get(
+                        "message",
+                        "Semantic profile generated. PII intelligence runs automatically after semantic generation.",
+                    )
                 )
-            )
             st.rerun()
         else:
             st.error(result.get("error", result.get("detail", "Semantic generation failed")))

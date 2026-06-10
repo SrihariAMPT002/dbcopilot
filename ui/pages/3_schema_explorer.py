@@ -159,6 +159,74 @@ def _confidence_cell(semantic: dict | None) -> str:
     return f"<span class='col-badge conf-badge'>{score:.0%}</span>"
 
 
+def _pii_summary_panel(semantics_by_column: Dict[int, dict], columns_by_table: Dict[int, list[dict]]) -> None:
+    pii_rows = [item for item in semantics_by_column.values() if item.get("is_pii")]
+    high_risk_rows = [
+        item
+        for item in pii_rows
+        if str(item.get("risk_level", "")).lower() in {"high", "critical"}
+    ]
+    pii_types = sorted(
+        {str(item.get("pii_type")).strip() for item in pii_rows if item.get("pii_type")}
+    )
+    total_columns = sum(len(cols) for cols in columns_by_table.values())
+    classified_columns = len(semantics_by_column)
+    coverage = int(round((classified_columns / total_columns) * 100)) if total_columns else 0
+
+    st.markdown("### PII Summary")
+    summary_cols = st.columns(4)
+    summary_cols[0].metric("PII Columns", len(pii_rows))
+    summary_cols[1].metric("High Risk Columns", len(high_risk_rows))
+    summary_cols[2].metric("Sensitive Data Types", len(pii_types))
+    summary_cols[3].metric("Governance Coverage", f"{coverage}%")
+
+    if pii_rows:
+        st.markdown("#### PII Columns")
+        st.dataframe(
+            [
+                {
+                    "Schema": item.get("schema_name"),
+                    "Table": item.get("table_name"),
+                    "Column": item.get("column_name"),
+                    "PII Type": item.get("pii_type") or "PII",
+                    "Risk Level": str(item.get("risk_level") or "low").title(),
+                    "Confidence": f"{float(item.get('confidence_score', 0.0)):.0%}",
+                }
+                for item in pii_rows
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.info("No PII columns have been detected yet.")
+
+    if high_risk_rows:
+        st.markdown("#### High Risk Columns")
+        st.dataframe(
+            [
+                {
+                    "Schema": item.get("schema_name"),
+                    "Table": item.get("table_name"),
+                    "Column": item.get("column_name"),
+                    "PII Type": item.get("pii_type") or "PII",
+                    "Risk Level": str(item.get("risk_level") or "high").title(),
+                    "Confidence": f"{float(item.get('confidence_score', 0.0)):.0%}",
+                }
+                for item in high_risk_rows
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.caption("No high-risk PII columns detected.")
+
+    if pii_types:
+        st.markdown("#### Sensitive Data Types")
+        st.write(", ".join(pii_types))
+    else:
+        st.caption("Sensitive data types will appear here once PII is classified.")
+
+
 def _col_badges(col: dict) -> str:
     badges = []
     if col.get("is_primary_key"):
@@ -272,6 +340,7 @@ field_search = st.text_input(
 
 pii_filter = "All Columns"
 semantics_by_column: Dict[int, dict] = {}
+columns_by_table: Dict[int, list[dict]] = {}
 if family == "SQL":
     pii_filter = st.selectbox(
         "PII Filter",
@@ -361,6 +430,7 @@ if family == "SQL":
                 if not matched_fields:
                     continue
             filtered_tables.append(table)
+            columns_by_table[table.get("id")] = []
 
         if schema_search and not filtered_tables and not _match_text(schema_name, schema_search):
             continue
@@ -401,6 +471,8 @@ if family == "SQL":
                             f"{columns.get('error', 'Unknown error')}"
                         )
                         continue
+
+                    columns_by_table[entity_id] = columns if isinstance(columns, list) else []
 
                     if not columns:
                         st.caption(f"No {terms['field_label'].lower()}s found.")
@@ -473,6 +545,9 @@ if family == "SQL":
                                 f"- `{rel.get('column_name')}` → **{ref_schema}{rel.get('referenced_table_name')}**"
                                 f".`{rel.get('referenced_column_name')}`"
                             )
+
+    if family == "SQL":
+        _pii_summary_panel(semantics_by_column, columns_by_table)
 
 else:
     ok_collections, collections_payload = mongodb_collections(db_id)

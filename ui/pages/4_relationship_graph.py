@@ -4,6 +4,7 @@ Relationship Graph page - visual schema relationship intelligence.
 
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 
@@ -123,6 +124,7 @@ nodes = graph_payload.get("nodes", [])
 edges = graph_payload.get("edges", [])
 metrics = graph_payload.get("metrics", {})
 cycles = graph_payload.get("cycles", [])
+relationship_intelligence = graph_payload.get("relationship_intelligence", {})
 
 top1, top2, top3, top4, top5 = st.columns(5)
 top1.markdown(
@@ -147,6 +149,32 @@ top5.markdown(
 )
 
 st.markdown("")
+
+if relationship_intelligence:
+    st.markdown("### Business Relationship Intelligence")
+    bi_col1, bi_col2 = st.columns(2)
+    with bi_col1:
+        st.markdown("**AI Summary**")
+        st.write(relationship_intelligence.get("ai_summary") or "No business summary available yet.")
+        st.markdown("**Business Entity Graph**")
+        st.code(relationship_intelligence.get("business_entity_graph") or "[]", language="json")
+    with bi_col2:
+        st.markdown("**Business Process Flows**")
+        st.code(relationship_intelligence.get("business_process_flows") or "[]", language="json")
+        st.markdown("**Upstream / Downstream**")
+        st.code(
+            json.dumps({
+                "upstream_dependencies": relationship_intelligence.get("upstream_dependencies") or "[]",
+                "downstream_dependencies": relationship_intelligence.get("downstream_dependencies") or "[]",
+            }, indent=2),
+            language="json",
+        )
+    st.caption(
+        f"Prompt: {relationship_intelligence.get('ai_prompt_id', 'relationship_discovery')} "
+        f"v{relationship_intelligence.get('ai_prompt_version', '')} · "
+        f"Model: {relationship_intelligence.get('ai_model_name', '')}"
+    )
+    st.markdown("---")
 
 node_map = {f"{node['schema_name']}.{node['table_name']}": node for node in nodes}
 focus_options = list(node_map.keys())

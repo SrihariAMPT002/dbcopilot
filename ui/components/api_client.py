@@ -9,12 +9,15 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 API_BASE = os.getenv("API_BASE_URL", "http://localhost:8000/api/v1")
-TIMEOUT = 30
+DEFAULT_TIMEOUT = 30
+SYNC_TIMEOUT = int(os.getenv("SYNC_REQUEST_TIMEOUT_SECONDS", "180") or 180)
+EMBEDDINGS_TIMEOUT = int(os.getenv("EMBEDDINGS_REQUEST_TIMEOUT_SECONDS", "180") or 180)
+PROMPT_STUDIO_TIMEOUT = int(os.getenv("PROMPT_STUDIO_REQUEST_TIMEOUT_SECONDS", "180") or 180)
 
 
-def _get(path: str, **params) -> Tuple[bool, Any]:
+def _get(path: str, timeout: int = DEFAULT_TIMEOUT, **params) -> Tuple[bool, Any]:
     try:
-        r = requests.get(f"{API_BASE}{path}", params=params, timeout=TIMEOUT)
+        r = requests.get(f"{API_BASE}{path}", params=params, timeout=timeout)
         r.raise_for_status()
         return True, r.json()
     except requests.exceptions.ConnectionError:
@@ -29,9 +32,9 @@ def _get(path: str, **params) -> Tuple[bool, Any]:
         return False, {"error": str(e)}
 
 
-def _post(path: str, payload: Dict) -> Tuple[bool, Any]:
+def _post(path: str, payload: Dict, timeout: int = DEFAULT_TIMEOUT) -> Tuple[bool, Any]:
     try:
-        r = requests.post(f"{API_BASE}{path}", json=payload, timeout=TIMEOUT)
+        r = requests.post(f"{API_BASE}{path}", json=payload, timeout=timeout)
         r.raise_for_status()
         return True, r.json()
     except requests.exceptions.ConnectionError:
@@ -46,9 +49,9 @@ def _post(path: str, payload: Dict) -> Tuple[bool, Any]:
         return False, {"error": str(e)}
 
 
-def _delete(path: str) -> Tuple[bool, Any]:
+def _delete(path: str, timeout: int = DEFAULT_TIMEOUT) -> Tuple[bool, Any]:
     try:
-        r = requests.delete(f"{API_BASE}{path}", timeout=TIMEOUT)
+        r = requests.delete(f"{API_BASE}{path}", timeout=timeout)
         r.raise_for_status()
         return True, r.json()
     except requests.exceptions.ConnectionError:
@@ -68,7 +71,7 @@ def connect_database(payload: Dict) -> Tuple[bool, Any]:
 
 
 def sync_schema(db_id: int) -> Tuple[bool, Any]:
-    return _post(f"/connections/{db_id}/sync", {})
+    return _post(f"/connections/{db_id}/sync", {}, timeout=SYNC_TIMEOUT)
 
 
 def get_connections() -> Tuple[bool, Any]:
@@ -135,7 +138,7 @@ def get_sync_logs(db_id: int, limit: int = 5) -> Tuple[bool, Any]:
 
 
 def generate_embeddings(db_id: int) -> Tuple[bool, Any]:
-    return _post(f"/embeddings/generate/{db_id}", {})
+    return _post(f"/embeddings/generate/{db_id}", {}, timeout=EMBEDDINGS_TIMEOUT)
 
 
 def get_embedding_status(db_id: int) -> Tuple[bool, Any]:
@@ -175,7 +178,7 @@ def list_prompt_templates() -> Tuple[bool, Any]:
 
 
 def generate_prompt_artifacts(db_id: int) -> Tuple[bool, Any]:
-    return _post(f"/prompt-studio/generate/{db_id}", {})
+    return _post(f"/prompt-studio/generate/{db_id}", {}, timeout=PROMPT_STUDIO_TIMEOUT)
 
 
 def preview_prompt_artifact(db_id: int, artifact_type: str) -> Tuple[bool, Any]:
@@ -268,6 +271,10 @@ def get_pipeline_jobs(limit: int = 100, status: Optional[str] = None) -> Tuple[b
 
 def get_pipeline_job(job_id: int) -> Tuple[bool, Any]:
     return _get(f"/pipeline/jobs/{job_id}")
+
+
+def get_pipeline_job_status(job_id: int) -> Tuple[bool, Any]:
+    return get_pipeline_job(job_id)
 
 
 def retry_pipeline_job(job_id: int, triggered_by: str = "ui") -> Tuple[bool, Any]:

@@ -5,6 +5,7 @@ Connect Database page - connection onboarding.
 import streamlit as st
 
 from components.api_client import connect_database, sync_schema, test_connection
+from components.job_utils import render_job_status
 from components.sidebar import render_sidebar
 
 
@@ -186,14 +187,20 @@ if connect_btn:
         with st.spinner("Syncing schema..."):
             ok2, sync_result = sync_schema(db_id)
 
-        if ok2 and sync_result.get("success"):
-            st.success(
-                f"Schema sync complete. "
-                f"Discovered {sync_result.get('schemas_discovered', 0)} schema(s), "
-                f"{sync_result.get('tables_discovered', 0)} table(s), "
-                f"{sync_result.get('columns_discovered', 0)} column(s)."
-            )
-            st.info("Go to Connected Sources or Schema Explorer to continue.")
+        if ok2:
+            status = str(sync_result.get("status", "")).upper()
+            if status == "QUEUED":
+                st.success(sync_result.get("message", "Schema sync queued."))
+                render_job_status(sync_result.get("job_id"), label="Sync Job")
+                st.info("Go to Connected Sources or the Jobs Dashboard to monitor progress.")
+            else:
+                st.success(
+                    f"Schema sync complete. "
+                    f"Discovered {sync_result.get('schemas_discovered', 0)} schema(s), "
+                    f"{sync_result.get('tables_discovered', 0)} table(s), "
+                    f"{sync_result.get('columns_discovered', 0)} column(s)."
+                )
+                st.info("Go to Connected Sources or Schema Explorer to continue.")
         else:
             msg = sync_result.get("message") or sync_result.get("error") or "Unknown error"
             st.warning(

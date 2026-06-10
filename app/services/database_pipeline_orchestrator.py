@@ -18,11 +18,11 @@ from app.models.metadata import ConnectedDatabase, DatabaseSchema, DatabaseTable
 from app.models.pipeline_job import JobStatus, JobType
 from app.schema_engine.embeddings import EmbeddingEngine
 from app.schema_engine.enricher import SchemaEnricher
-from app.schema_engine.prompt_builder import PromptBuilder
 from app.services.artifact_service import ArtifactService
 from app.services.mongodb_service import MongoDBService
 from app.services.pipeline_service import PipelineService
 from app.services.readiness_service import ReadinessService
+from app.services.prompt_studio_service import PromptStudioService
 
 logger = logging.getLogger(__name__)
 
@@ -180,12 +180,12 @@ class DatabasePipelineOrchestrator:
         completed_units += 1
         await self._update_parent_progress(parent_job_id, completed_units, total_units)
 
-        # Prompt package (db-level, derived from semantics)
+        # Database intelligence package (db-level)
         prompt_job_id = await self._db_stage_job_id(parent_job_id, JobType.prompt)
         if prompt_job_id:
             await self.pipeline.update_status(prompt_job_id, JobStatus.running, progress_percentage=10)
         try:
-            _ = await PromptBuilder(self.db).build_semantic_context(database_id)
+            await PromptStudioService(self.db).generate_artifacts(database_id)
             if prompt_job_id:
                 await self.pipeline.update_status(prompt_job_id, JobStatus.completed, progress_percentage=100)
         except Exception as exc:
@@ -292,4 +292,3 @@ class DatabasePipelineOrchestrator:
             .where(PipelineJob.parent_job_id == parent_job_id, PipelineJob.status == JobStatus.failed)
         )
         return int(res.scalar() or 0)
-

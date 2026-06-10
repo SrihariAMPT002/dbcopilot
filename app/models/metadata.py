@@ -507,6 +507,16 @@ class SchemaRelationshipGraph(Base):
     relationship_strength: Mapped[float] = mapped_column(nullable=False, default=1.0)
     path_depth: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     is_circular: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    business_entity_graph: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    business_process_flows: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    upstream_dependencies: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    downstream_dependencies: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    entity_lifecycle_descriptions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ai_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ai_confidence: Mapped[Optional[float]] = mapped_column(nullable=True)
+    ai_model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    ai_prompt_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    ai_prompt_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

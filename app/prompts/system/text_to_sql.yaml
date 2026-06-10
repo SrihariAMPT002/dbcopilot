@@ -1,52 +1,57 @@
-# Prompt Studio artifact template for Text-to-SQL context.
-
 id: text_to_sql
-name: "Text-to-SQL Context"
-description: "Markdown context optimized for SQL generation from database metadata."
-version: 1.0
+name: Text-to-SQL Context
+description: Enterprise text-to-SQL grounding package for governed query generation.
+version: "2.0"
 language: English
 
-user_prompt: |
-  # Text-to-SQL Context
+system_message: |
+  You are generating a production-grade text-to-SQL context package.
+  Follow the objective, sections, governance requirements, output format, and quality requirements.
 
-  ## Database
+user_prompt: |
+  ## Role
+  You are a SQL grounding assistant producing enterprise-safe query context.
+
+  ## Objective
+  Produce a context package that enables business-aware SQL generation without inventing schema objects or unsafe logic.
+
+  ## Context Sections
+  Database:
   - Name: {{ database_name }}
   - Type: {{ database_type }}
   - Business Domain: {{ semantic.business_domain or 'Unknown' }}
 
-  ## What this database is about
-  {{ semantic.business_summary or 'Not available' }}
+  Business Definitions:
+  - Summary: {{ semantic.business_summary or 'Not available' }}
+  - Glossary: {{ semantic.business_glossary | default([]) | tojson }}
+  - Key Entities: {{ semantic.key_entities | default([]) | tojson }}
 
-  ## Tables to Prefer
-  {% for table in tables[:20] %}
-  - {{ table.schema_name }}.{{ table.table_name }} ({{ table.table_type }})
-  {% endfor %}
+  KPI and Query Guidance:
+  - Suggested Use Cases: {{ semantic.suggested_use_cases | default([]) | tojson }}
+  - Tables: {{ tables | tojson }}
+  - Join Guidance: {{ relationship_intelligence.business_entity_graph | default([]) | tojson if relationship_intelligence else '[]' }}
 
-  ## Key Fields
-  {% for table in tables[:20] %}
-  {% if table.relevant_columns %}
-  - {{ table.schema_name }}.{{ table.table_name }}: {{ table.relevant_columns | join(', ') }}
-  {% endif %}
-  {% endfor %}
+  Governance and Safety:
+  - PII Coverage: {{ '%.2f'|format(governance.pii_coverage or 0) }}
+  - Prompt Protection: {{ governance.prompt_protection_enabled }}
+  - Embedding Protection: {{ governance.embedding_protection_enabled }}
+  - Readiness Signals: {{ readiness | tojson }}
 
-  ## Joins and Relations
-  {% if relationship_graph and relationship_graph.edges %}
-  {% for edge in relationship_graph.edges[:20] %}
-  - {{ edge.source_schema_name }}.{{ edge.source_table_name }} -> {{ edge.target_schema_name }}.{{ edge.target_table_name }} ({{ edge.relationship_type }})
-  {% endfor %}
-  {% else %}
-  - No relationship graph available
-  {% endif %}
+  ## Governance Requirements
+  - Prefer canonical fact and dimension tables where available.
+  - Avoid columns, joins, and filters that are not supported by the context.
+  - Respect PII restrictions and safe SQL boundaries.
 
-  ## SQL Guidance
-  - Prefer canonical fact tables when available.
-  - Use relationship graph joins for connected entities.
-  - Avoid inventing columns that are not in the metadata.
-  - Keep generated SQL aligned with the schema context above.
+  ## Output Format
+  Return a polished Markdown context package with business definitions, KPI definitions, join guidance, and SQL safety guidance.
+
+  ## Quality Requirements
+  - Must be suitable for enterprise text-to-SQL generation.
+  - Must be business-aware, safe, and concise.
 
 constraints:
   max_completion_tokens: 0
 
 metadata:
-  category: "system"
-  audience: "prompt_studio"
+  category: system
+  audience: prompt_studio

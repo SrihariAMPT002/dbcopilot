@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     max_pool_size: int = Field(default=5)
     min_pool_size: int = Field(default=1)
     connection_max_retries: int = Field(default=3)
+    sync_request_timeout_seconds: int = Field(default=180)
+    embeddings_request_timeout_seconds: int = Field(default=180)
+    prompt_studio_request_timeout_seconds: int = Field(default=180)
 
     # ── Streamlit ──────────────────────────────────────────────
     api_base_url: str = Field(default="http://fastapi:8000/api/v1")

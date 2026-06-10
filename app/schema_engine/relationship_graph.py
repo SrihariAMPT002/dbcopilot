@@ -19,6 +19,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.models.metadata import (
     ConnectedDatabase,
     DatabaseColumn,
@@ -26,8 +27,12 @@ from app.models.metadata import (
     DatabaseSchema,
     DatabaseTable,
     SchemaRelationshipGraph,
+    SchemaSemantic,
+    DatabaseSemantic,
 )
+from app.services.ai_observability_service import AIObservabilityService
 from app.utils import safe_flush
+from app.config.prompts import get_prompt_registry
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +93,7 @@ class RelationshipGraphSnapshot:
     edges: List[GraphEdgeRecord] = field(default_factory=list)
     metrics: GraphMetrics | None = None
     cycles: List[List[str]] = field(default_factory=list)
+    relationship_intelligence: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -323,6 +329,365 @@ class RelationshipGraphEngine:
             cycle_count=len(cycles),
         )
 
+    @staticmethod
+    def _json_safe(value: Any) -> str:
+        return json.dumps(value, default=str, indent=2)
+
+    @staticmethod
+    def _cluster_key(table_ids: list[int]) -> tuple[int, ...]:
+        return tuple(sorted(table_ids))
+
+    @staticmethod
+    def _cluster_label(tables: dict[int, DatabaseTable], table_ids: list[int]) -> str:
+        ordered = sorted(
+            (tables[table_id] for table_id in table_ids if table_id in tables),
+            key=lambda item: (item.schema.name, item.name),
+        )
+        if not ordered:
+            return "empty-cluster"
+        head = ordered[0]
+        if len(ordered) == 1:
+            return f"{head.schema.name}.{head.name}"
+        return f"{head.schema.name}.{head.name} +{len(ordered) - 1}"
+
+    @staticmethod
+    def _limit_columns(table: DatabaseTable, max_columns: int = 8) -> list[dict[str, Any]]:
+        return [
+            {
+                "name": column.name,
+                "data_type": column.data_type,
+                "is_primary_key": column.is_primary_key,
+                "is_foreign_key": column.is_foreign_key,
+                "is_unique": column.is_unique,
+            }
+            for column in sorted(table.columns, key=lambda item: item.ordinal_position or 0)[:max_columns]
+        ]
+
+    def _build_cluster_payload(
+        self,
+        database: ConnectedDatabase,
+        tables: dict[int, DatabaseTable],
+        edges: list[GraphEdgeRecord],
+        cluster_table_ids: list[int],
+        database_semantic: Optional[DatabaseSemantic],
+        table_semantics: list[tuple[SchemaSemantic, DatabaseTable]],
+    ) -> dict[str, Any]:
+        cluster_tables = [tables[table_id] for table_id in cluster_table_ids if table_id in tables]
+        cluster_table_ids_set = set(cluster_table_ids)
+        cluster_edges = [
+            edge for edge in edges
+            if edge.source_table_id in cluster_table_ids_set and edge.target_table_id in cluster_table_ids_set
+        ]
+        semantic_lookup = {semantic.table_id: semantic for semantic, _ in table_semantics}
+        return {
+            "database_id": database.id,
+            "database_name": database.display_name or database.name,
+            "database_type": database.db_type.value,
+            "cluster_id": self._cluster_key(cluster_table_ids),
+            "cluster_label": self._cluster_label(tables, cluster_table_ids),
+            "schema_summary": [
+                {
+                    "schema_name": table.schema.name,
+                    "table_name": table.name,
+                    "table_type": table.table_type.value,
+                    "description": table.description,
+                    "row_count": table.row_count,
+                }
+                for table in cluster_tables
+            ],
+            "relationships": [
+                {
+                    "source": f"{edge.source_schema_name}.{edge.source_table_name}",
+                    "target": f"{edge.target_schema_name}.{edge.target_table_name}",
+                    "relationship_type": edge.relationship_type,
+                    "join_columns": [asdict(link) for link in edge.join_columns],
+                    "strength": edge.relationship_strength,
+                    "depth": edge.path_depth,
+                }
+                for edge in cluster_edges
+            ],
+            "columns": [
+                {
+                    "schema_name": table.schema.name,
+                    "table_name": table.name,
+                    "columns": self._limit_columns(table),
+                }
+                for table in cluster_tables
+            ],
+            "semantic": {
+                "database_semantic": {
+                    "business_domain": database_semantic.business_domain if database_semantic else None,
+                    "business_summary": database_semantic.business_summary if database_semantic else None,
+                    "analysis_notes": database_semantic.analysis_notes if database_semantic else None,
+                    "key_entities": database_semantic.key_entities if database_semantic else [],
+                },
+                "table_semantics": [
+                    {
+                        "table_id": semantic.table_id,
+                        "schema_name": table.schema.name,
+                        "table_name": table.name,
+                        "semantic_summary": semantic.semantic_summary,
+                        "business_keywords": semantic.business_keywords,
+                        "likely_usage": semantic.likely_usage,
+                    }
+                    for semantic, table in table_semantics
+                    if semantic.table_id in cluster_table_ids_set
+                ],
+            },
+            "relationship_graph": {
+                "nodes": [
+                    {
+                        "table_id": table.id,
+                        "schema_id": table.schema_id,
+                        "schema_name": table.schema.name,
+                        "table_name": table.name,
+                        "table_type": table.table_type.value,
+                    }
+                    for table in cluster_tables
+                ],
+                "edges": [
+                    {
+                        "source_table_id": edge.source_table_id,
+                        "target_table_id": edge.target_table_id,
+                        "source_table_name": edge.source_table_name,
+                        "target_table_name": edge.target_table_name,
+                        "source_schema_name": edge.source_schema_name,
+                        "target_schema_name": edge.target_schema_name,
+                        "relationship_type": edge.relationship_type,
+                    }
+                    for edge in cluster_edges
+                ],
+            },
+        }
+
+    @staticmethod
+    def _parse_json_object(text: str) -> dict[str, Any]:
+        cleaned = (text or "").strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        if not cleaned:
+            return {}
+        try:
+            parsed = json.loads(cleaned)
+            return parsed if isinstance(parsed, dict) else {"value": parsed}
+        except Exception:
+            return {"raw_response": cleaned}
+
+    async def _fetch_semantics(
+        self,
+        database_id: int,
+    ) -> tuple[Optional[DatabaseSemantic], list[tuple[SchemaSemantic, DatabaseTable]]]:
+        database_semantic = await self.db.scalar(
+            select(DatabaseSemantic).where(DatabaseSemantic.source_id == database_id)
+        )
+        result = await self.db.execute(
+            select(SchemaSemantic, DatabaseTable)
+            .join(DatabaseTable, SchemaSemantic.table_id == DatabaseTable.id)
+            .join(DatabaseSchema, DatabaseTable.schema_id == DatabaseSchema.id)
+            .where(DatabaseSchema.connected_db_id == database_id)
+        )
+        table_semantics = [
+            (semantic, table)
+            for semantic, table in result.all()
+        ]
+        return database_semantic, table_semantics
+
+    def _cluster_tables(self, tables: list[DatabaseTable], edges: list[GraphEdgeRecord]) -> list[list[int]]:
+        adjacency: dict[int, set[int]] = defaultdict(set)
+        for table in tables:
+            adjacency[table.id]
+        for edge in edges:
+            adjacency[edge.source_table_id].add(edge.target_table_id)
+            adjacency[edge.target_table_id].add(edge.source_table_id)
+
+        clusters: list[list[int]] = []
+        seen: set[int] = set()
+        for table in tables:
+            if table.id in seen:
+                continue
+            queue = deque([table.id])
+            seen.add(table.id)
+            cluster: list[int] = []
+            while queue:
+                current = queue.popleft()
+                cluster.append(current)
+                for neighbor in adjacency.get(current, set()):
+                    if neighbor not in seen:
+                        seen.add(neighbor)
+                        queue.append(neighbor)
+            clusters.append(sorted(cluster))
+        return sorted(clusters, key=lambda ids: (len(ids), ids))
+
+    async def _analyze_cluster_relationships(
+        self,
+        database: ConnectedDatabase,
+        tables: dict[int, DatabaseTable],
+        edges: list[GraphEdgeRecord],
+        cluster_table_ids: list[int],
+        database_semantic: Optional[DatabaseSemantic],
+        table_semantics: list[tuple[SchemaSemantic, DatabaseTable]],
+    ) -> dict[str, Any]:
+        prompt_context = self._build_cluster_payload(
+            database,
+            tables,
+            edges,
+            cluster_table_ids,
+            database_semantic,
+            table_semantics,
+        )
+        registry = get_prompt_registry()
+        discovery_prompt = registry.render_prompt("relationship_discovery", prompt_context, category="relationship")
+        analysis_prompt = registry.render_prompt("business_relationship_analysis", prompt_context, category="relationship")
+        observability = AIObservabilityService()
+        result = await observability.generate(
+            operation="chat",
+            module="relationship_intelligence",
+            artifact_type="relationship_analysis",
+            prompt_id=discovery_prompt.metadata.id,
+            prompt_version=discovery_prompt.metadata.version,
+            database_id=database.id,
+            database_name=database.display_name or database.name,
+            model_name=settings.azure_openai_deployment or "azure_openai",
+            messages=[
+                {"role": "system", "content": analysis_prompt.system_message or discovery_prompt.system_message},
+                {"role": "user", "content": "\n\n".join([discovery_prompt.user_prompt, analysis_prompt.user_prompt])},
+            ],
+            request_kwargs={"response_format": {"type": "json_object"}, "max_completion_tokens": 1200},
+            completeness_score=1.0,
+            coverage_score=min(1.0, len(cluster_table_ids) / max(1, len(tables))),
+            confidence_score=0.0,
+            extra_metadata={
+                "feature": "relationship_analysis_cluster",
+                "prompt_name": discovery_prompt.metadata.id,
+                "artifact_type": "relationship_analysis",
+                "cluster_size": len(cluster_table_ids),
+                "cluster_label": prompt_context["cluster_label"],
+            },
+        )
+        payload = self._parse_json_object(result.content or "")
+        payload.setdefault("business_entity_graph", payload.get("business_entity_graph") or [])
+        payload.setdefault("business_process_flows", payload.get("business_process_flows") or [])
+        payload.setdefault("upstream_dependencies", payload.get("upstream_dependencies") or [])
+        payload.setdefault("downstream_dependencies", payload.get("downstream_dependencies") or [])
+        payload.setdefault("entity_lifecycle_descriptions", payload.get("entity_lifecycle_descriptions") or [])
+        payload.setdefault("business_relationship_summary", payload.get("business_relationship_summary") or "")
+        payload["confidence_score"] = float(payload.get("confidence_score", 0.7 if payload.get("business_relationship_summary") else 0.0) or 0.0)
+        payload["prompt_name"] = discovery_prompt.metadata.id
+        payload["prompt_version"] = str(discovery_prompt.metadata.version)
+        payload["model_name"] = result.model_name
+        payload["database_id"] = database.id
+        payload["feature"] = "relationship_analysis_cluster"
+        payload["trace_id"] = result.trace_id
+        payload["trace_url"] = result.trace_url
+        payload["source_prompt"] = discovery_prompt.user_prompt
+        payload["analysis_prompt"] = analysis_prompt.user_prompt
+        payload["cluster_id"] = self._cluster_key(cluster_table_ids)
+        payload["cluster_label"] = prompt_context["cluster_label"]
+        payload["cluster_table_ids"] = cluster_table_ids
+        return payload
+
+    async def _synthesize_relationship_intelligence(
+        self,
+        database: ConnectedDatabase,
+        tables: list[DatabaseTable],
+        edges: list[GraphEdgeRecord],
+    ) -> dict[str, Any]:
+        database_semantic, table_semantics = await self._fetch_semantics(database.id)
+        cluster_ids = self._cluster_tables(tables, edges)
+        cluster_payloads = [
+            await self._analyze_cluster_relationships(database, {table.id: table for table in tables}, edges, cluster_id, database_semantic, table_semantics)
+            for cluster_id in cluster_ids
+        ]
+
+        summary_payload = {
+            "database_id": database.id,
+            "database_name": database.display_name or database.name,
+            "database_type": database.db_type.value,
+            "cluster_count": len(cluster_payloads),
+            "clusters": [
+                {
+                    "cluster_id": payload.get("cluster_id"),
+                    "cluster_label": payload.get("cluster_label"),
+                    "cluster_size": len(payload.get("cluster_table_ids", [])),
+                    "business_relationship_summary": payload.get("business_relationship_summary", ""),
+                    "business_entity_graph": payload.get("business_entity_graph", []),
+                    "business_process_flows": payload.get("business_process_flows", []),
+                    "upstream_dependencies": payload.get("upstream_dependencies", []),
+                    "downstream_dependencies": payload.get("downstream_dependencies", []),
+                    "entity_lifecycle_descriptions": payload.get("entity_lifecycle_descriptions", []),
+                    "confidence_score": payload.get("confidence_score", 0.0),
+                }
+                for payload in cluster_payloads
+            ],
+            "database_semantic": {
+                "business_domain": database_semantic.business_domain if database_semantic else None,
+                "business_summary": database_semantic.business_summary if database_semantic else None,
+                "analysis_notes": database_semantic.analysis_notes if database_semantic else None,
+                "key_entities": database_semantic.key_entities if database_semantic else [],
+            },
+            "semantic": {
+                "database_semantic": {
+                    "business_domain": database_semantic.business_domain if database_semantic else None,
+                    "business_summary": database_semantic.business_summary if database_semantic else None,
+                    "analysis_notes": database_semantic.analysis_notes if database_semantic else None,
+                    "key_entities": database_semantic.key_entities if database_semantic else [],
+                },
+                "table_semantics": [],
+            },
+            "relationship_graph": {
+                "nodes": [],
+                "edges": [],
+            },
+            "relationships": [],
+            "columns": [],
+        }
+        registry = get_prompt_registry()
+        synthesis_prompt = registry.render_prompt("business_relationship_analysis", summary_payload, category="relationship")
+        observability = AIObservabilityService()
+        result = await observability.generate(
+            operation="chat",
+            module="relationship_intelligence",
+            artifact_type="relationship_analysis",
+            prompt_id=synthesis_prompt.metadata.id,
+            prompt_version=synthesis_prompt.metadata.version,
+            database_id=database.id,
+            database_name=database.display_name or database.name,
+            model_name=settings.azure_openai_deployment or "azure_openai",
+            messages=[
+                {"role": "system", "content": synthesis_prompt.system_message},
+                {"role": "user", "content": synthesis_prompt.user_prompt},
+            ],
+            request_kwargs={"response_format": {"type": "json_object"}, "max_completion_tokens": 1200},
+            completeness_score=1.0,
+            coverage_score=min(1.0, len(cluster_payloads) / max(1, len(tables))),
+            confidence_score=0.0,
+            extra_metadata={
+                "feature": "relationship_analysis_synthesis",
+                "cluster_count": len(cluster_payloads),
+                "table_count": len(tables),
+                "relationship_count": len(edges),
+            },
+        )
+        payload = self._parse_json_object(result.content or "")
+        payload.setdefault("business_entity_graph", payload.get("business_entity_graph") or [])
+        payload.setdefault("business_process_flows", payload.get("business_process_flows") or [])
+        payload.setdefault("upstream_dependencies", payload.get("upstream_dependencies") or [])
+        payload.setdefault("downstream_dependencies", payload.get("downstream_dependencies") or [])
+        payload.setdefault("entity_lifecycle_descriptions", payload.get("entity_lifecycle_descriptions") or [])
+        payload.setdefault("business_relationship_summary", payload.get("business_relationship_summary") or "")
+        payload["cluster_summaries"] = summary_payload["clusters"]
+        payload["cluster_count"] = len(cluster_payloads)
+        payload["prompt_name"] = synthesis_prompt.metadata.id
+        payload["prompt_version"] = str(synthesis_prompt.metadata.version)
+        payload["model_name"] = result.model_name
+        payload["database_id"] = database.id
+        payload["feature"] = "relationship_analysis_synthesis"
+        payload["trace_id"] = result.trace_id
+        payload["trace_url"] = result.trace_url
+        payload["source_prompt"] = synthesis_prompt.user_prompt
+        payload["analysis_prompt"] = synthesis_prompt.user_prompt
+        return payload
+
     async def build_relationship_graph(self, database_id: int, persist: bool = True) -> RelationshipGraphSnapshot:
         database = await self._fetch_database(database_id)
         tables = await self._fetch_tables(database_id)
@@ -405,6 +770,7 @@ class RelationshipGraphEngine:
                         max((max(path_lengths.values()) for path_lengths in lengths.values()), default=0),
                     )
         metrics = self._build_metrics(nodes, edges, graph_depth, cycles)
+        relationship_intelligence = await self._synthesize_relationship_intelligence(database, tables, edges)
         snapshot = RelationshipGraphSnapshot(
             database_id=database.id,
             database_name=database.display_name or database.name,
@@ -416,14 +782,56 @@ class RelationshipGraphEngine:
                 [f"{table_by_id[node_id].schema.name}.{table_by_id[node_id].name}" for node_id in cycle if node_id in table_by_id]
                 for cycle in cycles
             ],
+            relationship_intelligence=relationship_intelligence,
         )
 
         if persist:
-            await self._persist_graph(database_id, edges)
+            await self._persist_graph(database_id, edges, relationship_intelligence)
+
+        # Validate relationship prompts are loadable for downstream Prompt Studio / governance flows.
+        try:
+            registry = get_prompt_registry()
+            prompt_context = {
+                "database_name": database.display_name or database.name,
+                "database_type": database.db_type.value,
+                "schema_summary": [
+                    {
+                        "schema_name": table.schema.name,
+                        "table_name": table.name,
+                        "table_type": table.table_type.value,
+                    }
+                    for table in tables
+                ],
+                "relationships": [
+                    {
+                        "source": f"{edge.source_schema_name}.{edge.source_table_name}",
+                        "target": f"{edge.target_schema_name}.{edge.target_table_name}",
+                        "relationship_type": edge.relationship_type,
+                    }
+                    for edge in edges
+                ],
+                "columns": [
+                    {
+                        "schema_name": table.schema.name,
+                        "table_name": table.name,
+                        "columns": [column.name for column in table.columns],
+                    }
+                    for table in tables
+                ],
+                "relationship_graph": {
+                    "nodes": [node.__dict__ for node in nodes],
+                    "edges": [edge.__dict__ for edge in edges],
+                },
+                "semantic": {},
+            }
+            registry.render_prompt("relationship_discovery", prompt_context, category="relationship")
+            registry.render_prompt("business_relationship_analysis", prompt_context, category="relationship")
+        except Exception as exc:
+            logger.debug("Relationship prompt validation skipped: %s", exc)
 
         return snapshot
 
-    async def _persist_graph(self, database_id: int, edges: List[GraphEdgeRecord]) -> None:
+    async def _persist_graph(self, database_id: int, edges: List[GraphEdgeRecord], intelligence: dict[str, Any]) -> None:
         await self.db.execute(
             delete(SchemaRelationshipGraph).where(SchemaRelationshipGraph.database_id == database_id)
         )
@@ -444,6 +852,16 @@ class RelationshipGraphEngine:
                     relationship_strength=edge.relationship_strength,
                     path_depth=edge.path_depth,
                     is_circular=edge.is_circular,
+                    business_entity_graph=self._json_safe(intelligence.get("business_entity_graph", [])),
+                    business_process_flows=self._json_safe(intelligence.get("business_process_flows", [])),
+                    upstream_dependencies=self._json_safe(intelligence.get("upstream_dependencies", [])),
+                    downstream_dependencies=self._json_safe(intelligence.get("downstream_dependencies", [])),
+                    entity_lifecycle_descriptions=self._json_safe(intelligence.get("entity_lifecycle_descriptions", [])),
+                    ai_summary=intelligence.get("business_relationship_summary"),
+                    ai_confidence=float(intelligence.get("confidence_score", 0.0) or 0.0),
+                    ai_model_name=intelligence.get("model_name"),
+                    ai_prompt_id=intelligence.get("prompt_name"),
+                    ai_prompt_version=str(intelligence.get("prompt_version", "")) or None,
                 )
             )
         await safe_flush(self.db)

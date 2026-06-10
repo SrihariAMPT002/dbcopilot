@@ -12,18 +12,21 @@ from __future__ import annotations
 import logging
 from typing import Any, List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Response
 
+from app.core.config import settings
 from app.db import get_db
+from app.db.session import db_session
 from app.models.metadata import (
     DatabaseSchema,
     DatabaseTable,
     EmbeddingStatus,
     SchemaEmbedding,
 )
+from app.models.pipeline_job import JobStatus, JobType
 from app.schema_engine.embeddings import (
     COLLECTION_SCHEMA_PROMPTS,
     COLLECTION_SCHEMA_RELATIONSHIPS,
@@ -39,6 +42,7 @@ from app.schemas.embedding_schemas import (
     SemanticSearchResponse,
 )
 from app.services.qdrant_service import get_qdrant_service
+from app.services.pipeline_service import PipelineService
 from app.utils import safe_flush
 
 router = APIRouter(tags=["Embeddings"])
@@ -80,8 +84,8 @@ def _normalize_relationships(raw: Any) -> list[str]:
 @router.post(
     "/embeddings/generate/{db_id}",
     response_model=EmbeddingGenerateResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Generate embeddings for every table in a database",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Queue embedding generation for every table in a database",
     description=(
         "Runs the full embedding pipeline: builds enriched text representations for each "
         "table (schema summary, relationship context, prompt context), calls Azure OpenAI "
@@ -91,35 +95,46 @@ def _normalize_relationships(raw: Any) -> list[str]:
 )
 async def generate_database_embeddings(
     db_id: int,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> EmbeddingGenerateResponse:
     engine = EmbeddingEngine(db)
     _guard_embedding_config(engine)
+    pipeline = PipelineService(db)
     try:
-        logger.info("Embedding generation started for db_id=%s", db_id)
-        result = await engine.generate_database_embeddings(db_id)
-        logger.info(
-            "Embedding generation completed for db_id=%s in %.2fms (%d tables, %d vectors)",
-            db_id,
-            result.latency_ms,
-            result.tables_indexed,
-            result.vectors_indexed,
-        )
+        job = await pipeline.create_job(db_id, JobType.embeddings, triggered_by="api")
+
+        async def _runner(job_id: int) -> None:
+            async with db_session() as session:
+                job_service = PipelineService(session)
+                engine_inner = EmbeddingEngine(session)
+                _guard_embedding_config(engine_inner)
+                try:
+                    result = await engine_inner.generate_database_embeddings(db_id)
+                    if result.success:
+                        await job_service.update_status(job_id, JobStatus.completed, progress_percentage=100)
+                    else:
+                        await job_service.update_status(job_id, JobStatus.failed, progress_percentage=0, failure_reason=result.message)
+                except Exception as exc:
+                    logger.exception("Background embedding job failed for db_id=%s job_id=%s", db_id, job_id)
+                    await job_service.update_status(job_id, JobStatus.failed, progress_percentage=0, failure_reason=str(exc))
+
+        background_tasks.add_task(_runner, job.id)
         return EmbeddingGenerateResponse(
-            database_id=result.database_id,
-            database_name=result.database_name,
-            embedding_model=result.embedding_model,
-            tables_indexed=result.tables_indexed,
-            vectors_indexed=result.vectors_indexed,
-            token_usage=result.token_usage,
-            latency_ms=round(result.latency_ms, 2),
-            success=result.success,
-            message=result.message,
+            database_id=db_id,
+            database_name="queued",
+            embedding_model=settings.azure_openai_embedding_deployment,
+            tables_indexed=0,
+            vectors_indexed=0,
+            token_usage={},
+            latency_ms=0.0,
+            success=True,
+            message=f"Embedding generation queued as job {job.id}. Poll /pipeline/jobs/{job.id} for progress.",
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except Exception as exc:
-        logger.error("Embedding pipeline failed for db_id=%s: %s", db_id, exc, exc_info=True)
+        logger.error("Embedding queue failed for db_id=%s: %s", db_id, exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Embedding generation failed: {exc}",

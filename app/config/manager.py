@@ -88,8 +88,10 @@ class ConfigurationManager:
             logger.debug(f"Loaded {config_name} from cache")
             return self._config_cache[config_name]
 
-        # Load from file
+        # Load from file. Support nested config paths like "governance/pii_rules".
         config_file = self._config_dir / f"{config_name}.yaml"
+        if not config_file.exists() and "/" in config_name:
+            config_file = self._config_dir.joinpath(*config_name.split("/")).with_suffix(".yaml")
         if not config_file.exists():
             raise ConfigurationError(f"Configuration file not found: {config_file}")
 
@@ -159,6 +161,15 @@ class ConfigurationManager:
     def get_semantic_rules(self) -> Dict[str, Any]:
         """Get semantic analysis rules."""
         return self.load_config("semantic_rules")
+
+    def get_governance_rulebook(self) -> Dict[str, Any]:
+        """Get governance rulebook config."""
+        return {
+            "pii_rules": self.load_config("governance/pii_rules"),
+            "sensitive_data_rules": self.load_config("governance/sensitive_data_rules"),
+            "regulatory_rules": self.load_config("governance/regulatory_rules"),
+            "governance_policy": self.load_config("governance/governance_policy"),
+        }
 
     def get_feature_flags(self) -> Dict[str, Any]:
         """Get feature flags."""
@@ -267,6 +278,7 @@ class ConfigurationManager:
             self.get_readiness_rules()
             self.get_scoring_rules()
             self.get_semantic_rules()
+            self.get_governance_rulebook()
             self.get_feature_flags()
             self.get_retry_policies()
             logger.info("All configurations reloaded successfully")
