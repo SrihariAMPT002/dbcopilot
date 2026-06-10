@@ -259,6 +259,10 @@ def get_readiness_breakdown(db_id: int) -> Tuple[bool, Any]:
     return _get(f"/readiness/{db_id}/breakdown")
 
 
+def get_packages_config() -> Tuple[bool, Any]:
+    return _get("/config/packages")
+
+
 def recompute_readiness(db_id: int) -> Tuple[bool, Any]:
     return _post(f"/readiness/recompute/{db_id}", {})
 

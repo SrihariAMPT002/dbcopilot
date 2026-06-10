@@ -12,6 +12,8 @@ from typing import Literal
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.package_registry import get_package_registry
+from app.config.package_registry import package_is_enabled
 from app.core.config import settings
 from app.db import get_db
 from app.schema_engine.embeddings import EmbeddingEngine
@@ -34,21 +36,28 @@ def _state(enabled: bool, *, experimental: bool = False) -> CapabilityState:
 async def get_capabilities(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, dict[str, bool | CapabilityState]]:
+    registry = get_package_registry()
+    packages = registry.get("packages", {}) if isinstance(registry, dict) else {}
+    package_flags = {
+        name: bool(data.get("enabled", False))
+        for name, data in packages.items()
+        if isinstance(data, dict)
+    }
     embedding_engine = EmbeddingEngine(db)
     embeddings_enabled = embedding_engine.is_embedding_ready() and embedding_engine.is_qdrant_ready()
 
     capabilities = {
         "semantic_intelligence": {
-            "enabled": True,
-            "state": _state(True),
+            "enabled": package_flags.get("semantic", package_is_enabled("semantic")),
+            "state": _state(package_flags.get("semantic", package_is_enabled("semantic"))),
         },
         "embeddings": {
             "enabled": embeddings_enabled,
             "state": _state(embeddings_enabled),
         },
         "relationships": {
-            "enabled": True,
-            "state": _state(True),
+            "enabled": package_flags.get("relationship", package_is_enabled("relationship")),
+            "state": _state(package_flags.get("relationship", package_is_enabled("relationship"))),
         },
         "exports": {
             "enabled": True,
@@ -63,20 +72,20 @@ async def get_capabilities(
             "state": _state(True),
         },
         "readiness": {
-            "enabled": True,
-            "state": "experimental",
+            "enabled": package_flags.get("governance", package_is_enabled("governance")),
+            "state": "experimental" if package_flags.get("governance", package_is_enabled("governance")) else "disabled",
         },
         "ai_placeholders": {
             "enabled": False,
             "state": "disabled",
         },
         "operations": {
-            "enabled": True,
-            "state": "experimental",
+            "enabled": package_flags.get("agent", package_is_enabled("agent")),
+            "state": "experimental" if package_flags.get("agent", package_is_enabled("agent")) else "disabled",
         },
         "artifact_registry": {
-            "enabled": True,
-            "state": "experimental",
+            "enabled": package_flags.get("agent", package_is_enabled("agent")),
+            "state": "experimental" if package_flags.get("agent", package_is_enabled("agent")) else "disabled",
         },
         "mongodb_inference": {
             "enabled": True,
@@ -85,3 +94,11 @@ async def get_capabilities(
     }
 
     return capabilities
+
+
+@router.get(
+    "/config/packages",
+    summary="Return package registry metadata for the UI",
+)
+async def get_packages_config() -> dict[str, object]:
+    return get_package_registry()

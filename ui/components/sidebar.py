@@ -2,7 +2,17 @@
 
 import streamlit as st
 
-from app.config.package_registry import package_ui_visible
+from components.api_client import get_packages_config
+
+
+def _package_visibility() -> dict[str, bool]:
+    ok, payload = get_packages_config()
+    if not ok or not isinstance(payload, dict):
+        return {}
+    packages = payload.get("packages", {})
+    if not isinstance(packages, dict):
+        return {}
+    return {name: bool(data.get("ui_visibility", False)) for name, data in packages.items() if isinstance(data, dict)}
 
 
 NAV_LINKS = [
@@ -32,12 +42,13 @@ PACKAGE_NAV = {
 
 
 def render_sidebar() -> None:
+    visibility = _package_visibility()
     with st.sidebar:
         st.markdown("## AI Schema Intelligence Platform")
         st.markdown("---")
 
         for page_path, label in NAV_LINKS:
             package_name = PACKAGE_NAV.get(page_path)
-            if package_name and not package_ui_visible(package_name):
+            if package_name and not visibility.get(package_name, False):
                 continue
             st.page_link(page_path, label=label)
