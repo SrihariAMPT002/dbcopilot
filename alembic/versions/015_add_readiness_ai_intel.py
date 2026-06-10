@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 
-revision = "015_add_readiness_ai_intelligence"
+revision = "015_add_readiness_ai_intel"
 down_revision = "014_add_kpi_intelligence"
 branch_labels = None
 depends_on = None

@@ -11,7 +11,7 @@ from sqlalchemy import inspect
 
 
 revision = "012_add_overall_score"
-down_revision = "009_add_column_tracking"
+down_revision = "011_add_column_tracking"
 branch_labels = None
 depends_on = None
 
