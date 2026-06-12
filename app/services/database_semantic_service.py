@@ -11,6 +11,7 @@ Converts database metadata into AI-understandable business context:
 """
 
 import json
+import hashlib
 import logging
 import time
 from datetime import datetime, timezone
@@ -70,6 +71,7 @@ class DatabaseSemanticEnrichment:
         prompt_id: Optional[str] = None,
         prompt_version: Optional[str] = None,
         model_name: Optional[str] = None,
+        trace_id: Optional[str] = None,
     ):
         self.source_id = source_id
         self.business_domain = business_domain
@@ -80,6 +82,7 @@ class DatabaseSemanticEnrichment:
         self.suggested_use_cases = suggested_use_cases
         self.confidence_score = confidence_score
         self.raw_response = raw_response
+        self.trace_id = trace_id
         self.generated_at = datetime.now(timezone.utc)
 
 
@@ -103,6 +106,11 @@ class DatabaseSemanticService:
         db_semantic: DatabaseSemantic,
         enrichment: DatabaseSemanticEnrichment,
         status: SemanticGenerationStatus,
+        *,
+        execution_status: str | None = "success",
+        fallback_used: bool = False,
+        retry_count: int = 0,
+        trace_id: str | None = None,
     ) -> None:
         """Copy generated semantic values onto an ORM row."""
         db_semantic.business_domain = enrichment.business_domain
@@ -115,6 +123,10 @@ class DatabaseSemanticService:
         db_semantic.raw_ai_response = enrichment.raw_response
         db_semantic.error_message = None
         db_semantic.generation_status = status
+        db_semantic.execution_status = execution_status
+        db_semantic.used_fallback = fallback_used
+        db_semantic.retry_count = retry_count
+        db_semantic.trace_id = trace_id or getattr(enrichment, "trace_id", None)
         db_semantic.generated_at = enrichment.generated_at
         db_semantic.updated_at = datetime.now(timezone.utc)
 
@@ -136,6 +148,10 @@ class DatabaseSemanticService:
         db_semantic.raw_ai_response = None
         db_semantic.error_message = error_message
         db_semantic.generation_status = status
+        db_semantic.execution_status = "failed"
+        db_semantic.used_fallback = False
+        db_semantic.retry_count = 0
+        db_semantic.trace_id = None
         db_semantic.generated_at = now
         db_semantic.updated_at = now
 
@@ -148,7 +164,15 @@ class DatabaseSemanticService:
         """Mark a semantic row with a non-success status."""
         db_semantic.generation_status = status
         db_semantic.error_message = error_message
+        db_semantic.execution_status = "failed"
+        db_semantic.used_fallback = False
+        db_semantic.retry_count = 0
+        db_semantic.trace_id = None
         db_semantic.updated_at = datetime.now(timezone.utc)
+
+    @staticmethod
+    def _fingerprint_payload(payload: dict[str, Any]) -> str:
+        return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:32]
 
     async def get_or_create_semantic(
         self,
@@ -252,6 +276,7 @@ class DatabaseSemanticService:
         # Parse response
         response_text = ai_result.content or ""
         enrichment = self._parse_enrichment_response(source_id, response_text, metadata_payload)
+        enrichment.trace_id = getattr(ai_result, "trace_id", None)
 
         # Calculate confidence score
         confidence = self._calculate_confidence_score(database, enrichment)
@@ -306,6 +331,7 @@ class DatabaseSemanticService:
             response_text = ai_result.content or ""
             enrichment = self._parse_enrichment_response(source_id, response_text, metadata_payload)
             enrichment.confidence_score = self._calculate_confidence_score(database, enrichment)
+            enrichment.trace_id = getattr(ai_result, "trace_id", None)
 
             semantic_row = await self.save_enrichment(enrichment, SemanticGenerationStatus.completed)
             return semantic_row, (time.time() - start_time) * 1000
@@ -648,10 +674,17 @@ class DatabaseSemanticService:
             completeness_score=self._semantic_completeness(metadata_payload),
             coverage_score=self._semantic_coverage(metadata_payload),
             confidence_score=0.0,
+            execution_status="success",
+            fallback_used=False,
+            retry_count=0,
             extra_metadata={
                 "database_id": database.id,
+                "job_id": None,
+                "stage": "semantics",
                 "database_name": database.display_name or database.name,
                 "artifact_generated": "database_semantic",
+                "metadata_fingerprint": self._fingerprint_payload(metadata_payload),
+                "parse_success": True,
             },
         )
 
@@ -698,24 +731,22 @@ class DatabaseSemanticService:
         
         Handles malformed JSON gracefully.
         """
+        clean_response = self._extract_json_payload(response_text)
+        if not clean_response.strip():
+            raise ValueError("empty_ai_response")
         try:
-            clean_response = self._extract_json_payload(response_text)
             response_data = json.loads(clean_response)
         except json.JSONDecodeError as e:
             logger.error("Failed to parse OpenAI response as JSON: %s", e)
-            logger.debug("Response text: %s", response_text)
-            # Return minimal enrichment with raw response for debugging
-            return DatabaseSemanticEnrichment(
-                source_id=source_id,
-                business_domain="Unknown",
-                business_summary="Failed to parse AI response",
-                key_entities=[],
-                business_glossary=[],
-                suggested_use_cases=[],
-                confidence_score=0.0,
-                analysis_notes=None,
-                raw_response=response_text,
-            )
+            raise ValueError("invalid_json")
+        if not isinstance(response_data, dict):
+            raise ValueError("invalid_json")
+        required = ["business_domain", "business_summary", "key_entities", "business_glossary", "suggested_use_cases"]
+        missing = [field for field in required if field not in response_data]
+        if missing:
+            raise ValueError(f"missing_required_fields:{', '.join(missing)}")
+        if not any(str(response_data.get(field, "")).strip() for field in ["business_domain", "business_summary"]) and not response_data.get("key_entities"):
+            raise ValueError("missing_required_fields:business_domain,business_summary,key_entities")
 
         return DatabaseSemanticEnrichment(
             source_id=source_id,
@@ -727,6 +758,7 @@ class DatabaseSemanticService:
             confidence_score=1.0,  # Will be adjusted by calculate_confidence_score
             analysis_notes=self._normalize_description(response_data.get("analysis_notes")),
             raw_response=response_text,
+            trace_id=None,
         )
 
     # ── Confidence scoring ─────────────────────────────────────────────────

@@ -45,12 +45,20 @@ def _to_readiness_response(data: ReadinessBreakdown) -> ReadinessResponse:
             governance_readiness_score=data.governance_readiness_score,
             kpi_readiness_score=data.kpi_readiness_score,
             overall_score=data.overall_score,
+            kpi_cluster_count=data.kpi_cluster_count,
+            successful_cluster_count=data.successful_cluster_count,
+            failed_cluster_count=data.failed_cluster_count,
+            coverage_percentage=data.coverage_percentage,
         ),
         missing_stages=data.missing_stages,
         remediation_hints=data.remediation_hints,
         prompt_id=data.prompt_id,
         prompt_version=data.prompt_version,
         model_name=data.model_name,
+        kpi_cluster_count=data.kpi_cluster_count,
+        successful_cluster_count=data.successful_cluster_count,
+        failed_cluster_count=data.failed_cluster_count,
+        coverage_percentage=data.coverage_percentage,
     )
 
 

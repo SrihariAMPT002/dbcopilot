@@ -97,12 +97,11 @@ with action_cols[0]:
         if ok_gen:
             st.session_state.prompt_studio_bundle = bundle_payload
             st.success(bundle_payload.get("message", "Database intelligence generated."))
-            st.rerun()
         else:
             st.error(bundle_payload.get("error", "Database intelligence generation failed"))
 with action_cols[1]:
     if st.button("Refresh", use_container_width=True):
-        st.rerun()
+        st.session_state["prompt_studio_refresh_requested"] = True
 with action_cols[2]:
     st.caption("Generated intelligence is persisted to artifact_manifests and traced in Langfuse.")
 

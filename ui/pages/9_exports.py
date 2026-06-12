@@ -78,12 +78,11 @@ with action_cols[0]:
         if ok_export:
             st.session_state["latest_artifact_export"] = payload
             st.success(payload.get("message", "Versioned artifacts generated."))
-            st.rerun()
         else:
             st.error(payload.get("error", "Artifact export failed"))
 with action_cols[1]:
     if st.button("Refresh Registry", use_container_width=True):
-        st.rerun()
+        st.session_state["artifact_registry_refresh_requested"] = True
 with action_cols[2]:
     st.caption("Generates semantic_summary.json, embeddings.json, relationship_graph.json, and prompt_context.md as versioned AI context packages.")
 

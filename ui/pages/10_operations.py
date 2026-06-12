@@ -53,7 +53,6 @@ with run_col:
         ok_run, run_result = run_pipeline(selected_db_id, triggered_by="streamlit-operations")
         if ok_run:
             st.success(run_result.get("message", "Pipeline jobs queued."))
-            st.rerun()
         else:
             st.error(run_result.get("error", "Failed to queue pipeline run"))
 with ai_col:
@@ -62,12 +61,11 @@ with ai_col:
         if ok_ctx:
             st.success(ctx_payload.get("message", "AI context pipeline queued."))
             st.caption(f"Parent job: {ctx_payload.get('parent_job_id')}")
-            st.rerun()
         else:
             st.error(ctx_payload.get("error", "Failed to queue AI context pipeline"))
 with refresh_col:
     if st.button("Refresh", use_container_width=True):
-        st.rerun()
+        st.session_state["operations_refresh_requested"] = True
 
 status_filter = st.selectbox(
     "Job State Filter",
@@ -180,7 +178,6 @@ else:
                     ok_retry, retry_result = retry_pipeline_job(int(retry_target["id"]), triggered_by="streamlit-operations")
                     if ok_retry:
                         st.success(f"Retry queued as job #{retry_result.get('id')}.")
-                        st.rerun()
                     else:
                         st.error(retry_result.get("error", "Retry failed"))
             else:
@@ -197,7 +194,6 @@ else:
                     ok_cancel, cancel_result = cancel_pipeline_job(int(running_target["id"]))
                     if ok_cancel:
                         st.success(f"Cancelled job #{running_target['id']}.")
-                        st.rerun()
                     else:
                         st.error(cancel_result.get("error", "Cancel failed"))
             else:

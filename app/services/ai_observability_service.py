@@ -197,6 +197,9 @@ class AIObservabilityService:
         completeness_score: Optional[float],
         coverage_score: Optional[float],
         confidence_score: Optional[float],
+        execution_status: Optional[str] = None,
+        retry_count: Optional[int] = None,
+        fallback_used: Optional[bool] = None,
         extra_metadata: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         metadata = {
@@ -212,6 +215,9 @@ class AIObservabilityService:
             "completeness_score": completeness_score,
             "coverage_score": coverage_score,
             "confidence_score": confidence_score,
+            "execution_status": execution_status,
+            "retry_count": retry_count,
+            "fallback_used": fallback_used,
         }
         if extra_metadata:
             metadata.update(extra_metadata)
@@ -234,6 +240,9 @@ class AIObservabilityService:
         completeness_score: Optional[float] = None,
         coverage_score: Optional[float] = None,
         confidence_score: Optional[float] = None,
+        execution_status: Optional[str] = None,
+        retry_count: Optional[int] = None,
+        fallback_used: Optional[bool] = None,
         extra_metadata: Optional[dict[str, Any]] = None,
     ) -> AIObservationResult:
         """Execute an Azure OpenAI call under an optional LangSmith trace."""
@@ -264,6 +273,9 @@ class AIObservabilityService:
             completeness_score=completeness_score,
             coverage_score=coverage_score,
             confidence_score=confidence_score,
+            execution_status=execution_status,
+            retry_count=retry_count,
+            fallback_used=fallback_used,
             extra_metadata=extra_metadata,
         )
 
@@ -521,6 +533,9 @@ class AIObservabilityService:
         completeness_score: Optional[float] = None,
         coverage_score: Optional[float] = None,
         confidence_score: Optional[float] = None,
+        execution_status: Optional[str] = None,
+        retry_count: Optional[int] = None,
+        fallback_used: Optional[bool] = None,
         extra_metadata: Optional[dict[str, Any]] = None,
     ):
         """Return a trace/span context manager for non-LLM operations."""
@@ -535,6 +550,9 @@ class AIObservabilityService:
             completeness_score=completeness_score,
             coverage_score=coverage_score,
             confidence_score=confidence_score,
+            execution_status=execution_status,
+            retry_count=retry_count,
+            fallback_used=fallback_used,
             extra_metadata=extra_metadata,
         )
         if not self._langsmith_enabled or langsmith_trace is None:

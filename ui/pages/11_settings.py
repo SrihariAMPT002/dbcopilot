@@ -116,7 +116,7 @@ st.markdown(
 refresh_col, _ = st.columns([1, 5])
 with refresh_col:
     if st.button("Refresh Status", use_container_width=True):
-        st.rerun()
+        st.session_state["settings_refresh_requested"] = True
 
 ok, health = health_check()
 api_status = ok and health.get("status") == "healthy"

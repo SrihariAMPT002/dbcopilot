@@ -25,10 +25,13 @@ user_prompt: |
 
   Return JSON only with:
   {
-    "relationship_candidates": [],
-    "validated_relationships": [],
-    "isolated_tables": [],
-    "notes": ""
+    "cluster_summary": "",
+    "cluster_confidence": 0.0,
+    "business_entity_graph": [],
+    "business_process_flows": [],
+    "upstream_dependencies": [],
+    "downstream_dependencies": [],
+    "entity_lifecycle_descriptions": []
   }
 constraints:
   output_format: json

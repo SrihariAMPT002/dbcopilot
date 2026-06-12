@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.models.pipeline_job import JobStatus, PipelineJob
 from app.schemas.api_schemas import PipelineJobResponse, PipelineRunResponse
+from app.schemas.stage_contracts import StageGraphResponse
 from app.db.session import db_session
 from app.services.pipeline_service import PipelineService
 from app.services.database_pipeline_orchestrator import DatabasePipelineOrchestrator
@@ -184,3 +185,27 @@ async def generate_ai_context(
         }
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+
+
+@router.get(
+    "/stage-graph/{db_id}",
+    response_model=StageGraphResponse,
+    summary="Get the internal stage graph and current stage statuses",
+)
+async def stage_graph(
+    db_id: int,
+    parent_job_id: Optional[int] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> StageGraphResponse:
+    orchestrator = DatabasePipelineOrchestrator(db)
+    try:
+        payload = await orchestrator.get_stage_graph(db_id, parent_job_id=parent_job_id)
+        return StageGraphResponse.model_validate(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except Exception as exc:
+        logger.error("Stage graph lookup failed for db_id=%s: %s", db_id, exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to load stage graph",
+        )

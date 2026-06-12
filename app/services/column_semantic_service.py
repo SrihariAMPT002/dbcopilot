@@ -7,9 +7,11 @@ import json
 import logging
 import re
 import time
+import enum
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
+from unittest import result
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,6 +54,14 @@ class PIIClassificationResult:
     classified_at: datetime
     metadata_fingerprint: str
     notes: str | None = None
+
+
+class ExecutionContext(str, enum.Enum):
+    ADMIN = "ADMIN"
+    PIPELINE = "PIPELINE"
+    MANUAL = "MANUAL"
+    DEBUG = "DEBUG"
+    SYSTEM = "SYSTEM"
 
 
 class ColumnSemanticService:
@@ -123,6 +133,11 @@ class ColumnSemanticService:
             column.description or "",
         ]
         digest = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+        return digest[:32]
+
+    @staticmethod
+    def _stage_metadata_fingerprint(*parts: Any) -> str:
+        digest = hashlib.sha256(json.dumps(parts, default=str, sort_keys=True).encode("utf-8")).hexdigest()
         return digest[:32]
 
     def _classification_context(
@@ -219,9 +234,19 @@ class ColumnSemanticService:
         fingerprint = self._column_metadata_fingerprint(column, table)
         return existing.metadata_fingerprint != fingerprint
 
-    async def classify_column(self, column_id: int, force: bool = False) -> ColumnSemantic:
+    async def classify_column(
+        self,
+        column_id: int,
+        force: bool = False,
+        *,
+        execution_context: ExecutionContext,
+    ) -> ColumnSemantic:
         if not package_is_enabled("governance"):
             raise ValueError("Governance package is disabled by registry")
+        if execution_context not in {ExecutionContext.ADMIN, ExecutionContext.MANUAL, ExecutionContext.DEBUG}:
+            raise ValueError(
+                "Automated flows must use table-level governance; classify_column() only accepts ADMIN, MANUAL, or DEBUG execution contexts."
+            )
         stage_start = time.monotonic()
         column, table, database = await self._fetch_table_with_column(column_id)
         existing = await self.get_by_column_id(column_id)
@@ -239,7 +264,7 @@ class ColumnSemanticService:
                 pii_type=rule_hit[1],
                 risk_level=rule_hit[2],
                 confidence_score=rule_hit[3],
-                classification_source="rule",
+                classification_source="rules_engine",
                 review_status="auto_approved",
                 prompt_id="pii_classification",
                 prompt_version="1.0",
@@ -281,13 +306,22 @@ class ColumnSemanticService:
             completeness_score=1.0,
             coverage_score=1.0 if semantic else 0.5,
             confidence_score=0.0,
+            execution_status="success",
+            fallback_used=False,
+            retry_count=0,
             extra_metadata={
-                "classification_source": "llm",
+                "classification_source": "table_ai",
+                "execution_context": execution_context.value,
+                "database_id": database.id,
+                "job_id": None,
+                "stage": "governance",
                 "column_name": column.name,
                 "table_name": table.name,
                 "schema_name": table.schema.name,
                 "table_id": table.id,
                 "column_id": column.id,
+                "metadata_fingerprint": fingerprint,
+                "parse_success": False,
             },
         )
         _log_stage_duration(
@@ -298,14 +332,33 @@ class ColumnSemanticService:
             prompt_id=prompt.metadata.id,
         )
 
-        classification = self._parse_classification(
-            result.content or "",
-            prompt.metadata.id,
-            str(prompt.metadata.version),
-            model_name,
-            fingerprint,
-        )
+        try:
+            classification = self._parse_classification(
+                result.content or "",
+                prompt.metadata.id,
+                str(prompt.metadata.version),
+                model_name,
+                fingerprint,
+            )
+            classification.classification_source = "table_ai"
+            classification.execution_status = "success"
+            parse_success = True
+        except Exception as exc:
+            logger.warning("Column governance AI failed for column_id=%s: %s", column_id, exc)
+            classification = self._fallback_classification(
+                source="table_ai",
+                prompt_id=prompt.metadata.id,
+                prompt_version=str(prompt.metadata.version),
+                model_name=model_name,
+                metadata_fingerprint=fingerprint,
+                note=f"AI parse failed: {exc}",
+            )
+            classification.execution_status = "fallback"
+            parse_success = False
         row = await self._upsert_semantic(column, database.id, classification, result)
+        row_error = None if parse_success else "governance_ai_parse_failed"
+        if row_error:
+            row.error_message = row_error
         return row
 
     def _parse_classification(
@@ -316,14 +369,21 @@ class ColumnSemanticService:
         model_name: str,
         metadata_fingerprint: str,
     ) -> PIIClassificationResult:
-        payload: dict[str, Any] = {}
         cleaned = response_text.strip()
         if cleaned.startswith("```"):
             cleaned = cleaned.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        if not cleaned:
+            raise ValueError("empty_ai_response")
         try:
             payload = json.loads(cleaned)
-        except Exception:
-            logger.warning("PII classification response was not valid JSON")
+        except Exception as exc:
+            raise ValueError("invalid_json") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("invalid_json")
+        required_fields = ("is_pii", "confidence_score", "review_status", "classification_source")
+        missing = [field for field in required_fields if field not in payload]
+        if missing:
+            raise ValueError(f"missing_required_sections:{','.join(missing)}")
 
         is_pii = bool(payload.get("is_pii", False))
         pii_type = payload.get("pii_type")
@@ -336,7 +396,7 @@ class ColumnSemanticService:
             pii_type=pii_type,
             risk_level=risk_level if is_pii else "low",
             confidence_score=max(0.0, min(1.0, confidence)),
-            classification_source=str(payload.get("classification_source", "llm")),
+            classification_source=str(payload.get("classification_source", "table_ai")),
             review_status=str(
                 payload.get("review_status", self._review_status_from_confidence(confidence))
             ),
@@ -346,6 +406,31 @@ class ColumnSemanticService:
             classified_at=datetime.now(timezone.utc),
             metadata_fingerprint=metadata_fingerprint,
             notes=payload.get("notes"),
+        )
+
+    def _fallback_classification(
+        self,
+        *,
+        source: str,
+        prompt_id: str,
+        prompt_version: str,
+        model_name: str,
+        metadata_fingerprint: str,
+        note: str,
+    ) -> PIIClassificationResult:
+        return PIIClassificationResult(
+            is_pii=False,
+            pii_type=None,
+            risk_level="low",
+            confidence_score=0.0,
+            classification_source=source,
+            review_status="needs_review",
+            prompt_id=prompt_id,
+            prompt_version=prompt_version,
+            model_name=model_name,
+            classified_at=datetime.now(timezone.utc),
+            metadata_fingerprint=metadata_fingerprint,
+            notes=note,
         )
 
     async def _upsert_semantic(
@@ -370,6 +455,10 @@ class ColumnSemanticService:
         row.prompt_id = classification.prompt_id
         row.prompt_version = classification.prompt_version
         row.model_name = classification.model_name
+        row.classification_source = classification.classification_source
+        row.execution_status = classification.execution_status
+        row.used_fallback = classification.execution_status == "fallback"
+        row.trace_id = str(getattr(ai_result, "trace_id", None)) if ai_result is not None else None
         row.metadata_fingerprint = classification.metadata_fingerprint
         row.generated_at = classification.classified_at
         row.updated_at = classification.classified_at
@@ -395,7 +484,7 @@ class ColumnSemanticService:
                     pii_type=rule_hit[1],
                     risk_level=rule_hit[2],
                     confidence_score=rule_hit[3],
-                    classification_source="rule",
+                    classification_source="rules_engine",
                     review_status="auto_approved",
                     prompt_id="pii_classification",
                     prompt_version="1.0",
@@ -447,39 +536,83 @@ class ColumnSemanticService:
             completeness_score=1.0,
             coverage_score=1.0 if semantic else 0.5,
             confidence_score=0.0,
-            extra_metadata={"table_id": table.id, "database_id": database.id, "trigger_source": "table_governance"},
+            execution_status="success",
+            fallback_used=False,
+            retry_count=0,
+            extra_metadata={
+                "table_id": table.id,
+                "database_id": database.id,
+                "job_id": None,
+                "stage": "governance",
+                "trigger_source": "table_governance",
+                "classification_source": "table_ai",
+                "execution_status": "success",
+                "fallback_used": False,
+                "parse_success": True,
+                "metadata_fingerprint": self._stage_metadata_fingerprint(database.id, table.id, [c.id for c in unresolved]),
+            },
         )
-        payload = {}
         try:
-            payload = json.loads((result.content or "").strip() or "{}")
-        except Exception:
-            logger.warning("Table-level PII classification returned invalid JSON for table_id=%s", table.id)
-        resolved = payload.get("resolved_columns", []) if isinstance(payload, dict) else []
-        resolved_map = {item.get("column_name"): item for item in resolved if isinstance(item, dict)}
-        for column in unresolved:
-            item = resolved_map.get(column.name)
-            if item:
-                classification = PIIClassificationResult(
-                    is_pii=bool(item.get("is_pii")),
-                    pii_type=item.get("pii_type"),
-                    risk_level=item.get("risk_level"),
-                    confidence_score=float(item.get("confidence_score", 0.0)),
-                    classification_source=str(item.get("classification_source", "llm")),
-                    review_status=str(item.get("review_status", "needs_review")),
+            payload = self._parse_table_classification(result.content or "")
+            resolved = payload.get("resolved_columns", [])
+            resolved_map = {item.get("column_name"): item for item in resolved if isinstance(item, dict)}
+            for column in unresolved:
+                item = resolved_map.get(column.name)
+                if item:
+                    classification = PIIClassificationResult(
+                        is_pii=bool(item.get("is_pii")),
+                        pii_type=item.get("pii_type"),
+                        risk_level=item.get("risk_level"),
+                        confidence_score=float(item.get("confidence_score", 0.0)),
+                        classification_source=str(item.get("classification_source", "table_ai")),
+                        review_status=str(item.get("review_status", "needs_review")),
+                        prompt_id=prompt.metadata.id,
+                        prompt_version=str(prompt.metadata.version),
+                        model_name=model_name,
+                        classified_at=datetime.now(timezone.utc),
+                        metadata_fingerprint=self._column_metadata_fingerprint(column, table),
+                        notes=str(item.get("notes")) if item.get("notes") else None,
+                    )
+                    results.append(await self._upsert_semantic(column, database.id, classification, result))
+        except Exception as exc:
+            logger.warning("Table-level PII classification failed for table_id=%s: %s", table.id, exc)
+            fallback_source = "manual_reclassification" if force else "table_ai"
+            for column in unresolved:
+                classification = self._fallback_classification(
+                    source=fallback_source,
                     prompt_id=prompt.metadata.id,
                     prompt_version=str(prompt.metadata.version),
                     model_name=model_name,
-                    classified_at=datetime.now(timezone.utc),
                     metadata_fingerprint=self._column_metadata_fingerprint(column, table),
-                    notes=str(item.get("notes")) if item.get("notes") else None,
+                    note=f"Table AI failed: {exc}",
                 )
+                classification.execution_status = "fallback"
                 results.append(await self._upsert_semantic(column, database.id, classification, result))
-            else:
-                results.append(await self.classify_column(column.id, force=force))
         return results
 
+    @staticmethod
+    def _parse_table_classification(response_text: str) -> dict[str, Any]:
+        cleaned = (response_text or "").strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        if not cleaned:
+            raise ValueError("empty_ai_response")
+        try:
+            payload = json.loads(cleaned)
+        except Exception as exc:
+            raise ValueError("invalid_json") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("invalid_json")
+        required_fields = {"resolved_columns"}
+        missing = [field for field in required_fields if field not in payload]
+        if missing:
+            raise ValueError(f"missing_required_sections:{','.join(missing)}")
+        if not isinstance(payload.get("resolved_columns"), list):
+            raise ValueError("missing_required_sections:resolved_columns")
+        return payload
+
     async def generate_for_database(self, database_id: int, force: bool = False) -> list[ColumnSemantic]:
-        """Governance engine: rule-first, table-batched AI, then targeted column fallback."""
+        """Governance engine: rule-first, then one AI request per table."""
         stage_start = time.monotonic()
         if not package_is_enabled("governance"):
             raise ValueError("Governance package is disabled by registry")
@@ -505,6 +638,7 @@ class ColumnSemanticService:
             table_map.setdefault(table.id, []).append(column)
 
         column_count = len(columns)
+        existing_rows = {row.column_id: row for row in await self.get_by_database_id(database_id)}
         observability = AIObservabilityService()
         with observability.observe(
             module="column_semantics",
@@ -517,17 +651,36 @@ class ColumnSemanticService:
             completeness_score=1.0 if column_count > 0 else 0.0,
             coverage_score=min(1.0, column_count / 100.0) if column_count > 0 else 0.0,
             confidence_score=0.5 if column_count > 0 else 0.0,
+            execution_status="success",
+            fallback_used=False,
+            retry_count=0,
             extra_metadata={
                 "column_count": column_count,
                 "readiness_category": "governance",
                 "force": force,
+                "database_id": database.id,
+                "job_id": None,
+                "stage": "governance",
+                "metadata_fingerprint": self._stage_metadata_fingerprint(database.id, column_count, force),
             },
         ):
             results: list[ColumnSemantic] = []
             for table_id, table_columns in table_map.items():
                 try:
                     table = table_by_id[table_id]
+                    if not force and all(
+                        existing_rows.get(column.id)
+                        and existing_rows[column.id].metadata_fingerprint == self._column_metadata_fingerprint(column, table)
+                        for column in table_columns
+                    ):
+                        results.extend(existing_rows[column.id] for column in table_columns if existing_rows.get(column.id))
+                        continue
                     table_results = await self._classify_table(table, database, force=force)
+                    logger.error(
+                        "TABLE=%s RAW_AI_RESPONSE=%r",
+                        table.name,
+                        table_results.content
+                    )
                     results.extend(table_results)
                 except Exception as exc:
                     logger.exception("PII classification failed for table_id=%s: %s", table_id, exc)

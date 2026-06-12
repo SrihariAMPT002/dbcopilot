@@ -80,3 +80,6 @@ class PipelineJob(Base):
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     triggered_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    stage_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    depends_on: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

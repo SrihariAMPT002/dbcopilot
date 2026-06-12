@@ -229,7 +229,6 @@ for conn in connections:
                         f"Sync complete: {sync_result.get('schemas_discovered', 0)} schemas, "
                         f"{sync_result.get('tables_discovered', 0)} entities"
                     )
-                st.rerun()
             else:
                 msg = sync_result.get("message") or sync_result.get("error") or "Sync failed"
                 st.error(msg)
@@ -240,7 +239,6 @@ for conn in connections:
             if ok_ref and refreshed:
                 st.session_state[f"refreshed_{db_id}"] = refreshed
                 st.success("Metadata refreshed from backend.")
-                st.rerun()
             else:
                 st.error(refreshed.get("error", "Refresh failed"))
 
@@ -251,7 +249,6 @@ for conn in connections:
             if ok_ctx:
                 st.success(ctx_payload.get("message", "AI context pipeline queued."))
                 render_job_status(ctx_payload.get("parent_job_id"), label="AI Context Run")
-                st.rerun()
             else:
                 st.error(ctx_payload.get("error", "Failed to queue AI context pipeline"))
 
@@ -261,7 +258,6 @@ for conn in connections:
                 ok_sem, sem_result = regenerate_semantics(db_id)
             if ok_sem:
                 st.success("Semantic enrichment regenerated.")
-                st.rerun()
             else:
                 st.error(sem_result.get("error", "Semantic regeneration failed"))
 
@@ -271,7 +267,6 @@ for conn in connections:
                 ok_emb, emb_result = generate_embeddings(db_id)
             if ok_emb:
                 st.success(emb_result.get("message", "Embeddings regenerated."))
-                st.rerun()
             else:
                 st.error(emb_result.get("error", "Embedding regeneration failed"))
 
@@ -288,13 +283,11 @@ for conn in connections:
                 if ok_del:
                     st.success(f"Deleted {name}")
                     del st.session_state[f"confirm_delete_{db_id}"]
-                    st.rerun()
                 else:
                     st.error(f"Delete failed: {result_del.get('error')}")
         with cc2:
             if st.button("Cancel", key=f"cancel_{db_id}"):
                 del st.session_state[f"confirm_delete_{db_id}"]
-                st.rerun()
 
     st.markdown("---")
 

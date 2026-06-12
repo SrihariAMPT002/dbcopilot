@@ -517,6 +517,21 @@ class SchemaRelationshipGraph(Base):
     ai_model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     ai_prompt_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     ai_prompt_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    cluster_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    parent_cluster_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    domain_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    cluster_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    estimated_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    actual_input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    actual_output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    cluster_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    cluster_confidence: Mapped[Optional[float]] = mapped_column(nullable=True)
+    prompt_truncated: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    analysis_status: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    execution_status: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    used_fallback: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -580,6 +595,10 @@ class DatabaseSemantic(Base):
         nullable=False,
         index=True,
     )
+    execution_status: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    used_fallback: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     
     # Store raw AI response for debugging/transparency
     raw_ai_response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -669,6 +688,16 @@ class KPIIntelligence(Base):
     confidence_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
     metadata_fingerprint: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(64), nullable=False, default="discovered", index=True)
+    cluster_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    cluster_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    cluster_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    estimated_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    actual_input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    actual_output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    execution_status: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    used_fallback: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     generated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

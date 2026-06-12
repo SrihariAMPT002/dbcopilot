@@ -247,14 +247,12 @@ with action_cols[0]:
                         "Semantic profile generated. PII intelligence runs automatically after semantic generation.",
                     )
                 )
-            st.rerun()
         else:
             st.error(result.get("error", result.get("detail", "Semantic generation failed")))
 
 with action_cols[1]:
     if st.button("Refresh", use_container_width=True):
         _load_profile(db_id, force=True)
-        st.rerun()
 
 with action_cols[2]:
     ok_export_json, export_json = (export_semantic_profile(db_id, "json") if profile else (False, {}))

@@ -12,7 +12,7 @@ from app.db import get_db
 from app.models.column_semantic import ColumnSemantic
 from app.models.metadata import ConnectedDatabase, DatabaseColumn, DatabaseSchema, DatabaseTable
 from app.schemas.api_schemas import ColumnSemanticResponse
-from app.services.column_semantic_service import ColumnSemanticService
+from app.services.column_semantic_service import ColumnSemanticService, ExecutionContext
 
 router = APIRouter(prefix="/column-semantics", tags=["Column Semantics"])
 logger = logging.getLogger(__name__)
@@ -29,6 +29,7 @@ def _row_to_response(item: ColumnSemantic, column: DatabaseColumn, table: Databa
         model_name=item.model_name,
         column_category=item.column_category,
         table_category=item.table_category,
+        classification_source=item.classification_source,
         is_pii=item.is_pii,
         pii_type=item.pii_type,
         risk_level=item.risk_level,
@@ -92,7 +93,8 @@ async def classify_column(
 ) -> ColumnSemanticResponse:
     service = ColumnSemanticService(db)
     try:
-        semantic = await service.classify_column(column_id, force=force)
+        execution_context = ExecutionContext.ADMIN if force else ExecutionContext.MANUAL
+        semantic = await service.classify_column(column_id, force=force, execution_context=execution_context)
         await db.commit()
         result = await db.execute(
             select(ColumnSemantic, DatabaseColumn, DatabaseTable, DatabaseSchema)

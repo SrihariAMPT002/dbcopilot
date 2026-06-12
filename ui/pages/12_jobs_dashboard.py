@@ -90,8 +90,7 @@ metrics[4].metric("Cancelled", counts.get("CANCELLED", 0))
 
 active_jobs = [j for j in jobs if j.get("status") in {"QUEUED", "RUNNING"}]
 if active_jobs:
-    st.info("Active jobs are auto-refreshing this page.")
-    st.markdown("<meta http-equiv='refresh' content='8'>", unsafe_allow_html=True)
+    st.info("Active jobs can be inspected below without forcing a full-page refresh.")
 
 st.markdown("### Active Jobs")
 if active_jobs:

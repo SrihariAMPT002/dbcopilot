@@ -30,10 +30,8 @@ def render_job_status(job_id: int | None, label: str = "Job", refresh_seconds: i
         st.error(failure_reason)
 
     if status in {"QUEUED", "RUNNING"}:
-        st.caption(f"Auto-refreshing every {refresh_seconds}s while the job is active.")
-        st.markdown(
-            f"<meta http-equiv='refresh' content='{refresh_seconds}'>",
-            unsafe_allow_html=True,
+        st.caption(
+            f"Job is active. Refresh this status area from the page controls instead of rerunning the whole page."
         )
 
     return payload

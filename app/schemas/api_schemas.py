@@ -165,6 +165,7 @@ class ColumnSemanticResponse(BaseModel):
     model_name: Optional[str] = None
     column_category: Optional[str] = None
     table_category: Optional[str] = None
+    classification_source: Optional[str] = None
     is_pii: bool = False
     pii_type: Optional[str] = None
     risk_level: Optional[str] = None
@@ -372,6 +373,16 @@ class GraphEdgeResponse(BaseModel):
     ai_model_name: Optional[str] = None
     ai_prompt_id: Optional[str] = None
     ai_prompt_version: Optional[str] = None
+    cluster_id: Optional[str] = None
+    cluster_size: Optional[int] = None
+    estimated_tokens: Optional[int] = None
+    actual_input_tokens: Optional[int] = None
+    actual_output_tokens: Optional[int] = None
+    cluster_summary: Optional[str] = None
+    cluster_confidence: Optional[float] = None
+    execution_status: Optional[str] = None
+    used_fallback: bool = False
+    retry_count: int = 0
 
 
 class GraphMetricsResponse(BaseModel):
@@ -455,6 +466,14 @@ class ReadinessCategoryScore(BaseModel):
     governance_readiness_score: int
     kpi_readiness_score: int = 0
     overall_score: int
+    kpi_cluster_count: int = 0
+    successful_cluster_count: int = 0
+    failed_cluster_count: int = 0
+    coverage_percentage: float = 0.0
+    kpi_cluster_count: int = 0
+    successful_cluster_count: int = 0
+    failed_cluster_count: int = 0
+    coverage_percentage: float = 0.0
 
 
 class ReadinessResponse(BaseModel):
@@ -469,6 +488,10 @@ class ReadinessResponse(BaseModel):
     prompt_id: Optional[str] = None
     prompt_version: Optional[str] = None
     model_name: Optional[str] = None
+    kpi_cluster_count: int = 0
+    successful_cluster_count: int = 0
+    failed_cluster_count: int = 0
+    coverage_percentage: float = 0.0
 
 
 class ReadinessBreakdownResponse(ReadinessResponse):

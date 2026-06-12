@@ -30,6 +30,7 @@ from app.models.metadata import (
     SchemaSemantic,
 )
 from app.services.ai_observability_service import AIObservabilityService
+from app.schema_engine.relationship_graph import RelationshipGraphEngine
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,10 @@ class KPIArtifactBundle:
 class KPIIntelligenceService:
     """Deterministic KPI discovery using semantic and relationship metadata."""
 
+    MAX_CLUSTER_TABLES = 20
+    MAX_CLUSTER_RELATIONSHIPS = 50
+    MAX_CLUSTER_ESTIMATED_TOKENS = 4500
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.registry = get_prompt_registry()
@@ -57,17 +62,51 @@ class KPIIntelligenceService:
 
         database = await self._fetch_database(database_id)
         semantics = await self._fetch_semantics(database_id)
-        relationships = await self._fetch_relationships(database_id)
         column_semantics = await self._fetch_column_semantics(database_id)
+        graph = await RelationshipGraphEngine(self.db).build_relationship_graph(database_id, persist=False)
+        clusters = self._relationship_clusters(graph.edges)
+        cluster_results: list[dict[str, Any]] = []
+        for cluster_id, table_ids in clusters:
+            try:
+                cluster_result = await self._discover_for_cluster(
+                    database=database,
+                    cluster_id=cluster_id,
+                    table_ids=table_ids,
+                    semantics=semantics,
+                    graph=graph,
+                    column_semantics=column_semantics,
+                    job_id=job_id,
+                )
+            except Exception as exc:
+                logger.exception("KPI cluster failed | database_id=%s cluster_id=%s", database_id, cluster_id)
+                cluster_result = {
+                    "cluster_id": cluster_id,
+                    "cluster_name": self._cluster_name(table_ids, semantics),
+                    "cluster_size": len(table_ids),
+                    "estimated_tokens": 0,
+                    "actual_input_tokens": 0,
+                    "actual_output_tokens": 0,
+                    "execution_status": "failed",
+                    "fallback_used": False,
+                    "retry_count": 0,
+                    "error_message": str(exc),
+                    "catalog": [],
+                    "definitions": [],
+                    "lineage": [],
+                    "context": "",
+                    "prompt_id": "kpi_discovery",
+                    "prompt_version": "clustered",
+                    "model_name": settings.azure_openai_deployment,
+                    "domain": self._cluster_domain(semantics, table_ids),
+                }
+            cluster_results.append(cluster_result)
 
-        prompt_context = self._build_prompt_context(database, semantics, relationships, column_semantics)
-        rendered = self.registry.render_prompt("kpi_discovery", prompt_context, category="kpi")
-        ai_result = await self._call_azure_openai(database, rendered, job_id=job_id)
-        parsed = self._parse_response(ai_result.content or "", database, semantics, relationships, column_semantics)
-        catalog = parsed["catalog"]
-        definitions = parsed["definitions"]
-        lineage = parsed["lineage"]
-        context_md = parsed["context"]
+        successful_clusters = [item for item in cluster_results if item.get("execution_status") == "success"]
+        failed_clusters = [item for item in cluster_results if item.get("execution_status") != "success"]
+        catalog = self._aggregate_catalog([item["catalog"] for item in successful_clusters])
+        definitions = self._aggregate_definitions([item["definitions"] for item in successful_clusters])
+        lineage = self._aggregate_lineage([item["lineage"] for item in successful_clusters])
+        context_md = self._build_context_markdown(database, catalog, definitions, lineage)
 
         await self._persist_kpis(database_id, catalog)
 
@@ -82,21 +121,37 @@ class KPIIntelligenceService:
         for artifact_type, content, mime in bundles:
             artifacts.append(await self._store_artifact(database_id, artifact_type, content, mime=mime))
 
+        confidence_scores = [item.get("confidence", 0.0) for item in catalog if isinstance(item, dict)]
+
         return {
             "database_id": database_id,
             "database_name": database.display_name or database.name,
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "prompt_id": rendered.metadata.id,
-            "prompt_version": rendered.metadata.version,
-            "model_name": ai_result.model_name,
-            "confidence_score": ai_result.metadata.get("confidence_score", 0.0) if ai_result.metadata else 0.0,
+            "prompt_id": "kpi_discovery",
+            "prompt_version": "clustered",
+            "model_name": settings.azure_openai_deployment,
+            "confidence_score": round(sum(confidence_scores) / max(1, len(confidence_scores)), 3) if confidence_scores else 0.0,
             "kpi_count": len(catalog),
             "coverage": self._coverage(catalog, column_semantics),
+            "successful_clusters": len(successful_clusters),
+            "failed_clusters": len(failed_clusters),
+            "coverage_percentage": self._cluster_coverage_percentage(successful_clusters, failed_clusters),
             "artifacts": artifacts,
             "catalog": catalog,
             "definitions": definitions,
             "lineage": lineage,
             "context": context_md,
+            "cluster_count": len(cluster_results),
+            "clusters": [
+                {
+                    "cluster_id": result["cluster_id"],
+                    "cluster_name": result.get("cluster_name"),
+                    "domain": result["domain"],
+                    "kpi_count": len(result["catalog"]),
+                    "execution_status": result.get("execution_status"),
+                }
+                for result in cluster_results
+            ],
         }
 
     async def get_latest_package(self, database_id: int) -> dict[str, Any]:
@@ -170,7 +225,229 @@ class KPIIntelligenceService:
             },
         }
 
-    async def _call_azure_openai(self, database: ConnectedDatabase, rendered_prompt: Any, *, job_id: int | None = None):
+    @staticmethod
+    def _relationship_clusters(edges: list[SchemaRelationshipGraph]) -> list[tuple[str, list[int]]]:
+        adjacency: dict[int, set[int]] = {}
+        for edge in edges:
+            adjacency.setdefault(edge.source_table_id, set()).add(edge.target_table_id)
+            adjacency.setdefault(edge.target_table_id, set()).add(edge.source_table_id)
+        seen: set[int] = set()
+        clusters: list[tuple[str, list[int]]] = []
+        for start in adjacency:
+            if start in seen:
+                continue
+            stack = [start]
+            seen.add(start)
+            members: list[int] = []
+            while stack:
+                node = stack.pop()
+                members.append(node)
+                for neighbor in adjacency.get(node, set()):
+                    if neighbor not in seen:
+                        seen.add(neighbor)
+                        stack.append(neighbor)
+            clusters.append((hashlib.sha256(json.dumps(sorted(members)).encode("utf-8")).hexdigest()[:16], sorted(members)))
+        return clusters
+
+    def _cluster_domain(
+        self,
+        semantics: tuple[DatabaseSemantic | None, list[tuple[SchemaSemantic, DatabaseTable]]],
+        table_ids: list[int],
+    ) -> str:
+        db_semantic, table_semantics = semantics
+        table_lookup = {table.id: semantic for semantic, table in table_semantics}
+        domain_votes = [table_lookup[table_id].semantic_summary for table_id in table_ids if table_id in table_lookup]
+        if db_semantic and db_semantic.business_domain:
+            return db_semantic.business_domain
+        for vote in domain_votes:
+            if vote:
+                return str(vote)[:128]
+        return "general"
+
+    def _cluster_name(
+        self,
+        table_ids: list[int],
+        semantics: tuple[DatabaseSemantic | None, list[tuple[SchemaSemantic, DatabaseTable]]],
+    ) -> str:
+        _, table_semantics = semantics
+        lookup = {table.id: table for _, table in table_semantics}
+        names = [f"{lookup[table_id].schema.name}.{lookup[table_id].name}" for table_id in table_ids if table_id in lookup]
+        if not names:
+            return "empty-cluster"
+        return names[0] if len(names) == 1 else f"{names[0]} +{len(names) - 1}"
+
+    @staticmethod
+    def _estimate_text_tokens(text: str) -> int:
+        return max(1, len(text or "") // 4)
+
+    def _estimate_prompt_tokens(self, payload: dict[str, Any]) -> int:
+        return self._estimate_text_tokens(json.dumps(payload, default=str, sort_keys=True))
+
+    def _apply_cluster_budget(
+        self,
+        prompt_context: dict[str, Any],
+        cluster_relationships: list[SchemaRelationshipGraph],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        budgeted = dict(prompt_context)
+        budgeted["cluster_tables"] = (prompt_context.get("cluster_tables") or [])[: self.MAX_CLUSTER_TABLES]
+        budgeted["cluster_relationships"] = (prompt_context.get("cluster_relationships") or [])[: self.MAX_CLUSTER_RELATIONSHIPS]
+        budgeted["governance_intelligence"] = (prompt_context.get("governance_intelligence") or [])[: self.MAX_CLUSTER_TABLES]
+        estimated_tokens = self._estimate_prompt_tokens(budgeted)
+        prompt_truncated = len(prompt_context.get("cluster_tables") or []) > self.MAX_CLUSTER_TABLES or len(cluster_relationships) > self.MAX_CLUSTER_RELATIONSHIPS
+        if estimated_tokens > self.MAX_CLUSTER_ESTIMATED_TOKENS:
+            prompt_truncated = True
+            budgeted["cluster_tables"] = budgeted["cluster_tables"][: max(1, self.MAX_CLUSTER_TABLES // 2)]
+            budgeted["cluster_relationships"] = budgeted["cluster_relationships"][: max(1, self.MAX_CLUSTER_RELATIONSHIPS // 2)]
+            budgeted["governance_intelligence"] = budgeted["governance_intelligence"][: max(1, self.MAX_CLUSTER_TABLES // 2)]
+            estimated_tokens = self._estimate_prompt_tokens(budgeted)
+        return budgeted, {
+            "cluster_size": len(prompt_context.get("cluster_tables") or []),
+            "estimated_tokens": estimated_tokens,
+            "prompt_truncated": prompt_truncated,
+        }
+
+    @staticmethod
+    def _parse_required_json(response_text: str) -> dict[str, Any]:
+        text = (response_text or "").strip()
+        if not text:
+            raise ValueError("empty_ai_response")
+        try:
+            payload = json.loads(text)
+        except Exception as exc:
+            raise ValueError("invalid_json") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("invalid_json")
+        required = ["kpi_catalog", "kpi_definitions", "kpi_lineage", "kpi_context"]
+        missing = [field for field in required if field not in payload or payload[field] in (None, "", [], {})]
+        if missing:
+            raise ValueError(f"missing_required_sections:{','.join(missing)}")
+        return payload
+
+    def _cluster_prompt_context(
+        self,
+        database: ConnectedDatabase,
+        cluster_id: str,
+        table_ids: list[int],
+        semantics: tuple[DatabaseSemantic | None, list[tuple[SchemaSemantic, DatabaseTable]]],
+        relationships: list[SchemaRelationshipGraph],
+        column_semantics: list[ColumnSemantic],
+    ) -> dict[str, Any]:
+        db_semantic, table_semantics = semantics
+        table_lookup = {table.id: (semantic, table) for semantic, table in table_semantics}
+        cluster_tables = [table_lookup[table_id][1] for table_id in table_ids if table_id in table_lookup]
+        cluster_relationships = [
+            rel for rel in relationships if rel.source_table_id in table_ids or rel.target_table_id in table_ids
+        ]
+        cluster_columns = [sem for sem in column_semantics if sem.database_id == database.id]
+        domain = self._cluster_domain(semantics, table_ids)
+        return {
+            "database_id": database.id,
+            "database_name": database.display_name or database.name,
+            "semantic_domain": domain,
+            "cluster_id": cluster_id,
+            "cluster_name": self._cluster_name(table_ids, semantics),
+            "cluster_table_count": len(cluster_tables),
+            "cluster_tables": [
+                {
+                    "schema": table.schema.name,
+                    "table": table.name,
+                    "description": table.description,
+                    "semantic_summary": table_lookup[table.id][0].semantic_summary if table.id in table_lookup else None,
+                }
+                for table in cluster_tables
+            ],
+            "cluster_relationships": [
+                {
+                    "source_schema": rel.source_schema_name,
+                    "source_table": rel.source_table_name,
+                    "target_schema": rel.target_schema_name,
+                    "target_table": rel.target_table_name,
+                    "ai_summary": rel.ai_summary,
+                    "cluster_id": rel.cluster_id,
+                }
+                for rel in cluster_relationships
+            ],
+            "database_semantics": {
+                "business_domain": db_semantic.business_domain if db_semantic else None,
+                "business_summary": db_semantic.business_summary if db_semantic else None,
+            },
+            "governance_intelligence": [
+                {
+                    "column": sem.column_name,
+                    "is_pii": sem.is_pii,
+                    "risk_level": sem.risk_level,
+                    "confidence": sem.confidence_score,
+                }
+                for sem in cluster_columns
+            ],
+        }
+
+    async def _discover_for_cluster(
+        self,
+        *,
+        database: ConnectedDatabase,
+        cluster_id: str,
+        table_ids: list[int],
+        semantics: tuple[DatabaseSemantic | None, list[tuple[SchemaSemantic, DatabaseTable]]],
+        graph: Any,
+        column_semantics: list[ColumnSemantic],
+        job_id: int | None,
+    ) -> dict[str, Any]:
+        cluster_relationships = [edge for edge in graph.edges if edge.source_table_id in table_ids or edge.target_table_id in table_ids]
+        prompt_context = self._cluster_prompt_context(database, cluster_id, table_ids, semantics, cluster_relationships, column_semantics)
+        prompt_context, telemetry = self._apply_cluster_budget(prompt_context, cluster_relationships)
+        rendered = self.registry.render_prompt("kpi_discovery", prompt_context, category="kpi")
+        ai_result = await self._call_azure_openai(database, rendered, job_id=job_id, cluster_id=cluster_id, cluster_size=telemetry["cluster_size"], domain=prompt_context["semantic_domain"])
+        parsed_payload = self._parse_required_json(ai_result.content or "")
+        return {
+            "cluster_id": cluster_id,
+            "cluster_name": prompt_context["cluster_name"],
+            "cluster_size": telemetry["cluster_size"],
+            "estimated_tokens": telemetry["estimated_tokens"],
+            "actual_input_tokens": int(ai_result.token_usage.get("prompt_tokens", 0) or 0),
+            "actual_output_tokens": int(ai_result.token_usage.get("completion_tokens", 0) or 0),
+            "execution_status": "success",
+            "fallback_used": False,
+            "retry_count": 0,
+            "trace_id": getattr(ai_result, "trace_id", None),
+            "domain": prompt_context["semantic_domain"],
+            "catalog": parsed_payload["kpi_catalog"],
+            "definitions": parsed_payload["kpi_definitions"],
+            "lineage": parsed_payload["kpi_lineage"],
+            "context": parsed_payload["kpi_context"],
+            "prompt_id": rendered.metadata.id,
+            "prompt_version": rendered.metadata.version,
+            "model_name": ai_result.model_name,
+        }
+
+    @staticmethod
+    def _aggregate_catalog(collections: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+        seen: set[str] = set()
+        merged: list[dict[str, Any]] = []
+        for catalog in collections:
+            for item in catalog:
+                key = item.get("name")
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(item)
+        return merged
+
+    def _aggregate_definitions(self, collections: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+        catalog = self._aggregate_catalog(collections)
+        return self._build_definitions(catalog)
+
+    def _aggregate_lineage(self, collections: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = []
+        for lineage in collections:
+            merged.extend(lineage)
+        return merged
+
+    @staticmethod
+    def _stage_metadata_fingerprint(*parts: Any) -> str:
+        return hashlib.sha256(json.dumps(parts, default=str, sort_keys=True).encode("utf-8")).hexdigest()[:32]
+
+    async def _call_azure_openai(self, database: ConnectedDatabase, rendered_prompt: Any, *, job_id: int | None = None, cluster_id: str | None = None, cluster_size: int | None = None, domain: str | None = None):
         observability = AIObservabilityService()
         ai_result = await observability.generate(
             operation="chat",
@@ -195,63 +472,35 @@ class KPIIntelligenceService:
             completeness_score=0.0,
             coverage_score=0.0,
             confidence_score=0.0,
+            execution_status="success",
+            fallback_used=False,
+            retry_count=0,
             extra_metadata={
                 "database_id": database.id,
-                "job_id": None,
+                "job_id": job_id,
+                "stage": "kpi",
+                "cluster_id": cluster_id,
+                "cluster_size": cluster_size,
+                "semantic_domain": domain,
                 "module": "kpi_intelligence",
                 "prompt_id": rendered_prompt.metadata.id,
                 "prompt_version": rendered_prompt.metadata.version,
-                "job_id": job_id,
+                "execution_status": "success",
+                "fallback_used": False,
+                "metadata_fingerprint": self._stage_metadata_fingerprint(database.id, job_id, rendered_prompt.metadata.id, rendered_prompt.metadata.version),
             },
         )
         return ai_result
-
-    def _parse_response(
-        self,
-        response_text: str,
-        database: ConnectedDatabase,
-        semantics: tuple[DatabaseSemantic | None, list[tuple[SchemaSemantic, DatabaseTable]]],
-        relationships: list[SchemaRelationshipGraph],
-        column_semantics: list[ColumnSemantic],
-    ) -> dict[str, Any]:
-        try:
-            payload = json.loads(self._extract_json_payload(response_text))
-        except Exception:
-            payload = {}
-        catalog = payload.get("catalog") or self._discover_kpis(database, semantics, relationships, column_semantics)
-        definitions = payload.get("definitions") or self._build_definitions(catalog)
-        lineage = payload.get("lineage") or self._build_lineage(catalog, relationships)
-        context = payload.get("context") or self._build_context_markdown(database, catalog, definitions, lineage)
-        return {
-            "catalog": catalog,
-            "definitions": definitions,
-            "lineage": lineage,
-            "context": context,
-        }
-
-    @staticmethod
-    def _extract_json_payload(response_text: str) -> str:
-        text = (response_text or "").strip()
-        if text.startswith("```"):
-            text = "\n".join(text.splitlines()[1:-1]).strip()
-        if text.startswith("{") and text.endswith("}"):
-            return text
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return text[start : end + 1]
-        return text
 
     def _discover_kpis(
         self,
         database: ConnectedDatabase,
         semantics: tuple[DatabaseSemantic | None, list[tuple[SchemaSemantic, DatabaseTable]]],
-        relationships: list[SchemaRelationshipGraph],
+        relationships: list[Any],
         column_semantics: list[ColumnSemantic],
     ) -> list[dict[str, Any]]:
         db_semantic, table_semantics = semantics
         kpis: list[dict[str, Any]] = []
-        table_lookup = {table.id: table for _, table in table_semantics}
         for semantic, table in table_semantics:
             measurable_cols = [c for c in table.columns if any(token in c.name.lower() for token in ["count", "amount", "total", "revenue", "price", "qty", "quantity", "balance", "score"])]
             if not measurable_cols:
@@ -322,7 +571,7 @@ class KPIIntelligenceService:
             for item in catalog
         ]
 
-    def _build_lineage(self, catalog: list[dict[str, Any]], relationships: list[SchemaRelationshipGraph]) -> list[dict[str, Any]]:
+    def _build_lineage(self, catalog: list[dict[str, Any]], relationships: list[Any]) -> list[dict[str, Any]]:
         return [
             {
                 "name": item["name"],
@@ -373,6 +622,13 @@ class KPIIntelligenceService:
             "confidence_score": round(sum(item["confidence"] for item in catalog) / max(1, len(catalog)), 3) if catalog else 0.0,
         }
 
+    @staticmethod
+    def _cluster_coverage_percentage(successful_clusters: list[dict[str, Any]], failed_clusters: list[dict[str, Any]]) -> float:
+        total = len(successful_clusters) + len(failed_clusters)
+        if total <= 0:
+            return 0.0
+        return round((len(successful_clusters) / total) * 100.0, 2)
+
     async def _store_artifact(self, database_id: int, artifact_type: ArtifactType, content: str, *, mime: str) -> dict[str, Any]:
         path = Path("/tmp/artifacts_registry")
         path.mkdir(parents=True, exist_ok=True)
@@ -409,9 +665,6 @@ class KPIIntelligenceService:
             self.db.add(
                 KPIIntelligence(
                     database_id=database_id,
-                    prompt_id=item.get("prompt_id", "kpi_discovery"),
-                    prompt_version=item.get("prompt_version", "1.0"),
-                    model_name=item.get("model_name", settings.azure_openai_deployment),
                     name=item["name"],
                     description=item.get("description"),
                     business_meaning=item.get("business_meaning"),
@@ -428,6 +681,19 @@ class KPIIntelligenceService:
                     confidence_score=float(item.get("confidence", 0.0)),
                     metadata_fingerprint=fingerprint,
                     status=item.get("status", "discovered"),
+                    cluster_id=item.get("cluster_id"),
+                    cluster_name=item.get("cluster_name"),
+                    cluster_size=int(item.get("cluster_size", 0) or 0) if item.get("cluster_size") is not None else None,
+                    estimated_tokens=int(item.get("estimated_tokens", 0) or 0) if item.get("estimated_tokens") is not None else None,
+                    actual_input_tokens=int(item.get("actual_input_tokens", 0) or 0) if item.get("actual_input_tokens") is not None else None,
+                    actual_output_tokens=int(item.get("actual_output_tokens", 0) or 0) if item.get("actual_output_tokens") is not None else None,
+                    prompt_id=item.get("prompt_id", "kpi_discovery"),
+                    prompt_version=item.get("prompt_version", "clustered"),
+                    model_name=item.get("model_name", settings.azure_openai_deployment),
+                    execution_status=item.get("execution_status"),
+                    used_fallback=bool(item.get("used_fallback", False)),
+                    retry_count=int(item.get("retry_count", 0) or 0),
+                    trace_id=item.get("trace_id"),
                 )
             )
         await self.db.flush()
@@ -508,6 +774,12 @@ class KPIIntelligenceService:
             "id": row.id,
             "database_id": row.database_id,
             "name": row.name,
+            "cluster_id": row.cluster_id,
+            "cluster_name": row.cluster_name,
+            "cluster_size": row.cluster_size,
+            "estimated_tokens": row.estimated_tokens,
+            "actual_input_tokens": row.actual_input_tokens,
+            "actual_output_tokens": row.actual_output_tokens,
             "prompt_id": row.prompt_id,
             "prompt_version": row.prompt_version,
             "model_name": row.model_name,

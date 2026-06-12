@@ -5,6 +5,7 @@ Deterministic AI readiness scoring service.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from datetime import datetime, timezone
 import json
 from typing import Any
@@ -57,11 +58,16 @@ class ReadinessBreakdown:
     governance_readiness_score: int
     kpi_score: int
     kpi_readiness_score: int
+    kpi_cluster_count: int
+    successful_cluster_count: int
+    failed_cluster_count: int
+    coverage_percentage: float
     ai_summary: str | None
     ai_recommendations: list[str]
     ai_risks: list[str]
     ai_roadmap: list[str]
     ai_confidence: float
+    ai_narrative_status: str
     prompt_id: str | None
     prompt_version: str | None
     model_name: str | None
@@ -88,6 +94,10 @@ class ReadinessService:
         self.registry = get_prompt_registry()
         self.config = get_config_manager()
         self.readiness_rules = self._load_readiness_rules()
+
+    @staticmethod
+    def _stage_metadata_fingerprint(*parts: Any) -> str:
+        return hashlib.sha256(json.dumps(parts, default=str, sort_keys=True).encode("utf-8")).hexdigest()[:32]
 
     def _load_readiness_rules(self) -> dict[str, Any]:
         rules = self.config.get_readiness_rules()
@@ -226,13 +236,12 @@ class ReadinessService:
         if snapshot is None:
             return await self.recompute(database_id)
 
-        status = snapshot.readiness_status
         if database.last_sync_at and snapshot.generated_at < database.last_sync_at:
             return await self.recompute(database_id)
 
         return await self._build_breakdown(
             database_id,
-            status_override=status,
+            status_override=snapshot.readiness_status,
             snapshot=snapshot,
         )
 
@@ -240,136 +249,82 @@ class ReadinessService:
         if not self._package_enabled("governance"):
             raise ValueError("Governance package is disabled by registry")
         database = await self._fetch_database(database_id)
-        observability = AIObservabilityService()
         breakdown = await self._build_breakdown(database_id)
-        assessment_prompt = self._readiness_assessment_prompt()
-        ai_assessment = {
+        ai_assessment = self._fallback_ai_assessment(breakdown)
+        try:
+            ai_assessment = await self._generate_ai_assessment(database, breakdown)
+        except Exception:
+            logger.exception("AI readiness assessment generation failed; falling back to deterministic summary")
+
+        snapshot = await self._upsert_snapshot(database.id, breakdown, ai_assessment)
+        breakdown.generated_at = snapshot.generated_at
+        breakdown.ai_summary = snapshot.ai_summary
+        breakdown.ai_recommendations = self._parse_snapshot_json(snapshot.ai_recommendations)
+        breakdown.ai_risks = self._parse_snapshot_json(snapshot.ai_risks)
+        breakdown.ai_roadmap = self._parse_snapshot_json(snapshot.ai_roadmap)
+        breakdown.ai_confidence = float(snapshot.ai_confidence)
+        breakdown.ai_narrative_status = snapshot.execution_status or "failed"
+        breakdown.prompt_id = snapshot.prompt_id
+        breakdown.prompt_version = snapshot.prompt_version
+        breakdown.model_name = snapshot.model_name
+        breakdown.kpi_cluster_count = int(snapshot.kpi_cluster_count)
+        breakdown.successful_cluster_count = int(snapshot.successful_cluster_count)
+        breakdown.failed_cluster_count = int(snapshot.failed_cluster_count)
+        breakdown.coverage_percentage = float(snapshot.coverage_percentage)
+        return breakdown
+
+    async def _upsert_snapshot(self, database_id: int, breakdown: ReadinessBreakdown, ai_assessment: dict[str, Any]) -> ReadinessSnapshot:
+        snapshot = ReadinessSnapshot(
+            database_id=database_id,
+            metadata_score=breakdown.metadata_score,
+            semantic_score=breakdown.semantic_score,
+            embeddings_score=breakdown.embeddings_score,
+            relationship_score=breakdown.relationship_score,
+            prompt_score=breakdown.prompt_score,
+            metadata_readiness_score=breakdown.metadata_readiness_score,
+            semantic_readiness_score=breakdown.semantic_readiness_score,
+            relationship_readiness_score=breakdown.relationship_readiness_score,
+            ai_context_readiness_score=breakdown.ai_context_readiness_score,
+            governance_readiness_score=breakdown.governance_readiness_score,
+            kpi_score=breakdown.kpi_score,
+            overall_score=breakdown.overall_score,
+            kpi_cluster_count=breakdown.kpi_cluster_count,
+            successful_cluster_count=breakdown.successful_cluster_count,
+            failed_cluster_count=breakdown.failed_cluster_count,
+            coverage_percentage=breakdown.coverage_percentage,
+            ai_summary=ai_assessment["ai_summary"],
+            ai_recommendations=json.dumps(ai_assessment["ai_recommendations"], default=str),
+            ai_risks=json.dumps(ai_assessment["ai_risks"], default=str),
+            ai_roadmap=json.dumps(ai_assessment["ai_roadmap"], default=str),
+            ai_confidence=ai_assessment["ai_confidence"],
+            prompt_id=ai_assessment.get("prompt_id"),
+            prompt_version=ai_assessment.get("prompt_version"),
+            model_name=ai_assessment.get("model_name"),
+            execution_status=ai_assessment.get("execution_status"),
+            used_fallback=bool(ai_assessment.get("fallback_used", False)),
+            retry_count=int(ai_assessment.get("retry_count", 0) or 0),
+            trace_id=ai_assessment.get("trace_id"),
+            readiness_status=breakdown.readiness_status,
+        )
+        self.db.add(snapshot)
+        await self.db.flush()
+        return snapshot
+
+    def _fallback_ai_assessment(self, breakdown: ReadinessBreakdown) -> dict[str, Any]:
+        return {
             "ai_summary": self._fallback_ai_summary(breakdown),
             "ai_recommendations": self._fallback_recommendations(breakdown),
             "ai_risks": self._fallback_risks(breakdown),
             "ai_roadmap": self._fallback_roadmap(breakdown),
             "ai_confidence": round(min(1.0, breakdown.overall_score / 100.0), 3),
+            "execution_status": "fallback",
+            "fallback_used": True,
+            "retry_count": 0,
+            "trace_id": None,
+            "prompt_id": self._readiness_assessment_prompt().split("/", 1)[1],
+            "prompt_version": "registry",
+            "model_name": settings.azure_openai_deployment,
         }
-        try:
-            ai_assessment = await self._generate_ai_assessment(database, breakdown)
-            with observability.observe(
-                module="ai_readiness",
-                artifact_type="readiness_snapshot",
-                prompt_id=assessment_prompt.split("/", 1)[1],
-                prompt_version="registry",
-                database_id=database.id,
-                database_name=database.display_name or database.name,
-                model_name=settings.azure_openai_deployment,
-                completeness_score=breakdown.metadata_readiness_score / 100.0,
-                coverage_score=breakdown.ai_context_readiness_score / 100.0,
-                confidence_score=breakdown.overall_score / 100.0,
-                extra_metadata={
-                    "readiness_category": "overall",
-                },
-            ) as observation:
-                snapshot = ReadinessSnapshot(
-                    database_id=database_id,
-                    metadata_score=breakdown.metadata_score,
-                    semantic_score=breakdown.semantic_score,
-                    embeddings_score=breakdown.embeddings_score,
-                    relationship_score=breakdown.relationship_score,
-                    prompt_score=breakdown.prompt_score,
-                    metadata_readiness_score=breakdown.metadata_readiness_score,
-                    semantic_readiness_score=breakdown.semantic_readiness_score,
-                    relationship_readiness_score=breakdown.relationship_readiness_score,
-                    ai_context_readiness_score=breakdown.ai_context_readiness_score,
-                    governance_readiness_score=breakdown.governance_readiness_score,
-                    kpi_score=breakdown.kpi_score,
-                    overall_score=breakdown.overall_score,
-                    ai_summary=ai_assessment["ai_summary"],
-                    ai_recommendations=json.dumps(ai_assessment["ai_recommendations"], default=str),
-                    ai_risks=json.dumps(ai_assessment["ai_risks"], default=str),
-                    ai_roadmap=json.dumps(ai_assessment["ai_roadmap"], default=str),
-                    ai_confidence=ai_assessment["ai_confidence"],
-                    prompt_id=self._readiness_assessment_prompt().split("/", 1)[1],
-                    prompt_version=rendered.metadata.version,
-                    model_name=settings.azure_openai_deployment,
-                    readiness_status=breakdown.readiness_status,
-                )
-                self.db.add(snapshot)
-                await self.db.flush()
-                breakdown.generated_at = snapshot.generated_at
-                breakdown.ai_summary = snapshot.ai_summary
-                breakdown.ai_recommendations = self._parse_snapshot_json(snapshot.ai_recommendations)
-                breakdown.ai_risks = self._parse_snapshot_json(snapshot.ai_risks)
-                breakdown.ai_roadmap = self._parse_snapshot_json(snapshot.ai_roadmap)
-                breakdown.ai_confidence = float(snapshot.ai_confidence)
-                breakdown.prompt_id = snapshot.prompt_id
-                breakdown.prompt_version = snapshot.prompt_version
-                breakdown.model_name = snapshot.model_name
-                if observation is not None:
-                    observation.add_outputs(
-                        {
-                            "overall_score": breakdown.overall_score,
-                            "category_scores": breakdown.category_scores,
-                            "ai_summary": ai_assessment["ai_summary"],
-                            "readiness_status": breakdown.readiness_status.value,
-                        }
-                    )
-                    observation.add_metadata(
-                        {
-                            "database_id": database.id,
-                            "database_name": database.display_name or database.name,
-                            "module": "ai_readiness",
-                            "artifact_type": "readiness_snapshot",
-                            "prompt_version": rendered.metadata.version,
-                            "model": settings.azure_openai_deployment,
-                            "readiness_category": "overall",
-                            "score_generated": breakdown.overall_score,
-                            "completeness_score": breakdown.metadata_readiness_score / 100.0,
-                            "coverage_score": breakdown.ai_context_readiness_score / 100.0,
-                            "confidence_score": breakdown.overall_score / 100.0,
-                        }
-                    )
-                    observation.end(outputs={
-                        "overall_score": breakdown.overall_score,
-                        "category_scores": breakdown.category_scores,
-                        "readiness_status": breakdown.readiness_status.value,
-                    })
-                return breakdown
-        except Exception:
-            logger.exception("Readiness tracing failed; continuing without LangSmith update")
-            snapshot = ReadinessSnapshot(
-                database_id=database_id,
-                metadata_score=breakdown.metadata_score,
-                semantic_score=breakdown.semantic_score,
-                embeddings_score=breakdown.embeddings_score,
-                relationship_score=breakdown.relationship_score,
-                prompt_score=breakdown.prompt_score,
-                metadata_readiness_score=breakdown.metadata_readiness_score,
-                semantic_readiness_score=breakdown.semantic_readiness_score,
-                relationship_readiness_score=breakdown.relationship_readiness_score,
-                ai_context_readiness_score=breakdown.ai_context_readiness_score,
-                governance_readiness_score=breakdown.governance_readiness_score,
-                kpi_score=breakdown.kpi_score,
-                overall_score=breakdown.overall_score,
-                ai_summary=ai_assessment["ai_summary"],
-                ai_recommendations=json.dumps(ai_assessment["ai_recommendations"], default=str),
-                ai_risks=json.dumps(ai_assessment["ai_risks"], default=str),
-                ai_roadmap=json.dumps(ai_assessment["ai_roadmap"], default=str),
-                ai_confidence=ai_assessment["ai_confidence"],
-                prompt_id=self._readiness_assessment_prompt().split("/", 1)[1],
-                prompt_version=rendered.metadata.version,
-                model_name=settings.azure_openai_deployment,
-                readiness_status=breakdown.readiness_status,
-            )
-            self.db.add(snapshot)
-            await self.db.flush()
-            breakdown.generated_at = snapshot.generated_at
-            breakdown.ai_summary = snapshot.ai_summary
-            breakdown.ai_recommendations = self._parse_snapshot_json(snapshot.ai_recommendations)
-            breakdown.ai_risks = self._parse_snapshot_json(snapshot.ai_risks)
-            breakdown.ai_roadmap = self._parse_snapshot_json(snapshot.ai_roadmap)
-            breakdown.ai_confidence = float(snapshot.ai_confidence)
-            breakdown.prompt_id = snapshot.prompt_id
-            breakdown.prompt_version = snapshot.prompt_version
-            breakdown.model_name = snapshot.model_name
-            return breakdown
 
     async def _build_breakdown(
         self,
@@ -447,6 +402,10 @@ class ReadinessService:
             governance_readiness_score=governance_score,
             kpi_score=kpi_score,
             kpi_readiness_score=kpi_score,
+            kpi_cluster_count=int(stats["kpi"].get("kpi_cluster_count", 0) or 0),
+            successful_cluster_count=int(stats["kpi"].get("successful_cluster_count", 0) or 0),
+            failed_cluster_count=int(stats["kpi"].get("failed_cluster_count", 0) or 0),
+            coverage_percentage=float(stats["kpi"].get("coverage_percentage", 0.0) or 0.0),
             ai_summary=hydrated_ai["ai_summary"],
             ai_recommendations=hydrated_ai["ai_recommendations"],
             ai_risks=hydrated_ai["ai_risks"],
@@ -523,6 +482,10 @@ class ReadinessService:
             "model_name": snapshot.model_name,
             "ai_summary": snapshot.ai_summary,
             "ai_confidence": snapshot.ai_confidence,
+            "kpi_cluster_count": snapshot.kpi_cluster_count,
+            "successful_cluster_count": snapshot.successful_cluster_count,
+            "failed_cluster_count": snapshot.failed_cluster_count,
+            "coverage_percentage": snapshot.coverage_percentage,
         }
 
     async def _fetch_database_semantic(self, database_id: int) -> DatabaseSemantic | None:
@@ -828,14 +791,34 @@ class ReadinessService:
         kpi_artifacts = 0
         kpi_artifact_fresh = False
         kpi_confidence = 0.0
+        kpi_cluster_count = 0
+        successful_cluster_count = 0
+        failed_cluster_count = 0
+        coverage_percentage = 0.0
         if package_is_enabled("kpi"):
             try:
-                kpi_count = int(
-                    await self.db.scalar(
-                        select(func.count(KPIIntelligence.id)).where(KPIIntelligence.database_id == database_id)
-                    )
-                    or 0
+                kpi_rows = await self.db.execute(
+                    select(
+                        KPIIntelligence.cluster_id,
+                        KPIIntelligence.execution_status,
+                    ).where(KPIIntelligence.database_id == database_id)
                 )
+                rows = kpi_rows.all()
+                kpi_count = len(rows)
+                cluster_ids = {row[0] for row in rows if row[0] is not None}
+                kpi_cluster_count = len(cluster_ids)
+                successful_cluster_count = len(
+                    {row[0] for row in rows if row[0] is not None and str(row[1] or "").lower() == "success"}
+                )
+                failed_cluster_count = len(
+                    {row[0] for row in rows if row[0] is not None and str(row[1] or "").lower() not in {"success", ""}}
+                )
+                if kpi_cluster_count == 0:
+                    kpi_cluster_count = successful_cluster_count + failed_cluster_count
+                coverage_percentage = round(
+                    (successful_cluster_count / max(1, kpi_cluster_count)) * 100.0,
+                    2,
+                ) if kpi_cluster_count > 0 else 0.0
                 kpi_artifacts = int(
                     await self.db.scalar(
                         select(func.count(KPIArtifact.id)).where(KPIArtifact.database_id == database_id)
@@ -871,6 +854,10 @@ class ReadinessService:
             "artifact_fresh": kpi_artifact_fresh,
             "coverage_score": self._ratio_score(kpi_count, max(1, int(columns) // 10 or 1)),
             "confidence_score": kpi_confidence,
+            "kpi_cluster_count": kpi_cluster_count,
+            "successful_cluster_count": successful_cluster_count,
+            "failed_cluster_count": failed_cluster_count,
+            "coverage_percentage": coverage_percentage,
         }
 
         if tables > 0:
@@ -1014,15 +1001,22 @@ class ReadinessService:
                 completeness_score=breakdown.metadata_readiness_score / 100.0,
                 coverage_score=breakdown.ai_context_readiness_score / 100.0,
                 confidence_score=breakdown.overall_score / 100.0,
+                execution_status="success",
+                retry_count=0,
+                fallback_used=False,
                 extra_metadata={
                     "database_id": database.id,
-                    "module": "ai_readiness",
                     "job_id": None,
+                    "stage": "readiness",
+                    "module": "ai_readiness",
                     "prompt_id": rendered.metadata.id,
                     "prompt_version": rendered.metadata.version,
+                    "metadata_fingerprint": self._stage_metadata_fingerprint(database.id, rendered.metadata.id, rendered.metadata.version, breakdown.overall_score),
                 },
             )
             parsed = self._parse_ai_assessment(ai_result.content or "")
+            if not parsed:
+                raise ValueError("empty_or_invalid_ai_response")
             parsed["ai_confidence"] = float(parsed.get("confidence", 0.0))
             return {
                 "ai_summary": parsed.get("executive_summary") or "Readiness assessment generated.",
@@ -1030,6 +1024,10 @@ class ReadinessService:
                 "ai_risks": parsed.get("risks") or [],
                 "ai_roadmap": parsed.get("readiness_roadmap") or [],
                 "ai_confidence": float(parsed.get("confidence", 0.0) or 0.0),
+                "execution_status": "success",
+                "fallback_used": False,
+                "retry_count": 0,
+                "trace_id": getattr(ai_result, "trace_id", None),
             }
         except Exception:
             logger.exception("AI readiness assessment generation failed; falling back to deterministic summary")
@@ -1039,11 +1037,17 @@ class ReadinessService:
                 "ai_risks": self._fallback_risks(breakdown),
                 "ai_roadmap": self._fallback_roadmap(breakdown),
                 "ai_confidence": round(min(1.0, breakdown.overall_score / 100.0), 3),
+                "execution_status": "fallback",
+                "fallback_used": True,
+                "retry_count": 0,
+                "trace_id": None,
             }
 
     @staticmethod
     def _parse_ai_assessment(text: str) -> dict[str, Any]:
         payload = text.strip()
+        if not payload:
+            raise ValueError("empty_ai_response")
         if payload.startswith("```"):
             payload = "\n".join(payload.splitlines()[1:-1]).strip()
         if payload.startswith("{") and payload.endswith("}"):
@@ -1059,6 +1063,8 @@ class ReadinessService:
         return (
             f"Overall readiness is {breakdown.overall_score}%. "
             f"Semantic, relationship, governance, and KPI signals indicate the database is "
+            f"operating with KPI coverage at {breakdown.coverage_percentage:.2f}% across "
+            f"{breakdown.successful_cluster_count}/{max(1, breakdown.kpi_cluster_count)} successful clusters. "
             f"{breakdown.readiness_status.value.lower().replace('_', ' ')} for AI workflows."
         )
 
@@ -1253,6 +1259,18 @@ class ReadinessService:
         if not kpi["enabled"] or kpi["kpi_count"] < int(rules.get("min_kpi_count", 1)):
             return 0
 
+        coverage = float(kpi.get("coverage_percentage", 0.0) or 0.0)
+        if coverage <= 0:
+            return 0
+        if coverage < 25:
+            return 10
+        if coverage < 50:
+            return 25
+        if coverage < 75:
+            return 55
+        if coverage < 100:
+            return 80
+
         confidence = max(0, min(100, int(round(float(kpi["confidence_score"]) * 100))))
         freshness = 100 if kpi["artifact_fresh"] else 0
         weights = rules.get("weights", {})
@@ -1262,7 +1280,7 @@ class ReadinessService:
                 100,
                 int(
                     round(
-                        float(weights.get("coverage", 0.40)) * kpi["coverage_score"]
+                        float(weights.get("coverage", 0.40)) * max(kpi["coverage_score"], coverage)
                         + float(weights.get("freshness", 0.35)) * freshness
                         + float(weights.get("confidence", 0.25)) * confidence
                     )

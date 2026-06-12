@@ -161,13 +161,12 @@ with action_cols[0]:
                 render_job_status(result_gen.get("job_id"), label="Embedding Job")
             else:
                 st.success(result_gen.get("message", "Embeddings generated successfully."))
-            st.rerun()
         else:
             st.error(result_gen.get("error", "Embedding generation failed"))
 
 with action_cols[1]:
     if st.button("Refresh Status", use_container_width=True):
-        st.rerun()
+        st.session_state["embeddings_status_refresh"] = True
 
 with action_cols[2]:
     st.info(

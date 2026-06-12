@@ -37,12 +37,11 @@ with col1:
             success, result = generate_kpi_intelligence(db_id)
             if success:
                 st.success("KPI intelligence generated.")
-                st.rerun()
             else:
                 st.error(result.get("error", "Failed to generate KPI intelligence"))
 with col2:
     if st.button("Refresh"):
-        st.rerun()
+        st.session_state["kpi_intelligence_refresh_requested"] = True
 with col3:
     st.caption("KPI Intelligence is package-driven and appears only when the KPI package is enabled.")
 

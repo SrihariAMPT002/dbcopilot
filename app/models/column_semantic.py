@@ -66,6 +66,8 @@ class ColumnSemantic(Base):
         String(255),
         nullable=True,
     )
+    classification_source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    trace_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     metadata_fingerprint: Mapped[str | None] = mapped_column(
         String(64),
@@ -102,6 +104,10 @@ class ColumnSemantic(Base):
         nullable=False,
         default=0.0,
     )
+    execution_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    used_fallback: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     generated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),

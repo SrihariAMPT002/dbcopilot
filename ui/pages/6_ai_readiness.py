@@ -50,8 +50,8 @@ with action_cols[0]:
             ok_recompute, payload = recompute_readiness(db_id)
         if ok_recompute:
             st.success("Readiness snapshot recomputed.")
-            st.rerun()
-        st.error(payload.get("error", "Readiness recompute failed"))
+        else:
+            st.error(payload.get("error", "Readiness recompute failed"))
 with action_cols[1]:
     st.info("This page blends deterministic scores with an AI-written assessment and roadmap.")
 

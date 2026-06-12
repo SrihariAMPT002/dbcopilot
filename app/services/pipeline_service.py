@@ -4,6 +4,7 @@ Pipeline operations service.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
@@ -59,6 +60,8 @@ class PipelineService:
         parent_job_id: Optional[int] = None,
         entity_table_id: Optional[int] = None,
         entity_name: Optional[str] = None,
+        stage_name: Optional[str] = None,
+        depends_on: Optional[list[str]] = None,
     ) -> PipelineJob:
         await self._ensure_database(database_id)
         job = PipelineJob(
@@ -70,6 +73,8 @@ class PipelineService:
             status=JobStatus.queued,
             progress_percentage=0,
             triggered_by=triggered_by,
+            stage_name=stage_name,
+            depends_on=json.dumps(depends_on or []) if depends_on is not None else None,
         )
         self.db.add(job)
         await self.db.flush()
@@ -130,6 +135,12 @@ class PipelineService:
             status=JobStatus.queued,
             progress_percentage=0,
             triggered_by=triggered_by or current.triggered_by,
+            parent_job_id=current.parent_job_id,
+            entity_table_id=current.entity_table_id,
+            entity_name=current.entity_name,
+            stage_name=current.stage_name,
+            depends_on=current.depends_on,
+            retry_count=current.retry_count + 1,
         )
         self.db.add(retried)
         await self.db.flush()
