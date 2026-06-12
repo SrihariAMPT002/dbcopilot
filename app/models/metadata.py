@@ -365,6 +365,7 @@ class SchemaSemantic(Base):
     _important_columns: Mapped[str] = mapped_column("important_columns", Text, nullable=False, default="[]")
     _business_keywords: Mapped[str] = mapped_column("business_keywords", Text, nullable=False, default="[]")
     _possible_questions: Mapped[str] = mapped_column("possible_questions", Text, nullable=False, default="[]")
+    _business_processes: Mapped[str] = mapped_column("business_processes", Text, nullable=False, default="[]")
 
     # Metadata
     generated_at: Mapped[datetime] = mapped_column(
@@ -433,6 +434,33 @@ class SchemaSemantic(Base):
     def possible_questions(self, value: list[str]) -> None:
         """Serialize possible_questions to JSON string."""
         self._possible_questions = json.dumps(value or [])
+
+    @property
+    def business_capabilities(self) -> list[str]:
+        return self.likely_usage
+
+    @business_capabilities.setter
+    def business_capabilities(self, value: list[str]) -> None:
+        self.likely_usage = value
+
+    @property
+    def business_entities(self) -> list[str]:
+        return self.important_columns
+
+    @business_entities.setter
+    def business_entities(self, value: list[str]) -> None:
+        self.important_columns = value
+
+    @property
+    def business_processes(self) -> list[str]:
+        try:
+            return json.loads(self._business_processes) if self._business_processes else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @business_processes.setter
+    def business_processes(self, value: list[str]) -> None:
+        self._business_processes = json.dumps(value or [])
 
     def __repr__(self) -> str:
         return f"<SchemaSemantic id={self.id} table_id={self.table_id}>"
@@ -586,6 +614,7 @@ class DatabaseSemantic(Base):
     _key_entities: Mapped[str] = mapped_column("key_entities", Text, nullable=False, default="[]")
     _business_glossary: Mapped[str] = mapped_column("business_glossary", Text, nullable=False, default="[]")
     _suggested_use_cases: Mapped[str] = mapped_column("suggested_use_cases", Text, nullable=False, default="[]")
+    _business_processes: Mapped[str] = mapped_column("business_processes", Text, nullable=False, default="[]")
 
     # Confidence and metadata
     confidence_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
@@ -658,6 +687,41 @@ class DatabaseSemantic(Base):
     def suggested_use_cases(self, value: list[str]) -> None:
         """Serialize suggested_use_cases to JSON string."""
         self._suggested_use_cases = json.dumps(value or [])
+
+    @property
+    def business_capabilities(self) -> list[str]:
+        return self.suggested_use_cases
+
+    @business_capabilities.setter
+    def business_capabilities(self, value: list[str]) -> None:
+        self.suggested_use_cases = value
+
+    @property
+    def business_entities(self) -> list[str]:
+        return self.key_entities
+
+    @business_entities.setter
+    def business_entities(self, value: list[str]) -> None:
+        self.key_entities = value
+
+    @property
+    def business_processes(self) -> list[str]:
+        try:
+            return json.loads(self._business_processes) if self._business_processes else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @business_processes.setter
+    def business_processes(self, value: list[str]) -> None:
+        self._business_processes = json.dumps(value or [])
+
+    @property
+    def semantic_summary(self) -> str | None:
+        return self.business_summary
+
+    @semantic_summary.setter
+    def semantic_summary(self, value: str | None) -> None:
+        self.business_summary = value
 
 
 class KPIIntelligence(Base):

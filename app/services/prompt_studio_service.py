@@ -29,6 +29,7 @@ from app.services.ai_observability_service import AIObservabilityService
 from app.schema_engine.embeddings import EmbeddingEngine
 from app.schema_engine.relationship_graph import RelationshipGraphEngine
 from app.services.artifact_service import ArtifactService
+from app.services.column_semantic_service import ColumnSemanticService
 from app.utils import now_utc
 
 logger = logging.getLogger(__name__)
@@ -84,7 +85,9 @@ class PromptStudioService:
 
     @staticmethod
     def _redact_text(text: str) -> str:
-        return text
+        if not settings.pii_prompt_protection_enabled or not text.strip():
+            return text
+        return "[REDACTED]"
 
     @classmethod
     def _redact_context(cls, context: dict[str, Any]) -> dict[str, Any]:
@@ -380,6 +383,7 @@ class PromptStudioService:
         semantic = await self._fetch_semantic(database_id)
         tables = await self._fetch_tables(database_id)
         pii_map = await self._fetch_pii_map(database_id)
+        governance_summary = await ColumnSemanticService(self.db).governance_summary(database_id)
         try:
             relationship_graph = await RelationshipGraphEngine(self.db).get_relationship_graph(database_id)
         except Exception:
@@ -484,6 +488,12 @@ class PromptStudioService:
             "embeddings": embeddings_payload,
             "tables": table_payloads,
             "columns": column_payloads,
+            "governance": {
+                **governance_summary,
+                "pii_coverage": governance_summary.get("pii_identified_coverage", 0.0),
+                "prompt_protection_enabled": governance_summary.get("prompt_protection_enabled", False),
+                "embedding_protection_enabled": governance_summary.get("embedding_protection_enabled", False),
+            },
         }
 
     async def _fetch_database(self, database_id: int) -> ConnectedDatabase:

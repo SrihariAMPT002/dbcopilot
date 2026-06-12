@@ -20,6 +20,7 @@ NAV_LINKS = [
     ("pages/1_connect_database.py", "Connect Database"),
     ("pages/2_connected_sources.py", "Connected Sources"),
     ("pages/3_schema_explorer.py", "Schema Explorer"),
+    ("pages/14_governance.py", "Governance"),
     ("pages/4_relationship_graph.py", "Relationship Graph"),
     ("pages/5_semantic_intelligence.py", "Semantic Intelligence"),
     ("pages/7_embeddings_retrieval.py", "Embeddings & Retrieval"),
@@ -32,6 +33,7 @@ NAV_LINKS = [
 ]
 
 PACKAGE_NAV = {
+    "pages/14_governance.py": "governance",
     "pages/5_semantic_intelligence.py": "semantic",
     "pages/4_relationship_graph.py": "relationship",
     "pages/7_embeddings_retrieval.py": "rag",

@@ -706,11 +706,14 @@ class ReadinessService:
         prompt_artifacts_rendered = 0
         prompt_context_length = 0
         readiness_prompt_names = self._readiness_prompt_names()
-        enabled_artifacts = self._enabled_artifacts()
+        prompt_studio_templates = [
+            PromptStudioService._template_id_for(member.value)
+            for member in PromptStudioService._artifact_order()
+        ]
         if tables > 0:
             try:
                 prompt_context = await PromptStudioService(self.db)._build_context(database_id)
-                for template_id in enabled_artifacts:
+                for template_id in prompt_studio_templates:
                     try:
                         rendered = self.registry.render_prompt(template_id, prompt_context, category="system")
                         if rendered.user_prompt.strip():
@@ -860,6 +863,29 @@ class ReadinessService:
             "coverage_percentage": coverage_percentage,
         }
 
+        governance_complete = bool(columns > 0 and int(column_semantics) >= int(columns))
+        prompt_protection_enabled = bool(
+            settings.pii_prompt_protection_enabled
+            and governance_complete
+        )
+        embedding_protection_enabled = bool(
+            settings.pii_embedding_protection_enabled
+            and governance_complete
+            and int(embedding_status.get("completed_tables", 0)) > 0
+        )
+        governance_stats["governance_complete"] = governance_complete
+        governance_stats["prompt_protection_enabled"] = prompt_protection_enabled
+        governance_stats["embedding_protection_enabled"] = embedding_protection_enabled
+
+        ai_context_stats = {
+            "prompt_artifacts_rendered": prompt_artifacts_rendered,
+            "prompt_artifacts_expected": len(prompt_studio_templates) + len(readiness_prompt_names),
+            "prompt_context_length": prompt_context_length,
+            "prompt_artifact_errors": prompt_artifact_errors,
+            "embedding_coverage": self._ratio_score(int(embedding_status.get("completed_tables", 0)), int(max(1, tables))),
+            "semantic_dependency_coverage": semantic_stats["semantic_table_coverage"],
+        }
+
         if tables > 0:
             readiness_context = {
                 "database_name": database.display_name or database.name,
@@ -884,8 +910,8 @@ class ReadinessService:
                 },
                 "column_semantics": governance_stats["column_semantics"],
                 "governance_settings": {
-                    "prompt_protection_enabled": governance_stats["prompt_protection_enabled"],
-                    "embedding_protection_enabled": governance_stats["embedding_protection_enabled"],
+                    "prompt_protection_enabled": prompt_protection_enabled,
+                    "embedding_protection_enabled": embedding_protection_enabled,
                 },
             }
             for template_id in readiness_prompt_names:
@@ -896,30 +922,7 @@ class ReadinessService:
                         prompt_artifacts_rendered += 1
                 except Exception as exc:
                     prompt_artifact_errors.append(f"{template_id}: {exc}")
-
-        ai_context_stats = {
-            "prompt_artifacts_rendered": prompt_artifacts_rendered,
-            "prompt_artifacts_expected": len(enabled_artifacts) + len(readiness_prompt_names),
-            "prompt_context_length": prompt_context_length,
-            "prompt_artifact_errors": prompt_artifact_errors,
-            "embedding_coverage": self._ratio_score(int(embedding_status.get("completed_tables", 0)), int(max(1, tables))),
-            "semantic_dependency_coverage": semantic_stats["semantic_table_coverage"],
-        }
-
-        prompt_protection_enabled = bool(
-            settings.pii_prompt_protection_enabled
-            and governance_stats["column_semantics"] > 0
-            and prompt_artifacts_rendered >= len(enabled_artifacts) + len(readiness_prompt_names)
-            and not prompt_artifact_errors
-        )
-        embedding_protection_enabled = bool(
-            settings.pii_embedding_protection_enabled
-            and governance_stats["column_semantics"] > 0
-            and governance_stats["pii_columns"] > 0
-            and int(embedding_status.get("completed_tables", 0)) > 0
-        )
-        governance_stats["prompt_protection_enabled"] = prompt_protection_enabled
-        governance_stats["embedding_protection_enabled"] = embedding_protection_enabled
+            ai_context_stats["prompt_artifacts_rendered"] = prompt_artifacts_rendered
 
         return {
             "metadata": metadata_stats,
@@ -1415,10 +1418,12 @@ class ReadinessService:
                 hints.append("PII intelligence is incomplete; run column PII classification for all columns.")
             if governance["pii_classified_coverage"] < 100 and governance["pii_columns"] > 0:
                 hints.append("Some PII columns are missing type labels; rerun PII classification.")
-            if not governance["prompt_protection_enabled"]:
-                hints.append("Enable prompt protection to redact PII from generated prompt artifacts.")
-            if not governance["embedding_protection_enabled"]:
-                hints.append("Enable embedding protection to exclude PII column details from vector indexes.")
+            if not governance.get("governance_complete"):
+                hints.append("Run metadata-driven governance classification for all columns.")
+            elif not governance["prompt_protection_enabled"]:
+                hints.append("Prompt protection is disabled or governance intelligence is incomplete.")
+            if governance.get("governance_complete") and not governance["embedding_protection_enabled"]:
+                hints.append("Complete embedding generation so PII masking can protect vector indexes.")
 
         if category_scores.get("kpi_readiness_score", 0) < 85:
             missing.append("kpi")

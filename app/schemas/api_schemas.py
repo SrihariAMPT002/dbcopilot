@@ -160,6 +160,9 @@ class ColumnSemanticResponse(BaseModel):
     database_id: int
     business_name: Optional[str] = None
     business_description: Optional[str] = None
+    business_meaning: Optional[str] = None
+    governance_reasoning: Optional[str] = None
+    table_purpose: Optional[str] = None
     prompt_id: Optional[str] = None
     prompt_version: Optional[str] = None
     model_name: Optional[str] = None

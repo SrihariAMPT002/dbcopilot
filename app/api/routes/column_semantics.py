@@ -24,6 +24,9 @@ def _row_to_response(item: ColumnSemantic, column: DatabaseColumn, table: Databa
         database_id=item.database_id,
         business_name=item.business_name,
         business_description=item.business_description,
+        business_meaning=item.business_meaning,
+        governance_reasoning=item.governance_reasoning,
+        table_purpose=item.table_purpose,
         prompt_id=item.prompt_id,
         prompt_version=item.prompt_version,
         model_name=item.model_name,
@@ -79,6 +82,16 @@ async def rescan_column_semantics(
     )
     rows = result.all()
     return [_row_to_response(item, column, table, schema) for item, column, table, schema in rows]
+
+
+@router.get(
+    "/databases/{db_id}/governance-package",
+    summary="Get aggregated governance intelligence package for a database",
+)
+async def get_governance_package(db_id: int, db: AsyncSession = Depends(get_db)) -> dict:
+    service = ColumnSemanticService(db)
+    await service._fetch_database(db_id)
+    return await service.build_governance_package(db_id)
 
 
 @router.post(

@@ -54,6 +54,21 @@ class ColumnSemantic(Base):
         Text,
         nullable=True,
     )
+
+    business_meaning: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    governance_reasoning: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    table_purpose: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
     prompt_id: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,

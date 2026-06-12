@@ -243,6 +243,10 @@ def list_column_semantics(db_id: int) -> Tuple[bool, Any]:
     return _get(f"/column-semantics/databases/{db_id}")
 
 
+def get_governance_package(db_id: int) -> Tuple[bool, Any]:
+    return _get(f"/column-semantics/databases/{db_id}/governance-package")
+
+
 def rescan_column_semantics(db_id: int, force: bool = False) -> Tuple[bool, Any]:
     return _post(f"/column-semantics/databases/{db_id}/rescan?force={str(force).lower()}", {})
 

@@ -362,7 +362,29 @@ class EmbeddingEngine:
 
         return "\n".join(lines)
 
-    def _build_relationship_text(self, table: DatabaseTable) -> str:
+    @staticmethod
+    def _column_id_for_name(table: DatabaseTable, column_name: str) -> int | None:
+        for column in table.columns or []:
+            if column.name == column_name:
+                return column.id
+        return None
+
+    def _protected_column_label(
+        self,
+        table: DatabaseTable,
+        column_name: str,
+        pii_map: dict[int, ColumnSemantic] | None,
+    ) -> str:
+        column_id = self._column_id_for_name(table, column_name)
+        if column_id is not None and self._should_mask_column(column_id, pii_map):
+            return "[PII PROTECTED]"
+        return column_name
+
+    def _build_relationship_text(
+        self,
+        table: DatabaseTable,
+        pii_map: dict[int, ColumnSemantic] | None = None,
+    ) -> str:
         if not table.relationships_from:
             return (
                 f"Table {table.schema.name}.{table.name} has no discovered foreign key relationships."
@@ -372,8 +394,9 @@ class EmbeddingEngine:
         for rel in table.relationships_from:
             target_schema = f"{rel.referenced_schema}." if rel.referenced_schema else ""
             constraint = f" ({rel.constraint_name})" if rel.constraint_name else ""
+            source_column = self._protected_column_label(table, rel.column_name, pii_map)
             lines.append(
-                f" - {rel.column_name} joins to {target_schema}{rel.referenced_table_name}.{rel.referenced_column_name}{constraint}"
+                f" - {source_column} joins to {target_schema}{rel.referenced_table_name}.{rel.referenced_column_name}{constraint}"
             )
         return "\n".join(lines)
 
@@ -575,7 +598,7 @@ class EmbeddingEngine:
         pii_map = await self._fetch_pii_map(database_id)
 
         table_text = self._build_table_text(table, semantic, pii_map)
-        relationship_text = self._build_relationship_text(table)
+        relationship_text = self._build_relationship_text(table, pii_map)
         prompt_text = self._build_prompt_text(table, semantic)
 
         texts = [table_text, relationship_text, prompt_text]
@@ -612,9 +635,12 @@ class EmbeddingEngine:
                 text=table_text,
                 payload={
                     **self._payload_base(database, table, COLLECTION_SCHEMA_TABLES, table_text),
-                    "column_names": [column.name for column in table.columns],
+                    "column_names": [
+                        self._protected_column_label(table, column.name, pii_map)
+                        for column in table.columns
+                    ],
                     "relationships": [
-                        f"{rel.column_name}->{rel.referenced_table_name}.{rel.referenced_column_name}"
+                        f"{self._protected_column_label(table, rel.column_name, pii_map)}->{rel.referenced_table_name}.{rel.referenced_column_name}"
                         for rel in table.relationships_from
                     ],
                     "semantic_summary": semantic.semantic_summary if semantic else None,
@@ -630,7 +656,7 @@ class EmbeddingEngine:
                     **self._payload_base(database, table, COLLECTION_SCHEMA_RELATIONSHIPS, relationship_text),
                     "relationships": [
                         {
-                            "column_name": rel.column_name,
+                            "column_name": self._protected_column_label(table, rel.column_name, pii_map),
                             "referenced_schema": rel.referenced_schema,
                             "referenced_table_name": rel.referenced_table_name,
                             "referenced_column_name": rel.referenced_column_name,

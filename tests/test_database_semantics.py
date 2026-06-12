@@ -215,39 +215,33 @@ class _ConcurrentSemanticSession:
 # ── DatabaseSemanticService Tests ─────────────────────────────────────────────
 
 class TestDatabaseSemanticServiceMetadataAggregation:
-    """Test metadata aggregation and summarization."""
+    """Test compact semantic package input construction."""
 
     @pytest.mark.asyncio
-    async def test_build_metadata_summary(self, mock_db, sample_database):
-        """Test building compact metadata summary."""
+    async def test_build_semantic_input(self, mock_db, sample_database, monkeypatch: pytest.MonkeyPatch):
+        """Test building metadata + governance package input without raw schema dumps."""
         service = DatabaseSemanticService(mock_db)
-        
-        payload = await service._build_metadata_summary(sample_database)
-        
-        # Verify payload structure
-        assert payload["database_name"] == "test_db"
-        assert payload["database_type"] == "postgresql"
-        assert len(payload["schemas"]) == 1
-        assert payload["total_tables"] == 2
-        assert payload["total_relationships"] == 1
-        
-        # Verify schema structure
-        schema_info = payload["schemas"][0]
-        assert schema_info["name"] == "public"
-        assert schema_info["description"] == "Public schema"
-        assert schema_info["table_count"] == 2
-        assert len(schema_info["tables"]) == 2
-        
-        # Verify table structure
-        table_info = schema_info["tables"][0]
-        assert table_info["name"] == "customers"
-        assert table_info["type"] == "table"
-        assert table_info["description"] == "Customer master data"
-        assert len(table_info["columns"]) == 2
-        assert table_info["columns"][0]["name"] == "customer_id"
-        assert table_info["columns"][0]["is_pk"] is True
-        assert table_info["columns"][0]["description"] == "Unique customer identifier"
-        assert "description" not in table_info["columns"][1]
+        monkeypatch.setattr(
+            "app.services.database_semantic_service.ColumnSemanticService.build_governance_package",
+            AsyncMock(return_value={"database_id": 1, "table_count": 2, "packages": []}),
+        )
+        monkeypatch.setattr(
+            "app.services.database_semantic_service.ColumnSemanticService.get_pii_map",
+            AsyncMock(return_value={}),
+        )
+
+        payload = await service._build_semantic_input(sample_database)
+
+        metadata = payload["metadata"]
+        assert metadata["database_name"] == "Test Database"
+        assert metadata["database_type"] == "postgresql"
+        assert metadata["table_count"] == 2
+        assert metadata["relationship_count"] == 1
+        assert len(metadata["tables"]) == 2
+        assert metadata["tables"][0]["table_name"] == "customers"
+        assert metadata["tables"][0]["description"] == "Customer master data"
+        assert "columns" not in metadata["tables"][0]
+        assert payload["governance_package"]["table_count"] == 2
 
     def test_analyze_naming_patterns_good_names(self, sample_database):
         """Test analyzing good naming patterns."""
@@ -294,78 +288,6 @@ class TestDatabaseSemanticServiceMetadataAggregation:
         assert not service._is_poor_name("customers")
         assert not service._is_poor_name("order_items")
         assert not service._is_poor_name("user_profile")
-
-    def test_validate_payload_size(self):
-        """Test payload size validation."""
-        service = DatabaseSemanticService(AsyncMock())
-        
-        # Small payload
-        small_payload = {"tables": [{"name": f"table_{i}"} for i in range(10)]}
-        assert service._validate_payload_size(small_payload) is True
-        
-        # Large payload
-        large_payload = {"tables": [{"name": f"table_{i}", "data": "x" * 10000} for i in range(100)]}
-        assert service._validate_payload_size(large_payload) is False
-
-    def test_build_schema_prompt_parts_includes_descriptions(self):
-        """Test LLM schema summary includes catalog descriptions."""
-        service = DatabaseSemanticService(AsyncMock())
-        metadata = {
-            "schemas": [
-                {
-                    "name": "public",
-                    "description": "Main application schema",
-                    "tables": [
-                        {
-                            "name": "customers",
-                            "type": "table",
-                            "row_count": 100,
-                            "description": "Customer master data",
-                            "columns": [
-                                {
-                                    "name": "customer_id",
-                                    "type": "INTEGER",
-                                    "description": "Unique customer identifier",
-                                },
-                                {"name": "customer_name", "type": "VARCHAR(255)"},
-                            ],
-                            "relationships": [],
-                        }
-                    ],
-                }
-            ]
-        }
-
-        schema_lines, _ = service._build_schema_prompt_parts(metadata)
-        joined = "\n".join(schema_lines)
-
-        assert "Schema description: Main application schema" in joined
-        assert "Table description: Customer master data" in joined
-        assert "customer_id(INTEGER) — Unique customer identifier" in joined
-        assert "customer_name(VARCHAR(255))" in joined
-        assert "customer_name(VARCHAR(255)) —" not in joined
-
-    def test_sample_large_schema(self):
-        """Test schema sampling for large databases."""
-        service = DatabaseSemanticService(AsyncMock())
-        
-        # Create large payload
-        payload = {
-            "database_name": "test",
-            "schemas": [
-                {
-                    "name": "public",
-                    "tables": [{"name": f"table_{i}"} for i in range(100)],
-                }
-            ],
-        }
-        
-        sampled = service._sample_large_schema(payload)
-        
-        # Verify sampling
-        assert "_sampling_note" in sampled
-        assert len(sampled["schemas"][0]["tables"]) <= 50  # MAX_ENTITIES_TO_SAMPLE
-
 
 class TestDatabaseSemanticServiceConfidenceScoring:
     """Test confidence score calculation."""
@@ -429,24 +351,26 @@ class TestDatabaseSemanticServiceResponseParsing:
         
         response_text = json.dumps({
             "business_domain": "E-Commerce",
-            "business_summary": "Customer order management system",
-            "key_entities": ["customers", "orders", "products"],
-            "business_glossary": [
-                {"term": "SKU", "definition": "Stock keeping unit"},
-            ],
-            "suggested_use_cases": [
+            "semantic_summary": "Customer order management system",
+            "business_entities": ["customers", "orders", "products"],
+            "business_capabilities": [
                 "Customer lifetime value analysis",
                 "Order fulfillment tracking",
             ],
-            "analysis_notes": "Schema was sampled; some tables omitted.",
+            "business_processes": ["Order capture", "Fulfillment"],
+            "business_glossary": [
+                {"term": "SKU", "definition": "Stock keeping unit"},
+            ],
+            "analysis_notes": "Governance-informed semantic package.",
         })
         
-        enrichment = service._parse_enrichment_response(1, response_text, {})
+        enrichment = service._parse_enrichment_response(1, response_text)
         
         assert enrichment.business_domain == "E-Commerce"
         assert len(enrichment.key_entities) == 3
+        assert enrichment.business_processes == ["Order capture", "Fulfillment"]
         assert enrichment.confidence_score == 1.0
-        assert enrichment.analysis_notes == "Schema was sampled; some tables omitted."
+        assert enrichment.analysis_notes == "Governance-informed semantic package."
 
     def test_parse_enrichment_response_invalid_json(self):
         """Test parsing invalid JSON response."""
@@ -454,12 +378,8 @@ class TestDatabaseSemanticServiceResponseParsing:
         
         response_text = "This is not valid JSON {invalid"
         
-        enrichment = service._parse_enrichment_response(1, response_text, {})
-        
-        assert enrichment.business_domain == "Unknown"
-        assert enrichment.confidence_score == 0.0
-        assert enrichment.analysis_notes is None
-        assert enrichment.raw_response == response_text
+        with pytest.raises(ValueError, match="invalid_json"):
+            service._parse_enrichment_response(1, response_text)
 
 
 class TestDatabaseSemanticServiceDatabaseOperations:
@@ -619,15 +539,17 @@ class TestDatabaseSemanticServicePrompts:
     """Test prompt building for Azure OpenAI."""
 
     @pytest.mark.asyncio
-    async def test_build_prompt_variables_schema_summary(self, mock_db, sample_database):
-        """Test schema_summary passed to the semantic prompt template."""
+    async def test_build_prompt_variables_semantic_package(self, mock_db, sample_database):
+        """Test metadata and governance package passed to the semantic prompt template."""
         service = DatabaseSemanticService(mock_db)
-        metadata = await service._build_metadata_summary(sample_database)
+        semantic_input = {
+            "metadata": {"table_count": 2, "tables": [{"table_name": "customers"}]},
+            "governance_package": {"table_count": 2, "packages": []},
+        }
 
-        variables = service._build_prompt_variables(sample_database, metadata)
-        schema_summary = variables["schema_summary"]
+        variables = service._build_prompt_variables(sample_database, semantic_input)
 
-        assert "customers" in schema_summary
-        assert "Schema description: Public schema" in schema_summary
-        assert "Table description: Customer master data" in schema_summary
-        assert "customer_id(INTEGER) — Unique customer identifier" in schema_summary
+        assert "metadata" in variables
+        assert "governance_package" in variables
+        assert variables["metadata"]["tables"][0]["table_name"] == "customers"
+        assert "schema_summary" not in variables

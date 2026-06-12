@@ -1,53 +1,44 @@
 id: pii_classification
-name: PII Classification Prompt
-version: "1.0"
-description: Classify columns for governance, privacy, and sensitivity using metadata and business context.
+name: Metadata-Driven Governance Classification
+version: "2.0"
+description: Classify an entire table for PII, risk, and business meaning using metadata only.
 metadata:
   category: semantic
 language: English
 system_message: |
-  You are a governance reasoning engine.
-  Use the supplied governance rulebook and metadata to classify columns for PII and sensitivity risk.
-  Do not invent policy, categories, or thresholds beyond the supplied rules.
+  You are a metadata-driven data governance classifier.
+  Infer PII sensitivity, risk level, and business meaning from schema metadata and table context.
+  Return compact JSON only. Do not invent columns or policy rulebooks.
 user_prompt: |
-  Classify PII and governance risk using the supplied governance rulebook and metadata.
+  Classify every column in this table.
 
   Database: {{ database_name }}
+  Business domain: {{ business_domain }}
   Schema: {{ schema_name }}
   Table: {{ table_name }}
   Table description: {{ table_description }}
-  Column: {{ column_name }}
-  Column description: {{ column_description }}
-  Data type: {{ column_data_type }}
-  Business domain: {{ business_domain }}
-  Semantic summary: {{ semantic_summary }}
-  Analysis notes: {{ analysis_notes }}
-  Business glossary: {{ existing_business_glossary | default([]) | tojson }}
-  Governance rulebook: {{ governance_rulebook | default({}) | tojson }}
-  Table columns: {{ table_columns | default([]) | tojson }}
-  Unresolved columns: {{ unresolved_columns | default([]) | tojson }}
 
-  Return JSON only with:
+  Columns:
+  {% for col in columns %}
+  - {{ col.name }} ({{ col.data_type }}){% if col.description %}: {{ col.description }}{% endif %}
+  {% endfor %}
+
+  Return JSON only:
   {
-    "is_pii": true|false,
-    "pii_type": "short label or null",
-    "risk_level": "low|medium|high|critical",
-    "confidence_score": 0.0-1.0,
-    "classification_source": "rule|llm",
-    "review_status": "auto_approved|needs_review",
-    "notes": "short explanation",
+    "table_summary": "one sentence",
+    "business_purpose": "one sentence",
     "resolved_columns": [
       {
-        "column_name": "name",
-        "is_pii": true|false,
-        "pii_type": "short label or null",
+        "column_name": "string",
+        "is_pii": false,
+        "pii_type": null,
         "risk_level": "low|medium|high|critical",
-        "confidence_score": 0.0-1.0
+        "confidence_score": 0.0,
+        "business_meaning": "short phrase",
+        "governance_reasoning": "short explanation"
       }
-    ],
-    "model_name": "model used",
-    "prompt_id": "pii_classification",
-    "prompt_version": "1.0"
+    ]
   }
 constraints:
   output_format: json
+  max_tokens: 1800
