@@ -1,6 +1,6 @@
 """Add governance intelligence fields to column_semantics.
 
-Revision ID: 019_add_governance_intelligence_fields
+Revision ID: 019_add_governance_fields
 Revises: 018_add_subcluster_fields
 Create Date: 2026-06-09
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 
-revision = "019_add_governance_intelligence_fields"
+revision = "019_add_governance_fields"
 down_revision = "018_add_subcluster_fields"
 branch_labels = None
 depends_on = None

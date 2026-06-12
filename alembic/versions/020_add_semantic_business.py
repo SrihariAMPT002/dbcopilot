@@ -1,7 +1,7 @@
 """Add business_processes fields for V3 semantic intelligence.
 
-Revision ID: 020_add_semantic_business_processes
-Revises: 019_add_governance_intelligence_fields
+Revision ID: 020_add_semantic_business
+Revises: 019_add_governance_fields
 Create Date: 2026-06-09
 """
 
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 
-revision = "020_add_semantic_business_processes"
-down_revision = "019_add_governance_intelligence_fields"
+revision = "020_add_semantic_business"
+down_revision = "019_add_governance_fields"
 branch_labels = None
 depends_on = None
 
