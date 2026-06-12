@@ -1,37 +1,37 @@
 id: relationship_discovery
-name: Relationship Discovery Prompt
-version: "1.0"
-description: Infer and validate database table relationships from schema metadata.
+name: Cluster Relationship Intelligence
+version: "2.0"
+description: Discover business relationship intelligence from governance and semantic cluster packages.
 metadata:
   category: relationship
 language: English
 system_message: |
-  You are a relationship discovery engine.
-  Analyze table, column, and foreign key metadata to identify reliable joins and relationship structure.
-  Prefer explicit relationships over inferred ones and return JSON only.
+  You are a business relationship intelligence engine.
+  Analyze the cluster package to discover entity graphs, process flows, dependencies, and lifecycle patterns.
+  PII columns in the governance package are visible context — describe business relationships without exposing raw sensitive values.
+  Return compact JSON only. Never infer relationships outside the supplied cluster metadata.
 user_prompt: |
-  Analyze the following database relationship metadata.
+  Analyze this relationship cluster package.
 
-  Database: {{ database_name }}
-  Database type: {{ database_type }}
-  Schemas and tables:
-  {{ schema_summary | default([]) | tojson }}
+  Governance package:
+  {{ governance_package | tojson }}
 
-  Existing relationships:
-  {{ relationships | default([]) | tojson }}
+  Semantic package:
+  {{ semantic_package | tojson }}
 
-  Column context:
-  {{ columns | default([]) | tojson }}
+  Cluster metadata:
+  {{ cluster_metadata | tojson }}
 
-  Return JSON only with:
+  Return JSON only:
   {
-    "cluster_summary": "",
+    "cluster_summary": "one sentence",
     "cluster_confidence": 0.0,
-    "business_entity_graph": [],
+    "entity_graph": [],
     "business_process_flows": [],
     "upstream_dependencies": [],
     "downstream_dependencies": [],
-    "entity_lifecycle_descriptions": []
+    "lifecycle_flows": []
   }
 constraints:
   output_format: json
+  max_tokens: 1800

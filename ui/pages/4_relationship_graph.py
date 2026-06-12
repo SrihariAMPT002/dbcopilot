@@ -161,6 +161,13 @@ if relationship_intelligence:
     with bi_col2:
         st.markdown("**Business Process Flows**")
         st.code(relationship_intelligence.get("business_process_flows") or "[]", language="json")
+        st.markdown("**Lifecycle flows**")
+        st.code(
+            relationship_intelligence.get("lifecycle_flows")
+            or relationship_intelligence.get("entity_lifecycle_descriptions")
+            or "[]",
+            language="json",
+        )
         st.markdown("**Upstream / Downstream**")
         st.code(
             json.dumps({

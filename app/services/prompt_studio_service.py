@@ -540,6 +540,7 @@ class PromptStudioService:
             "upstream_dependencies": first.upstream_dependencies or "[]",
             "downstream_dependencies": first.downstream_dependencies or "[]",
             "entity_lifecycle_descriptions": first.entity_lifecycle_descriptions or "[]",
+            "lifecycle_flows": first.entity_lifecycle_descriptions or "[]",
             "ai_summary": first.ai_summary or "",
             "ai_confidence": first.ai_confidence or 0.0,
             "ai_model_name": first.ai_model_name or "",
