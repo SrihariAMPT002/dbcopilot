@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-
-import pytest
 
 from app.services.column_semantic_service import ColumnSemanticService
 
@@ -105,8 +104,94 @@ def test_metadata_package_excludes_rulebook_payload():
     assert package["columns"][0]["name"] == "email_address"
 
 
-@pytest.mark.asyncio
-async def test_build_governance_package_groups_pii_columns():
+def test_governance_error_message_normalizes_azure_empty_response():
+    service = ColumnSemanticService(AsyncMock())
+    assert service._governance_error_message(ValueError("azure_empty_response finish_reason=length")) == "azure_empty_response"
+    assert service._governance_error_message(ValueError("empty_ai_response")) == "empty_ai_response"
+    assert service._governance_error_message(ValueError("invalid_json")) == "invalid_json"
+    assert (
+        service._governance_error_message(ValueError("missing_required_sections:resolved_columns"))
+        == "missing_required_fields:resolved_columns"
+    )
+
+
+def test_upsert_failed_semantic_persists_error_state_without_fake_pii():
+    service = ColumnSemanticService(AsyncMock())
+    column = _column()
+    table = column.table
+    table.columns = [column]
+    service.get_by_column_id = AsyncMock(return_value=None)
+    service.db.add = lambda row: None
+    service.db.flush = AsyncMock()
+
+    row = asyncio.run(
+        service._upsert_failed_semantic(
+            column,
+            database_id=1,
+            prompt_id="pii_classification",
+            prompt_version="2.0",
+            model_name="gpt-5-nano",
+            metadata_fingerprint="abc123",
+            error_message="empty_ai_response",
+            ai_result=None,
+        )
+    )
+
+    assert row.execution_status == "failed"
+    assert row.used_fallback is False
+    assert row.error_message == "empty_ai_response"
+    assert row.pii_type is None
+    assert row.risk_level is None
+    assert row.business_meaning is None
+    assert row.governance_reasoning is None
+
+
+def test_classify_table_persists_failed_state_on_empty_ai_response(monkeypatch):
+    service = ColumnSemanticService(AsyncMock())
+    column = _column()
+    table = column.table
+    table.columns = [column]
+    database = SimpleNamespace(id=1, display_name="Demo DB", name="demo")
+
+    async def fake_generate(self, **kwargs):
+        return SimpleNamespace(content="", trace_id="trace-1")
+
+    async def fake_get_by_database_id(_database_id):
+        return []
+
+    async def fake_persist_table_failure(columns, database_id, **kwargs):
+        return [
+            SimpleNamespace(
+                column_id=column.id,
+                execution_status="failed",
+                used_fallback=False,
+                error_message=kwargs["error_message"],
+            )
+        ]
+
+    monkeypatch.setattr(
+        "app.services.column_semantic_service.AIObservabilityService.generate",
+        fake_generate,
+    )
+    service.get_by_database_id = fake_get_by_database_id
+    service._fetch_database_semantic = AsyncMock(return_value=None)
+    service._persist_table_failure = AsyncMock(side_effect=fake_persist_table_failure)
+    service.registry.render_prompt = lambda *args, **kwargs: SimpleNamespace(
+        metadata=SimpleNamespace(id="pii_classification", version="2.0"),
+        system_message="system",
+        user_prompt="user",
+    )
+
+    results = asyncio.run(service._classify_table(table, database, force=True))
+
+    assert len(results) == 1
+    assert results[0].execution_status == "failed"
+    assert results[0].used_fallback is False
+    assert results[0].error_message == "empty_ai_response"
+    service._persist_table_failure.assert_awaited_once()
+
+
+def test_build_governance_package_groups_pii_columns():
     service = ColumnSemanticService(AsyncMock())
     row = SimpleNamespace(
         is_pii=True,
@@ -115,6 +200,7 @@ async def test_build_governance_package_groups_pii_columns():
         business_meaning="Customer email",
         governance_reasoning="Direct identifier",
         table_purpose="Customer contact storage",
+        execution_status="success",
     )
     column = SimpleNamespace(name="email_address")
     table = SimpleNamespace(name="customers")
@@ -124,6 +210,6 @@ async def test_build_governance_package_groups_pii_columns():
             all=lambda: [(row, column, table, schema)],
         )
     )
-    package = await service.build_governance_package(1)
+    package = asyncio.run(service.build_governance_package(1))
     assert package["table_count"] == 1
     assert package["packages"][0]["pii_columns"][0]["column_name"] == "email_address"

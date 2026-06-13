@@ -24,6 +24,153 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+def _response_attr(obj: Any, key: str, default: Any = None) -> Any:
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _stringify_message_content(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text") or item.get("content") or ""
+            else:
+                text = _response_attr(item, "text") or _response_attr(item, "content") or ""
+            if text:
+                parts.append(str(text).strip())
+        return "\n".join(parts).strip()
+    return str(content).strip()
+
+
+def _text_parts_from_output_content(content: Any) -> list[str]:
+    if content is None:
+        return []
+    if isinstance(content, str):
+        return [content.strip()] if content.strip() else []
+    if not isinstance(content, list):
+        return []
+    parts: list[str] = []
+    for item in content:
+        item_type = _response_attr(item, "type", "")
+        if item_type in {"output_text", "text"}:
+            text = _response_attr(item, "text") or _response_attr(item, "content") or ""
+            if text:
+                parts.append(str(text).strip())
+        elif isinstance(item, dict):
+            text = item.get("text") or item.get("content") or ""
+            if text:
+                parts.append(str(text).strip())
+        else:
+            text = _response_attr(item, "text") or _response_attr(item, "content") or ""
+            if text:
+                parts.append(str(text).strip())
+    return parts
+
+
+def _content_from_output_items(output: Any) -> str:
+    if output is None:
+        return ""
+    if isinstance(output, str):
+        return output.strip()
+    if not isinstance(output, list):
+        return ""
+    parts: list[str] = []
+    for item in output:
+        item_type = _response_attr(item, "type", "")
+        if item_type in {"message", "output_message", "assistant"}:
+            parts.extend(_text_parts_from_output_content(_response_attr(item, "content")))
+        elif item_type in {"output_text", "text"}:
+            text = _response_attr(item, "text") or _response_attr(item, "content") or ""
+            if text:
+                parts.append(str(text).strip())
+        elif isinstance(item, dict):
+            if item.get("type") in {"message", "output_message", "assistant"}:
+                parts.extend(_text_parts_from_output_content(item.get("content")))
+            else:
+                text = item.get("text") or item.get("content") or ""
+                if isinstance(text, str) and text.strip():
+                    parts.append(text.strip())
+    return "\n".join(parts).strip()
+
+
+def _content_from_choices(response: Any) -> str:
+    choices = _response_attr(response, "choices", []) or []
+    if not choices:
+        return ""
+    choice = choices[0]
+    message = _response_attr(choice, "message")
+    if message is None:
+        return ""
+    content = _stringify_message_content(_response_attr(message, "content"))
+    if content:
+        return content
+    parsed = _response_attr(message, "parsed")
+    if parsed is not None:
+        if isinstance(parsed, dict):
+            return json.dumps(parsed)
+        return str(parsed).strip()
+    return ""
+
+
+def _resolve_finish_reason(response: Any) -> str:
+    choices = _response_attr(response, "choices", []) or []
+    if choices:
+        finish_reason = _response_attr(choices[0], "finish_reason")
+        if finish_reason:
+            return str(finish_reason)
+    status = _response_attr(response, "status")
+    if status:
+        return str(status)
+    incomplete = _response_attr(response, "incomplete_details")
+    if incomplete is not None:
+        reason = _response_attr(incomplete, "reason")
+        if reason:
+            return str(reason)
+    return "unknown"
+
+
+def extract_azure_content(response: Any) -> str:
+    """Extract assistant text from Azure OpenAI chat or responses-shaped payloads."""
+    content = _content_from_choices(response)
+    if content:
+        return content
+
+    output_text = _response_attr(response, "output_text")
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text.strip()
+
+    content = _content_from_output_items(_response_attr(response, "output"))
+    if content:
+        return content
+
+    finish_reason = _resolve_finish_reason(response)
+    raise ValueError(f"azure_empty_response finish_reason={finish_reason}")
+
+
+def _serialize_for_log(value: Any) -> str:
+    if value is None:
+        return "null"
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            return json.dumps(model_dump(), default=str)
+        except Exception:
+            pass
+    try:
+        return json.dumps(value, default=str)
+    except Exception:
+        return repr(value)
+
+
 try:  # Optional dependency.
     from openai import AzureOpenAI
 except Exception:  # pragma: no cover - optional dependency.
@@ -115,14 +262,6 @@ class AIObservabilityService:
             "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
             "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
         }
-
-    @staticmethod
-    def _chat_content_from_response(response: Any) -> str:
-        choices = getattr(response, "choices", []) or []
-        if not choices:
-            return ""
-        message = getattr(choices[0], "message", None)
-        return (getattr(message, "content", "") or "").strip()
 
     @staticmethod
     def _embeddings_from_response(response: Any) -> list[list[float]]:
@@ -353,13 +492,14 @@ class AIObservabilityService:
     ) -> AIObservationResult:
         client = self._resolve_openai_client(embedding=False)
 
-        def _invoke() -> Any:
-            kwargs: dict[str, Any] = {
-                "model": model_name,
-                "messages": messages,
-            }
-            kwargs.update(request_kwargs)
-            return client.chat.completions.create(**kwargs)
+        def _invoke(request_payload: dict[str, Any]) -> Any:
+            return client.chat.completions.create(**request_payload)
+
+        request_payload: dict[str, Any] = {
+            "model": model_name,
+            "messages": messages,
+        }
+        request_payload.update(request_kwargs)
 
         observation = (
             langsmith_trace(
@@ -375,9 +515,17 @@ class AIObservabilityService:
 
         with observation as generation:
             try:
-                response = await asyncio.to_thread(_invoke)
+                logger.error("AZURE REQUEST=%s", _serialize_for_log(request_payload))
+                response = await asyncio.to_thread(_invoke, request_payload)
+                logger.error("AZURE RAW RESPONSE=%s", response)
+                logger.error("AZURE RESPONSE DUMP=%s", _serialize_for_log(response))
+                try:
+                    content = extract_azure_content(response)
+                except ValueError as exc:
+                    logger.error("EXTRACTED CONTENT=%s", "")
+                    raise exc
+                logger.error("EXTRACTED CONTENT=%s", content)
                 latency_ms = (time.perf_counter() - start) * 1000
-                content = self._chat_content_from_response(response)
                 usage = self._usage_from_response(response)
                 if generation is not None:
                     self._safe_trace_call(generation, "add_outputs", {"content": content})
