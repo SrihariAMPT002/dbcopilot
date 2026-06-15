@@ -171,6 +171,21 @@ def _serialize_for_log(value: Any) -> str:
         return repr(value)
 
 
+def _response_dump_json(response: Any) -> str:
+    dump_json = getattr(response, "model_dump_json", None)
+    if callable(dump_json):
+        try:
+            return dump_json(indent=2)
+        except TypeError:
+            try:
+                return dump_json()
+            except Exception:
+                pass
+        except Exception:
+            pass
+    return _serialize_for_log(response)
+
+
 try:  # Optional dependency.
     from openai import AzureOpenAI
 except Exception:  # pragma: no cover - optional dependency.
@@ -215,6 +230,10 @@ class AIObservabilityService:
     def __init__(self) -> None:
         self._langsmith_enabled = bool(settings.langsmith_tracing and langsmith_trace is not None)
 
+    @staticmethod
+    def _dev_logging_enabled() -> bool:
+        return bool(getattr(settings, "is_development", False) or getattr(settings, "debug", False))
+
     @classmethod
     def _resolve_openai_client(
         cls,
@@ -257,11 +276,37 @@ class AIObservabilityService:
         usage = getattr(response, "usage", None)
         if not usage:
             return {}
+        completion_tokens_details = getattr(usage, "completion_tokens_details", None)
+        reasoning_tokens = 0
+        if completion_tokens_details is not None:
+            reasoning_tokens = int(getattr(completion_tokens_details, "reasoning_tokens", 0) or 0)
         return {
             "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
             "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
             "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+            "reasoning_tokens": reasoning_tokens,
         }
+
+    @staticmethod
+    def _response_usage_summary(response: Any) -> dict[str, Any]:
+        usage = AIObservabilityService._usage_from_response(response)
+        return {
+            "finish_reason": _resolve_finish_reason(response),
+            "model": _response_attr(response, "model"),
+            "deployment": _response_attr(response, "deployment") or _response_attr(response, "model"),
+            "prompt_tokens": usage.get("prompt_tokens", 0),
+            "completion_tokens": usage.get("completion_tokens", 0),
+            "total_tokens": usage.get("total_tokens", 0),
+            "reasoning_tokens": usage.get("reasoning_tokens", 0),
+        }
+
+    @staticmethod
+    def _response_content_length(response: Any) -> int:
+        try:
+            content = extract_azure_content(response)
+        except Exception:
+            content = _content_from_choices(response) or _response_attr(response, "output_text") or _content_from_output_items(_response_attr(response, "output"))
+        return len(content or "")
 
     @staticmethod
     def _embeddings_from_response(response: Any) -> list[list[float]]:
@@ -386,6 +431,7 @@ class AIObservabilityService:
     ) -> AIObservationResult:
         """Execute an Azure OpenAI call under an optional LangSmith trace."""
         request_kwargs = dict(request_kwargs or {})
+        retry_on_length = int(request_kwargs.pop("_retry_on_length", 0) or 0)
         model = model_name or (
             settings.azure_openai_embedding_deployment if operation == "embeddings" else settings.azure_openai_deployment
         )
@@ -491,6 +537,7 @@ class AIObservabilityService:
         trace_input: dict[str, Any],
     ) -> AIObservationResult:
         client = self._resolve_openai_client(embedding=False)
+        retry_on_length = int(request_kwargs.get("_retry_on_length", 0) or 0)
 
         def _invoke(request_payload: dict[str, Any]) -> Any:
             return client.chat.completions.create(**request_payload)
@@ -500,6 +547,22 @@ class AIObservabilityService:
             "messages": messages,
         }
         request_payload.update(request_kwargs)
+        if str(model_name).startswith("gpt-5") and "reasoning_effort" not in request_payload:
+            request_payload["reasoning_effort"] = "low"
+
+        dev_logging = self._dev_logging_enabled()
+        if dev_logging:
+            logger.info(
+                "AI dev request | module=%s artifact_type=%s model=%s prompt_id=%s prompt_version=%s metadata=%s input=%s request_kwargs=%s",
+                module,
+                artifact_type,
+                model_name,
+                prompt_id,
+                prompt_version,
+                _serialize_for_log(metadata),
+                _serialize_for_log(trace_input),
+                _serialize_for_log(request_kwargs),
+            )
 
         observation = (
             langsmith_trace(
@@ -516,17 +579,63 @@ class AIObservabilityService:
         with observation as generation:
             try:
                 logger.error("AZURE REQUEST=%s", _serialize_for_log(request_payload))
+                logger.error("AZURE REQUEST SIZE chars=%d", len(_serialize_for_log(request_payload)))
                 response = await asyncio.to_thread(_invoke, request_payload)
-                logger.error("AZURE RAW RESPONSE=%s", response)
+                raw_response_dump = _response_dump_json(response)
+                logger.error("AZURE RAW RESPONSE=%s", raw_response_dump)
                 logger.error("AZURE RESPONSE DUMP=%s", _serialize_for_log(response))
+                response_summary = self._response_usage_summary(response)
+                logger.info(
+                    "AZURE RESPONSE META | module=%s artifact_type=%s finish_reason=%s prompt_tokens=%d completion_tokens=%d total_tokens=%d reasoning_tokens=%d response_chars=%d",
+                    module,
+                    artifact_type,
+                    response_summary["finish_reason"],
+                    response_summary["prompt_tokens"],
+                    response_summary["completion_tokens"],
+                    response_summary["total_tokens"],
+                    response_summary["reasoning_tokens"],
+                    len(raw_response_dump),
+                )
                 try:
                     content = extract_azure_content(response)
                 except ValueError as exc:
-                    logger.error("EXTRACTED CONTENT=%s", "")
-                    raise exc
+                    finish_reason = _resolve_finish_reason(response)
+                    logger.warning(
+                        "Azure OpenAI extraction failed | module=%s artifact_type=%s model=%s finish_reason=%s prompt_chars=%d response_chars=%d",
+                        module,
+                        artifact_type,
+                        model_name,
+                        finish_reason,
+                        len(_serialize_for_log(request_payload)),
+                        len(raw_response_dump),
+                    )
+                    raise
                 logger.error("EXTRACTED CONTENT=%s", content)
                 latency_ms = (time.perf_counter() - start) * 1000
                 usage = self._usage_from_response(response)
+                summary = self._response_usage_summary(response)
+                logger.info(
+                    "AI request usage | module=%s artifact_type=%s model=%s deployment=%s finish_reason=%s prompt_tokens=%d completion_tokens=%d total_tokens=%d reasoning_tokens=%d",
+                    module,
+                    artifact_type,
+                    summary["model"],
+                    summary["deployment"],
+                    summary["finish_reason"],
+                    summary["prompt_tokens"],
+                    summary["completion_tokens"],
+                    summary["total_tokens"],
+                    summary["reasoning_tokens"],
+                )
+                if dev_logging:
+                    logger.info(
+                        "AI dev result | module=%s artifact_type=%s model=%s latency_ms=%.2f usage=%s content=%s",
+                        module,
+                        artifact_type,
+                        model_name,
+                        latency_ms,
+                        _serialize_for_log(usage),
+                        content,
+                    )
                 if generation is not None:
                     self._safe_trace_call(generation, "add_outputs", {"content": content})
                     self._safe_trace_call(
@@ -538,7 +647,7 @@ class AIObservabilityService:
 
                 estimated_input_tokens = self._estimate_input_tokens("chat", trace_input)
                 logger.info(
-                    "AI chat complete | module=%s artifact_type=%s model=%s input_tokens_est=%d prompt_tokens=%d completion_tokens=%d total_tokens=%d output_chars=%d latency_ms=%.2f",
+                    "AI chat complete | module=%s artifact_type=%s model=%s input_tokens_est=%d prompt_tokens=%d completion_tokens=%d total_tokens=%d reasoning_tokens=%d output_chars=%d latency_ms=%.2f",
                     module,
                     artifact_type,
                     model_name,
@@ -546,6 +655,7 @@ class AIObservabilityService:
                     usage.get("prompt_tokens", 0),
                     usage.get("completion_tokens", 0),
                     usage.get("total_tokens", 0),
+                    usage.get("reasoning_tokens", 0),
                     len(content),
                     latency_ms,
                 )
@@ -559,7 +669,7 @@ class AIObservabilityService:
                     token_usage=usage,
                     content=content,
                     raw_response=response,
-                    trace_id=getattr(generation, "id", None),
+                    trace_id=str(getattr(generation, "id", None)) if getattr(generation, "id", None) is not None else None,
                     trace_url=None,
                     metadata=metadata,
                 )
@@ -652,7 +762,7 @@ class AIObservabilityService:
                     token_usage=usage,
                     embeddings=vectors,
                     raw_response=response,
-                    trace_id=getattr(embedding_obs, "id", None),
+                    trace_id=str(getattr(embedding_obs, "id", None)) if getattr(embedding_obs, "id", None) is not None else None,
                     trace_url=None,
                     metadata=metadata,
                 )

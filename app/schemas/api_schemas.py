@@ -183,6 +183,47 @@ class ColumnSemanticResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class GovernancePackageColumnResponse(BaseModel):
+    column_name: str
+    is_pii: bool = False
+    pii_type: Optional[str] = None
+    risk_level: Optional[str] = None
+    confidence_score: float = 0.0
+    business_meaning: Optional[str] = None
+    governance_reasoning: Optional[str] = None
+
+
+class GovernancePackageResponse(BaseModel):
+    id: int
+    database_id: int
+    table_id: int
+    table_name: str
+    schema_name: str
+    table_summary: Optional[str] = None
+    business_purpose: Optional[str] = None
+    pii_columns: List[GovernancePackageColumnResponse] = Field(default_factory=list)
+    risk_columns: List[GovernancePackageColumnResponse] = Field(default_factory=list)
+    sensitive_columns: List[GovernancePackageColumnResponse] = Field(default_factory=list)
+    overall_risk: Optional[str] = None
+    confidence_score: float = 0.0
+    prompt_id: Optional[str] = None
+    prompt_version: Optional[str] = None
+    model_name: Optional[str] = None
+    trace_id: Optional[str] = None
+    raw_failure_reason: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class GovernancePiiSummaryResponse(BaseModel):
+    database_id: int
+    table_count: int = 0
+    pii_columns: int = 0
+    risk_columns: int = 0
+    sensitive_columns: int = 0
+    governance_packages: int = 0
+
+
 class RelationshipResponse(BaseModel):
     id: int
     table_id: int
@@ -366,11 +407,6 @@ class GraphEdgeResponse(BaseModel):
     relationship_strength: float
     path_depth: int
     is_circular: bool
-    business_entity_graph: Optional[str] = None
-    business_process_flows: Optional[str] = None
-    upstream_dependencies: Optional[str] = None
-    downstream_dependencies: Optional[str] = None
-    entity_lifecycle_descriptions: Optional[str] = None
     ai_summary: Optional[str] = None
     ai_confidence: Optional[float] = None
     ai_model_name: Optional[str] = None
@@ -447,6 +483,36 @@ class GraphExportResponse(BaseModel):
     format: str
     filename: str
     content: str
+
+
+class RelationshipPackageClusterResponse(BaseModel):
+    cluster_id: str
+    parent_cluster_id: Optional[str] = None
+    domain_name: Optional[str] = None
+    cluster_label: Optional[str] = None
+    cluster_summary: Optional[str] = None
+    cluster_confidence: float = 0.0
+    entity_graph: List[Dict[str, Any]] = Field(default_factory=list)
+    hidden_relationships: List[Dict[str, Any]] = Field(default_factory=list)
+    business_process_flows: List[Dict[str, Any]] = Field(default_factory=list)
+    upstream_dependencies: List[Dict[str, Any]] = Field(default_factory=list)
+    downstream_dependencies: List[Dict[str, Any]] = Field(default_factory=list)
+    lifecycle_flows: List[Dict[str, Any]] = Field(default_factory=list)
+    estimated_tokens: Optional[int] = None
+    actual_input_tokens: Optional[int] = None
+    actual_output_tokens: Optional[int] = None
+    prompt_truncated: Optional[bool] = None
+    analysis_status: Optional[str] = None
+
+
+class RelationshipPackageResponse(BaseModel):
+    database_id: int
+    packages: List[RelationshipPackageClusterResponse] = Field(default_factory=list)
+
+
+class RelationshipLineageResponse(BaseModel):
+    database_id: int
+    lineage: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 # ── AI Readiness ───────────────────────────────────────────────────────────────

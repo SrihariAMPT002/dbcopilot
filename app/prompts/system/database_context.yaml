@@ -33,11 +33,11 @@ user_prompt: |
 
   Relationship Intelligence:
   - Summary: {{ relationship_intelligence.ai_summary or 'Not available' if relationship_intelligence else 'Not available' }}
-  - Entity Graph: {{ relationship_intelligence.business_entity_graph | default([]) | tojson if relationship_intelligence else '[]' }}
+  - Entity Graph: {{ relationship_intelligence.entity_graph | default([]) | tojson if relationship_intelligence else '[]' }}
   - Process Flows: {{ relationship_intelligence.business_process_flows | default([]) | tojson if relationship_intelligence else '[]' }}
   - Upstream Dependencies: {{ relationship_intelligence.upstream_dependencies | default([]) | tojson if relationship_intelligence else '[]' }}
   - Downstream Dependencies: {{ relationship_intelligence.downstream_dependencies | default([]) | tojson if relationship_intelligence else '[]' }}
-  - Lifecycle Descriptions: {{ relationship_intelligence.entity_lifecycle_descriptions | default([]) | tojson if relationship_intelligence else '[]' }}
+  - Lifecycle Flows: {{ relationship_intelligence.lifecycle_flows | default([]) | tojson if relationship_intelligence else '[]' }}
 
   Governance Summary:
   - PII Coverage: {{ '%.2f'|format(governance.pii_coverage or 0) }}
@@ -69,9 +69,8 @@ user_prompt: |
   - Must surface business domain, entities, glossary, relationships, governance, and AI guidance.
   - Must be concise but complete enough for AI grounding.
 
-constraints:
-  max_completion_tokens: 0
-
 metadata:
   category: system
   audience: prompt_studio
+constraints:
+  max_completion_tokens: 0

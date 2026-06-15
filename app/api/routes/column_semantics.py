@@ -11,7 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.models.column_semantic import ColumnSemantic
 from app.models.metadata import ConnectedDatabase, DatabaseColumn, DatabaseSchema, DatabaseTable
-from app.schemas.api_schemas import ColumnSemanticResponse
+from app.schemas.api_schemas import (
+    ColumnSemanticResponse,
+    GovernancePackageResponse,
+    GovernancePiiSummaryResponse,
+)
 from app.services.column_semantic_service import ColumnSemanticService, ExecutionContext
 
 router = APIRouter(prefix="/column-semantics", tags=["Column Semantics"])
@@ -92,6 +96,41 @@ async def get_governance_package(db_id: int, db: AsyncSession = Depends(get_db))
     service = ColumnSemanticService(db)
     await service._fetch_database(db_id)
     return await service.build_governance_package(db_id)
+
+
+@router.get(
+    "/governance/packages/{database_id}",
+    summary="Get canonical governance packages for a database",
+    response_model=dict,
+)
+async def get_governance_packages(database_id: int, db: AsyncSession = Depends(get_db)) -> dict:
+    service = ColumnSemanticService(db)
+    await service._fetch_database(database_id)
+    return await service.build_governance_package(database_id)
+
+
+@router.get(
+    "/governance/package/{table_id}",
+    summary="Get canonical governance package for a table",
+    response_model=GovernancePackageResponse,
+)
+async def get_governance_package_for_table(table_id: int, db: AsyncSession = Depends(get_db)) -> dict:
+    service = ColumnSemanticService(db)
+    package = await service.get_governance_package(table_id)
+    if package is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Governance package not found for table {table_id}")
+    return package
+
+
+@router.get(
+    "/governance/pii-summary/{database_id}",
+    summary="Get governance PII summary for a database",
+    response_model=GovernancePiiSummaryResponse,
+)
+async def get_governance_pii_summary(database_id: int, db: AsyncSession = Depends(get_db)) -> dict:
+    service = ColumnSemanticService(db)
+    await service._fetch_database(database_id)
+    return await service.get_governance_pii_summary(database_id)
 
 
 @router.post(

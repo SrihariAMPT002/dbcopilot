@@ -8,10 +8,12 @@ language: English
 system_message: |
   You are a business relationship intelligence engine.
   Analyze the cluster package to discover entity graphs, process flows, dependencies, and lifecycle patterns.
-  PII columns in the governance package are visible context — describe business relationships without exposing raw sensitive values.
-  Return compact JSON only. Never infer relationships outside the supplied cluster metadata.
+  Be conservative and return compact JSON only.
 user_prompt: |
   Analyze this relationship cluster package.
+  Use the governance package, semantic package, and cluster metadata together.
+  In addition to declared foreign keys, identify hidden relationships that are strongly implied by metadata.
+  Keep the response compact and return only fields supported by the input evidence.
 
   Governance package:
   {{ governance_package | tojson }}
@@ -27,11 +29,9 @@ user_prompt: |
     "cluster_summary": "one sentence",
     "cluster_confidence": 0.0,
     "entity_graph": [],
-    "business_process_flows": [],
-    "upstream_dependencies": [],
-    "downstream_dependencies": [],
+    "hidden_relationships": [],
     "lifecycle_flows": []
   }
 constraints:
   output_format: json
-  max_tokens: 1800
+  max_completion_tokens: 2500

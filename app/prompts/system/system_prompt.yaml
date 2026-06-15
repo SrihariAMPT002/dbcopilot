@@ -28,7 +28,9 @@ user_prompt: |
 
   Relationship Intelligence:
   - Summary: {{ relationship_intelligence.ai_summary or 'Not available' if relationship_intelligence else 'Not available' }}
+  - Entity Graph: {{ relationship_intelligence.entity_graph | default([]) | tojson if relationship_intelligence else '[]' }}
   - Process Flows: {{ relationship_intelligence.business_process_flows | default([]) | tojson if relationship_intelligence else '[]' }}
+  - Lifecycle Flows: {{ relationship_intelligence.lifecycle_flows | default([]) | tojson if relationship_intelligence else '[]' }}
 
   Governance Signals:
   - Prompt Protection: {{ governance.prompt_protection_enabled }}
@@ -49,9 +51,8 @@ user_prompt: |
   - Must be concise, explicit, and governance-aware.
   - Must prioritize correctness over verbosity.
 
-constraints:
-  max_completion_tokens: 0
-
 metadata:
   category: system
   audience: prompt_studio
+constraints:
+  max_completion_tokens: 0

@@ -12,7 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.schema_engine.relationship_graph import RelationshipGraphEngine
-from app.schemas.api_schemas import GraphExportResponse, RelationshipGraphResponse, TableNeighborsResponse, JoinPathsResponse
+from app.schemas.api_schemas import (
+    GraphExportResponse,
+    RelationshipGraphResponse,
+    TableNeighborsResponse,
+    JoinPathsResponse,
+    RelationshipPackageResponse,
+    RelationshipLineageResponse,
+)
 
 router = APIRouter(tags=["Relationship Graph"])
 logger = logging.getLogger(__name__)
@@ -77,6 +84,44 @@ async def get_relationship_graph(db_id: int, db: AsyncSession = Depends(get_db))
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to build relationship graph",
         )
+
+
+@router.get(
+    "/relationships/{db_id}",
+    response_model=RelationshipPackageResponse,
+    summary="Get canonical relationship package for a database",
+)
+async def get_relationship_package(db_id: int, db: AsyncSession = Depends(get_db)) -> RelationshipPackageResponse:
+    engine = RelationshipGraphEngine(db)
+    package = await engine.get_relationship_package(db_id)
+    return RelationshipPackageResponse.model_validate(package)
+
+
+@router.get(
+    "/relationships/domains/{db_id}",
+    response_model=RelationshipPackageResponse,
+    summary="Get domain-scoped relationship packages for a database",
+)
+async def get_relationship_domains(db_id: int, db: AsyncSession = Depends(get_db)) -> RelationshipPackageResponse:
+    engine = RelationshipGraphEngine(db)
+    package = await engine.get_relationship_package(db_id)
+    return RelationshipPackageResponse.model_validate(package)
+
+
+@router.get(
+    "/relationships/lineage/{db_id}",
+    response_model=RelationshipLineageResponse,
+    summary="Get relationship lineage for a database",
+)
+async def get_relationship_lineage(db_id: int, db: AsyncSession = Depends(get_db)) -> RelationshipLineageResponse:
+    engine = RelationshipGraphEngine(db)
+    package = await engine.get_relationship_package(db_id)
+    lineage: list[dict] = []
+    for item in package.get("packages", []):
+        lineage.extend(item.get("entity_graph") or [])
+        lineage.extend(item.get("upstream_dependencies") or [])
+        lineage.extend(item.get("downstream_dependencies") or [])
+    return RelationshipLineageResponse(database_id=db_id, lineage=lineage)
 
 
 @router.get(

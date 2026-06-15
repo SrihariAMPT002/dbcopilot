@@ -29,7 +29,7 @@ user_prompt: |
   KPI and Query Guidance:
   - Suggested Use Cases: {{ semantic.suggested_use_cases | default([]) | tojson }}
   - Tables: {{ tables | default([]) | tojson }}
-  - Join Guidance: {{ relationship_intelligence.business_entity_graph | default([]) | tojson if relationship_intelligence else '[]' }}
+  - Join Guidance: {{ relationship_intelligence.entity_graph | default([]) | tojson if relationship_intelligence else '[]' }}
 
   Governance and Safety:
   - PII Coverage: {{ '%.2f'|format(governance.pii_coverage or 0) }}
@@ -49,9 +49,8 @@ user_prompt: |
   - Must be suitable for enterprise text-to-SQL generation.
   - Must be business-aware, safe, and concise.
 
-constraints:
-  max_completion_tokens: 0
-
 metadata:
   category: system
   audience: prompt_studio
+constraints:
+  max_completion_tokens: 0

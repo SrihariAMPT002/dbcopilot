@@ -24,10 +24,9 @@ from app.core.config import settings
 from app.models.artifact_manifest import ArtifactType
 from app.models.column_semantic import ColumnSemantic
 from app.models.metadata import ConnectedDatabase, DatabaseSchema, DatabaseSemantic, DatabaseTable
-from app.models.metadata import SchemaRelationshipGraph
+from app.models.metadata import KPIIntelligence, GovernancePackage, RelationshipPackage, SchemaRelationshipGraph, SemanticPackage
 from app.services.ai_observability_service import AIObservabilityService
 from app.schema_engine.embeddings import EmbeddingEngine
-from app.schema_engine.relationship_graph import RelationshipGraphEngine
 from app.services.artifact_service import ArtifactService
 from app.services.column_semantic_service import ColumnSemanticService
 from app.utils import now_utc
@@ -381,16 +380,14 @@ class PromptStudioService:
     async def _build_context(self, database_id: int) -> dict[str, Any]:
         database = await self._fetch_database(database_id)
         semantic = await self._fetch_semantic(database_id)
+        semantic_package = await self._fetch_semantic_package(database_id)
         tables = await self._fetch_tables(database_id)
         pii_map = await self._fetch_pii_map(database_id)
         governance_summary = await ColumnSemanticService(self.db).governance_summary(database_id)
-        try:
-            relationship_graph = await RelationshipGraphEngine(self.db).get_relationship_graph(database_id)
-        except Exception:
-            relationship_graph = None
-        relationship_intelligence = {}
-        if relationship_graph and relationship_graph.edges:
-            relationship_intelligence = self._relationship_intelligence_from_graph(relationship_graph)
+        governance_packages = await self._fetch_governance_packages(database_id)
+        relationship_packages = await self._fetch_relationship_packages(database_id)
+        kpi_summary = await self._fetch_kpi_summary(database_id)
+        relationship_intelligence = self._relationship_intelligence_from_packages(relationship_packages)
         try:
             embedding_status = await EmbeddingEngine(self.db).get_embedding_status(database_id)
         except Exception:
@@ -429,6 +426,7 @@ class PromptStudioService:
             "key_entities": semantic.key_entities if semantic else [],
             "business_glossary": semantic.business_glossary if semantic else [],
             "suggested_use_cases": semantic.suggested_use_cases if semantic else [],
+            "semantic_package": self._semantic_package_to_dict(semantic_package) if semantic_package else {},
         }
 
         table_payloads = []
@@ -482,10 +480,11 @@ class PromptStudioService:
             "column_count": column_count,
             "relationship_count": relationship_count,
             "semantic": semantic_payload,
-            "relationship_graph": relationship_graph,
             "relationship_intelligence": relationship_intelligence,
+            "relationship_packages": [self._relationship_package_to_dict(row) for row in relationship_packages],
             "readiness": readiness_payload,
             "embeddings": embeddings_payload,
+            "kpi": kpi_summary,
             "tables": table_payloads,
             "columns": column_payloads,
             "governance": {
@@ -494,6 +493,7 @@ class PromptStudioService:
                 "prompt_protection_enabled": governance_summary.get("prompt_protection_enabled", False),
                 "embedding_protection_enabled": governance_summary.get("embedding_protection_enabled", False),
             },
+            "governance_packages": [self._governance_package_to_dict(row) for row in governance_packages],
         }
 
     async def _fetch_database(self, database_id: int) -> ConnectedDatabase:
@@ -523,6 +523,10 @@ class PromptStudioService:
         )
         return result.scalars().first()
 
+    async def _fetch_semantic_package(self, database_id: int) -> SemanticPackage | None:
+        result = await self.db.execute(select(SemanticPackage).where(SemanticPackage.database_id == database_id))
+        return result.scalars().first()
+
     async def _fetch_pii_map(self, database_id: int) -> dict[int, ColumnSemantic]:
         result = await self.db.execute(
             select(ColumnSemantic).where(ColumnSemantic.database_id == database_id)
@@ -530,22 +534,23 @@ class PromptStudioService:
         return {row.column_id: row for row in result.scalars().all()}
 
     @staticmethod
-    def _relationship_intelligence_from_graph(graph) -> dict[str, Any]:
-        if not graph.edges:
+    def _relationship_intelligence_from_packages(packages: list[RelationshipPackage]) -> dict[str, Any]:
+        if not packages:
             return {}
-        first = graph.edges[0]
+        first = packages[0]
         return {
-            "business_entity_graph": first.business_entity_graph or "[]",
-            "business_process_flows": first.business_process_flows or "[]",
-            "upstream_dependencies": first.upstream_dependencies or "[]",
-            "downstream_dependencies": first.downstream_dependencies or "[]",
-            "entity_lifecycle_descriptions": first.entity_lifecycle_descriptions or "[]",
-            "lifecycle_flows": first.entity_lifecycle_descriptions or "[]",
-            "ai_summary": first.ai_summary or "",
-            "ai_confidence": first.ai_confidence or 0.0,
-            "ai_model_name": first.ai_model_name or "",
-            "ai_prompt_id": first.ai_prompt_id or "",
-            "ai_prompt_version": first.ai_prompt_version or "",
+            "entity_graph": first.entity_graph or [],
+            "business_process_flows": first.business_process_flows or [],
+            "hidden_relationships": first.hidden_relationships or [],
+            "upstream_dependencies": first.upstream_dependencies or [],
+            "downstream_dependencies": first.downstream_dependencies or [],
+            "lifecycle_flows": first.lifecycle_flows or [],
+            "cluster_summary": first.cluster_summary or "",
+            "cluster_confidence": first.confidence_score or 0.0,
+            "domain_name": first.domain_name or "",
+            "prompt_id": first.prompt_id or "",
+            "prompt_version": first.prompt_version or "",
+            "model_name": first.model_name or "",
         }
 
     async def _fetch_tables(self, database_id: int) -> list[DatabaseTable]:
@@ -562,6 +567,84 @@ class PromptStudioService:
             .order_by(DatabaseSchema.name, DatabaseTable.name)
         )
         return result.scalars().unique().all()
+
+    async def _fetch_governance_packages(self, database_id: int) -> list[GovernancePackage]:
+        result = await self.db.execute(
+            select(GovernancePackage).where(GovernancePackage.database_id == database_id)
+        )
+        return list(result.scalars().all())
+
+    async def _fetch_relationship_packages(self, database_id: int) -> list[RelationshipPackage]:
+        result = await self.db.execute(
+            select(RelationshipPackage).where(RelationshipPackage.database_id == database_id)
+        )
+        return list(result.scalars().all())
+
+    async def _fetch_kpi_summary(self, database_id: int) -> dict[str, Any]:
+        result = await self.db.execute(
+            select(KPIIntelligence).where(KPIIntelligence.database_id == database_id)
+        )
+        rows = list(result.scalars().all())
+        return {
+            "kpi_count": len(rows),
+            "kpis": [
+                {
+                    "name": row.name,
+                    "formula": row.formula,
+                    "business_meaning": row.business_meaning,
+                    "confidence": row.confidence,
+                }
+                for row in rows[:50]
+            ],
+        }
+
+    @staticmethod
+    def _governance_package_to_dict(row: GovernancePackage) -> dict[str, Any]:
+        return {
+            "id": row.id,
+            "database_id": row.database_id,
+            "table_id": row.table_id,
+            "table_name": row.table_name,
+            "schema_name": row.schema_name,
+            "table_summary": row.table_summary,
+            "business_purpose": row.business_purpose,
+            "pii_columns": row.pii_columns,
+            "risk_columns": row.risk_columns,
+            "sensitive_columns": row.sensitive_columns,
+            "overall_risk": row.overall_risk,
+            "confidence_score": row.confidence_score,
+        }
+
+    @staticmethod
+    def _semantic_package_to_dict(row: SemanticPackage) -> dict[str, Any]:
+        return {
+            "id": row.id,
+            "database_id": row.database_id,
+            "business_domain": row.business_domain,
+            "semantic_summary": row.semantic_summary,
+            "business_entities": row.business_entities,
+            "business_processes": row.business_processes,
+            "business_capabilities": row.business_capabilities,
+            "business_glossary": row.business_glossary,
+            "confidence_score": row.confidence_score,
+        }
+
+    @staticmethod
+    def _relationship_package_to_dict(row: RelationshipPackage) -> dict[str, Any]:
+        return {
+            "id": row.id,
+            "database_id": row.database_id,
+            "cluster_id": row.cluster_id,
+            "domain_name": row.domain_name,
+            "cluster_summary": row.cluster_summary,
+            "entity_graph": row.entity_graph,
+            "business_process_flows": row.business_process_flows,
+            "hidden_relationships": row.hidden_relationships,
+            "upstream_dependencies": row.upstream_dependencies,
+            "downstream_dependencies": row.downstream_dependencies,
+            "lifecycle_flows": row.lifecycle_flows,
+            "confidence_score": row.confidence_score,
+        }
 
     async def _generate_context_package(self, artifact_type: str, context: dict[str, Any]) -> ContextPackageResult:
         artifact = self._artifact_enum(artifact_type)

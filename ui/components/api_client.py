@@ -211,6 +211,14 @@ def get_relationship_graph(db_id: int) -> Tuple[bool, Any]:
     return _get(f"/relationships/graph/{db_id}")
 
 
+def get_relationship_package(db_id: int) -> Tuple[bool, Any]:
+    return _get(f"/relationships/{db_id}")
+
+
+def get_relationship_lineage(db_id: int) -> Tuple[bool, Any]:
+    return _get(f"/relationships/lineage/{db_id}")
+
+
 def get_table_neighbors(table_id: int, depth: int = 1) -> Tuple[bool, Any]:
     return _get(f"/relationships/tables/{table_id}/neighbors", depth=depth)
 

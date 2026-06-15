@@ -17,6 +17,7 @@ from components.api_client import (
     get_connections,
     get_join_paths,
     get_relationship_graph,
+    get_relationship_package,
     get_table_neighbors,
 )
 from components.sidebar import render_sidebar
@@ -125,6 +126,8 @@ edges = graph_payload.get("edges", [])
 metrics = graph_payload.get("metrics", {})
 cycles = graph_payload.get("cycles", [])
 relationship_intelligence = graph_payload.get("relationship_intelligence", {})
+ok_package, relationship_package = get_relationship_package(db_id)
+relationship_package = relationship_package if ok_package and isinstance(relationship_package, dict) else {}
 
 top1, top2, top3, top4, top5 = st.columns(5)
 top1.markdown(
@@ -158,6 +161,8 @@ if relationship_intelligence:
         st.write(relationship_intelligence.get("ai_summary") or "No business summary available yet.")
         st.markdown("**Business Entity Graph**")
         st.code(relationship_intelligence.get("business_entity_graph") or "[]", language="json")
+        st.markdown("**Hidden Relationships**")
+        st.code(relationship_intelligence.get("hidden_relationships") or "[]", language="json")
     with bi_col2:
         st.markdown("**Business Process Flows**")
         st.code(relationship_intelligence.get("business_process_flows") or "[]", language="json")
@@ -182,6 +187,10 @@ if relationship_intelligence:
         f"Model: {relationship_intelligence.get('ai_model_name', '')}"
     )
     st.markdown("---")
+
+if relationship_package.get("packages"):
+    st.markdown("### Relationship Packages")
+    st.json(relationship_package)
 
 node_map = {f"{node['schema_name']}.{node['table_name']}": node for node in nodes}
 focus_options = list(node_map.keys())

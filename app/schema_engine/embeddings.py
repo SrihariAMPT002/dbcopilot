@@ -30,9 +30,12 @@ from app.models.metadata import (
     DatabaseRelationship,
     DatabaseSchema,
     DatabaseTable,
+    GovernancePackage,
     EmbeddingStatus,
     SchemaEmbedding,
     SchemaSemantic,
+    SemanticPackage,
+    RelationshipPackage,
 )
 from app.services.ai_observability_service import AIObservabilityService
 from app.utils import safe_flush, truncate
@@ -288,6 +291,24 @@ class EmbeddingEngine:
         )
         return {row.column_id: row for row in result.scalars().all()}
 
+    async def _fetch_governance_packages(self, database_id: int) -> dict[int, GovernancePackage]:
+        result = await self.db.execute(
+            select(GovernancePackage).where(GovernancePackage.database_id == database_id)
+        )
+        return {row.table_id: row for row in result.scalars().all()}
+
+    async def _fetch_semantic_package(self, database_id: int) -> SemanticPackage | None:
+        result = await self.db.execute(
+            select(SemanticPackage).where(SemanticPackage.database_id == database_id)
+        )
+        return result.scalars().first()
+
+    async def _fetch_relationship_packages(self, database_id: int) -> list[RelationshipPackage]:
+        result = await self.db.execute(
+            select(RelationshipPackage).where(RelationshipPackage.database_id == database_id)
+        )
+        return list(result.scalars().all())
+
     @staticmethod
     def _should_mask_column(
         column_id: int,
@@ -426,6 +447,44 @@ class EmbeddingEngine:
             )
 
         return "\n".join(f" - {item}" for item in prompts)
+
+    def _build_package_text(
+        self,
+        database: ConnectedDatabase,
+        table: DatabaseTable,
+        governance: GovernancePackage | None,
+        semantic_package: SemanticPackage | None,
+        relationship_packages: list[RelationshipPackage],
+    ) -> tuple[str, str, str]:
+        governance_bits = []
+        if governance:
+            governance_bits.extend([
+                f"Governance summary: {governance.table_summary or ''}",
+                f"Business purpose: {governance.business_purpose or ''}",
+                f"PII columns: {', '.join(item.get('column_name', '') for item in governance.pii_columns[:10])}",
+            ])
+        semantic_bits = []
+        if semantic_package:
+            semantic_bits.extend([
+                f"Business domain: {semantic_package.business_domain or ''}",
+                f"Semantic summary: {semantic_package.semantic_summary or ''}",
+                f"Business entities: {', '.join(semantic_package.business_entities[:10])}",
+                f"Business processes: {', '.join(semantic_package.business_processes[:10])}",
+                f"Business capabilities: {', '.join(semantic_package.business_capabilities[:10])}",
+            ])
+        relationship_bits = []
+        relevant_relationships = [
+            package for package in relationship_packages
+            if package.cluster_id and table.name in package.cluster_id
+        ]
+        for package in relevant_relationships[:3]:
+            relationship_bits.append(
+                f"Relationship cluster {package.cluster_id}: {package.cluster_summary or ''}"
+            )
+        governance_text = "\n".join(bit for bit in governance_bits if bit)
+        semantic_text = "\n".join(bit for bit in semantic_bits if bit)
+        relationship_text = "\n".join(bit for bit in relationship_bits if bit)
+        return governance_text, semantic_text, relationship_text
 
     
     async def _sync_embedding_row(
@@ -596,10 +655,23 @@ class EmbeddingEngine:
         table = await self._fetch_table(table_id)
         semantic = await self._fetch_semantic_summary(table_id)
         pii_map = await self._fetch_pii_map(database_id)
+        governance_packages = await self._fetch_governance_packages(database_id)
+        semantic_package = await self._fetch_semantic_package(database_id)
+        relationship_packages = await self._fetch_relationship_packages(database_id)
+        package_governance = governance_packages.get(table.id)
 
         table_text = self._build_table_text(table, semantic, pii_map)
         relationship_text = self._build_relationship_text(table, pii_map)
         prompt_text = self._build_prompt_text(table, semantic)
+        governance_text, semantic_text, relationship_package_text = self._build_package_text(
+            database, table, package_governance, semantic_package, relationship_packages
+        )
+        if governance_text:
+            table_text = "\n\n".join([table_text, governance_text])
+        if semantic_text:
+            prompt_text = "\n\n".join([prompt_text, semantic_text])
+        if relationship_package_text:
+            relationship_text = "\n\n".join([relationship_text, relationship_package_text])
 
         texts = [table_text, relationship_text, prompt_text]
         vectors, usage = await self._embed_texts(

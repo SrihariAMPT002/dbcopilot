@@ -46,8 +46,8 @@ class StageGraphNode:
 
 STAGE_GRAPH: list[StageGraphNode] = [
     StageGraphNode("metadata", JobType.sync, [], "Metadata"),
-    StageGraphNode("governance", JobType.semantic, ["metadata"], "Governance"),
-    StageGraphNode("semantics", JobType.semantic, ["governance"], "Semantics"),
+    StageGraphNode("semantics", JobType.semantic, ["metadata"], "Semantics"),
+    StageGraphNode("governance", JobType.semantic, ["semantics"], "Governance"),
     StageGraphNode("relationships", JobType.relationship_graph, ["semantics"], "Relationships"),
     StageGraphNode("kpi", JobType.kpi, ["relationships"], "KPI"),
     StageGraphNode("prompt", JobType.prompt, ["kpi"], "Prompt"),
@@ -91,8 +91,8 @@ class DatabasePipelineOrchestrator:
                 parent_job_id=parent.id,
                 entity_table_id=table.id,
                 entity_name=f"{table.schema.name}.{table.name}",
-                stage_name="semantics",
-                depends_on=["governance"],
+                stage_name="governance",
+                depends_on=["semantics"],
             )
             await self.pipeline.create_job(
                 database_id=database_id,

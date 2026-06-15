@@ -144,6 +144,13 @@ def _load_profile(db_id: int, force: bool = False):
     return st.session_state.get("semantic_profile"), True
 
 
+def _load_semantic_package(db_id: int):
+    from components.api_client import api_get
+
+    ok, payload = api_get(f"/semantics/package/{db_id}")
+    return payload if ok and isinstance(payload, dict) else {}
+
+
 st.markdown(
     """
 <div class="hero">
@@ -175,6 +182,7 @@ selected_conn = db_options[selected_label]
 db_id = selected_conn["id"]
 
 profile, profile_ok = _load_profile(db_id)
+semantic_package = _load_semantic_package(db_id)
 status_text, status_class = _status_meta(profile if profile_ok else None)
 
 header_cols = st.columns([2, 1, 1])
@@ -214,6 +222,48 @@ with header_cols[2]:
     )
 
 st.write("")
+
+pkg_cols = st.columns(4)
+with pkg_cols[0]:
+    st.markdown(
+        f"""
+        <div class="section-card">
+            <div class="label">Business Domain</div>
+            <div class="value">{semantic_package.get('business_domain') or 'Not determined'}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with pkg_cols[1]:
+    st.markdown(
+        f"""
+        <div class="section-card">
+            <div class="label">Entities</div>
+            <div class="value">{len(_safe_list(semantic_package.get('business_entities')))}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with pkg_cols[2]:
+    st.markdown(
+        f"""
+        <div class="section-card">
+            <div class="label">Processes</div>
+            <div class="value">{len(_safe_list(semantic_package.get('business_processes')))}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with pkg_cols[3]:
+    st.markdown(
+        f"""
+        <div class="section-card">
+            <div class="label">Capabilities</div>
+            <div class="value">{len(_safe_list(semantic_package.get('business_capabilities')))}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 action_cols = st.columns([1.4, 1, 1, 1])
 if "semantic_generate_busy" not in st.session_state:

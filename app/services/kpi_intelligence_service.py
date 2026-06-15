@@ -24,10 +24,13 @@ from app.models.metadata import (
     DatabaseSchema,
     DatabaseSemantic,
     DatabaseTable,
+    GovernancePackage,
     KPIArtifact,
     KPIIntelligence,
     SchemaRelationshipGraph,
+    RelationshipPackage,
     SchemaSemantic,
+    SemanticPackage,
 )
 from app.services.ai_observability_service import AIObservabilityService
 from app.schema_engine.relationship_graph import RelationshipGraphEngine
@@ -61,10 +64,15 @@ class KPIIntelligenceService:
             raise ValueError("KPI package is disabled by registry")
 
         database = await self._fetch_database(database_id)
+        governance_packages = await self._fetch_governance_packages(database_id)
+        semantic_package = await self._fetch_semantic_package(database_id)
+        relationship_packages = await self._fetch_relationship_packages(database_id)
         semantics = await self._fetch_semantics(database_id)
         column_semantics = await self._fetch_column_semantics(database_id)
-        graph = await RelationshipGraphEngine(self.db).build_relationship_graph(database_id, persist=False)
-        clusters = self._relationship_clusters(graph.edges)
+        clusters = self._relationship_clusters_from_packages(relationship_packages)
+        if not clusters:
+            graph = await RelationshipGraphEngine(self.db).build_relationship_graph(database_id, persist=False)
+            clusters = self._relationship_clusters(graph.edges)
         cluster_results: list[dict[str, Any]] = []
         for cluster_id, table_ids in clusters:
             try:
@@ -73,7 +81,9 @@ class KPIIntelligenceService:
                     cluster_id=cluster_id,
                     table_ids=table_ids,
                     semantics=semantics,
-                    graph=graph,
+                    governance_packages=governance_packages,
+                    semantic_package=semantic_package,
+                    relationship_packages=relationship_packages,
                     column_semantics=column_semantics,
                     job_id=job_id,
                 )
@@ -133,6 +143,11 @@ class KPIIntelligenceService:
             "confidence_score": round(sum(confidence_scores) / max(1, len(confidence_scores)), 3) if confidence_scores else 0.0,
             "kpi_count": len(catalog),
             "coverage": self._coverage(catalog, column_semantics),
+            "package_inputs": {
+                "governance_packages": len(governance_packages),
+                "semantic_package": bool(semantic_package),
+                "relationship_packages": len(relationship_packages),
+            },
             "successful_clusters": len(successful_clusters),
             "failed_clusters": len(failed_clusters),
             "coverage_percentage": self._cluster_coverage_percentage(successful_clusters, failed_clusters),
@@ -174,8 +189,14 @@ class KPIIntelligenceService:
         semantics: tuple[DatabaseSemantic | None, list[tuple[SchemaSemantic, DatabaseTable]]],
         relationships: list[SchemaRelationshipGraph],
         column_semantics: list[ColumnSemantic],
+        *,
+        governance_packages: list[GovernancePackage] | None = None,
+        semantic_package: SemanticPackage | None = None,
+        relationship_packages: list[RelationshipPackage] | None = None,
     ) -> dict[str, Any]:
         db_semantic, table_semantics = semantics
+        governance_packages = governance_packages or []
+        relationship_packages = relationship_packages or []
         return {
             "database_id": database.id,
             "database_name": database.display_name or database.name,
@@ -187,6 +208,9 @@ class KPIIntelligenceService:
                 "business_glossary": db_semantic.business_glossary if db_semantic else [],
                 "suggested_use_cases": db_semantic.suggested_use_cases if db_semantic else [],
             },
+            "governance_packages": [self._governance_package_to_dict(row) for row in governance_packages],
+            "semantic_package": self._semantic_package_to_dict(semantic_package) if semantic_package else {},
+            "relationship_packages": [self._relationship_package_to_dict(row) for row in relationship_packages],
             "schema_semantics": [
                 {
                     "schema": table.schema.name,
@@ -331,13 +355,22 @@ class KPIIntelligenceService:
         semantics: tuple[DatabaseSemantic | None, list[tuple[SchemaSemantic, DatabaseTable]]],
         relationships: list[SchemaRelationshipGraph],
         column_semantics: list[ColumnSemantic],
+        *,
+        governance_packages: list[GovernancePackage] | None = None,
+        semantic_package: SemanticPackage | None = None,
+        relationship_packages: list[RelationshipPackage] | None = None,
     ) -> dict[str, Any]:
         db_semantic, table_semantics = semantics
         table_lookup = {table.id: (semantic, table) for semantic, table in table_semantics}
         cluster_tables = [table_lookup[table_id][1] for table_id in table_ids if table_id in table_lookup]
-        cluster_relationships = [
-            rel for rel in relationships if rel.source_table_id in table_ids or rel.target_table_id in table_ids
-        ]
+        if relationship_packages:
+            cluster_relationships = [
+                rel for rel in relationship_packages if any(str(table_id) in (rel.cluster_id or "") for table_id in table_ids)
+            ]
+        else:
+            cluster_relationships = [
+                rel for rel in relationships if rel.source_table_id in table_ids or rel.target_table_id in table_ids
+            ]
         cluster_columns = [sem for sem in column_semantics if sem.database_id == database.id]
         domain = self._cluster_domain(semantics, table_ids)
         return {
@@ -371,6 +404,8 @@ class KPIIntelligenceService:
                 "business_domain": db_semantic.business_domain if db_semantic else None,
                 "business_summary": db_semantic.business_summary if db_semantic else None,
             },
+            "semantic_package": self._semantic_package_to_dict(semantic_package) if semantic_package else {},
+            "governance_packages": [self._governance_package_to_dict(row) for row in (governance_packages or [])],
             "governance_intelligence": [
                 {
                     "column": sem.column_name,
@@ -394,7 +429,20 @@ class KPIIntelligenceService:
         job_id: int | None,
     ) -> dict[str, Any]:
         cluster_relationships = [edge for edge in graph.edges if edge.source_table_id in table_ids or edge.target_table_id in table_ids]
-        prompt_context = self._cluster_prompt_context(database, cluster_id, table_ids, semantics, cluster_relationships, column_semantics)
+        governance_packages = await self._fetch_governance_packages(database.id)
+        semantic_package = await self._fetch_semantic_package(database.id)
+        relationship_packages = await self._fetch_relationship_packages(database.id)
+        prompt_context = self._cluster_prompt_context(
+            database,
+            cluster_id,
+            table_ids,
+            semantics,
+            cluster_relationships,
+            column_semantics,
+            governance_packages=governance_packages,
+            semantic_package=semantic_package,
+            relationship_packages=relationship_packages,
+        )
         prompt_context, telemetry = self._apply_cluster_budget(prompt_context, cluster_relationships)
         rendered = self.registry.render_prompt("kpi_discovery", prompt_context, category="kpi")
         ai_result = await self._call_azure_openai(database, rendered, job_id=job_id, cluster_id=cluster_id, cluster_size=telemetry["cluster_size"], domain=prompt_context["semantic_domain"])
@@ -571,6 +619,19 @@ class KPIIntelligenceService:
             for item in catalog
         ]
 
+    @staticmethod
+    def _relationship_clusters_from_packages(packages: list[RelationshipPackage]) -> list[tuple[str, list[int]]]:
+        clusters: dict[str, list[int]] = {}
+        for package in packages:
+            cluster_key = package.cluster_id or "database"
+            members = clusters.setdefault(cluster_key, [])
+            for entry in package.entity_graph:
+                for table_id_key in ("source_table_id", "target_table_id"):
+                    table_id = entry.get(table_id_key)
+                    if isinstance(table_id, int) and table_id not in members:
+                        members.append(table_id)
+        return [(cluster_id, sorted(table_ids)) for cluster_id, table_ids in clusters.items() if table_ids]
+
     def _build_lineage(self, catalog: list[dict[str, Any]], relationships: list[Any]) -> list[dict[str, Any]]:
         return [
             {
@@ -719,6 +780,24 @@ class KPIIntelligenceService:
         )
         return db_semantic, [(semantic, table) for semantic, table in result.all()]
 
+    async def _fetch_governance_packages(self, database_id: int) -> list[GovernancePackage]:
+        result = await self.db.execute(
+            select(GovernancePackage).where(GovernancePackage.database_id == database_id)
+        )
+        return list(result.scalars().all())
+
+    async def _fetch_semantic_package(self, database_id: int) -> SemanticPackage | None:
+        result = await self.db.execute(
+            select(SemanticPackage).where(SemanticPackage.database_id == database_id)
+        )
+        return result.scalars().first()
+
+    async def _fetch_relationship_packages(self, database_id: int) -> list[RelationshipPackage]:
+        result = await self.db.execute(
+            select(RelationshipPackage).where(RelationshipPackage.database_id == database_id)
+        )
+        return list(result.scalars().all())
+
     async def _fetch_relationships(self, database_id: int) -> list[SchemaRelationshipGraph]:
         result = await self.db.execute(
             select(SchemaRelationshipGraph)
@@ -798,4 +877,52 @@ class KPIIntelligenceService:
             "confidence_score": row.confidence_score,
             "metadata_fingerprint": row.metadata_fingerprint,
             "status": row.status,
+        }
+
+    @staticmethod
+    def _governance_package_to_dict(row: GovernancePackage) -> dict[str, Any]:
+        return {
+            "id": row.id,
+            "database_id": row.database_id,
+            "table_id": row.table_id,
+            "table_name": row.table_name,
+            "schema_name": row.schema_name,
+            "table_summary": row.table_summary,
+            "business_purpose": row.business_purpose,
+            "pii_columns": row.pii_columns,
+            "risk_columns": row.risk_columns,
+            "sensitive_columns": row.sensitive_columns,
+            "overall_risk": row.overall_risk,
+            "confidence_score": row.confidence_score,
+        }
+
+    @staticmethod
+    def _semantic_package_to_dict(row: SemanticPackage) -> dict[str, Any]:
+        return {
+            "id": row.id,
+            "database_id": row.database_id,
+            "business_domain": row.business_domain,
+            "semantic_summary": row.semantic_summary,
+            "business_entities": row.business_entities,
+            "business_processes": row.business_processes,
+            "business_capabilities": row.business_capabilities,
+            "business_glossary": row.business_glossary,
+            "confidence_score": row.confidence_score,
+        }
+
+    @staticmethod
+    def _relationship_package_to_dict(row: RelationshipPackage) -> dict[str, Any]:
+        return {
+            "id": row.id,
+            "database_id": row.database_id,
+            "cluster_id": row.cluster_id,
+            "domain_name": row.domain_name,
+            "cluster_summary": row.cluster_summary,
+            "entity_graph": row.entity_graph,
+            "business_process_flows": row.business_process_flows,
+            "hidden_relationships": row.hidden_relationships,
+            "upstream_dependencies": row.upstream_dependencies,
+            "downstream_dependencies": row.downstream_dependencies,
+            "lifecycle_flows": row.lifecycle_flows,
+            "confidence_score": row.confidence_score,
         }

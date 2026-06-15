@@ -139,6 +139,66 @@ async def get_semantics(
     return _semantic_response(db_semantic)
 
 
+@router.get(
+    "/package/{source_id}",
+    summary="Get canonical semantic package for a database",
+)
+async def get_semantic_package(
+    source_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    result = await db.execute(select(ConnectedDatabase).where(ConnectedDatabase.id == source_id))
+    database = result.scalars().first()
+    if not database:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Database {source_id} not found")
+
+    service = DatabaseSemanticService(db)
+    return await service.get_semantic_package(source_id)
+
+
+@router.get(
+    "/entities/{source_id}",
+    summary="Get semantic business entities for a database",
+)
+async def get_semantic_entities(source_id: int, db: AsyncSession = Depends(get_db)) -> list[str]:
+    result = await db.execute(select(ConnectedDatabase).where(ConnectedDatabase.id == source_id))
+    database = result.scalars().first()
+    if not database:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Database {source_id} not found")
+    service = DatabaseSemanticService(db)
+    return await service.get_semantic_entities(source_id)
+
+
+@router.get(
+    "/processes/{source_id}",
+    summary="Get semantic business processes for a database",
+)
+async def get_semantic_processes(source_id: int, db: AsyncSession = Depends(get_db)) -> list[str]:
+    result = await db.execute(select(ConnectedDatabase).where(ConnectedDatabase.id == source_id))
+    database = result.scalars().first()
+    if not database:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Database {source_id} not found")
+    service = DatabaseSemanticService(db)
+    return await service.get_semantic_processes(source_id)
+
+
+@router.get(
+    "/{source_id}/package",
+    summary="Get canonical semantic intelligence package for a database",
+)
+async def get_semantic_package(
+    source_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    result = await db.execute(select(ConnectedDatabase).where(ConnectedDatabase.id == source_id))
+    database = result.scalars().first()
+    if not database:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Database {source_id} not found")
+
+    service = DatabaseSemanticService(db)
+    return await service.build_semantic_package(source_id)
+
+
 @router.delete(
     "/{source_id}",
     summary="Delete semantic intelligence for a database",

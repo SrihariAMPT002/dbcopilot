@@ -90,6 +90,35 @@ class SyncService:
                 columns=counts["columns"],
                 relationships=counts["relationships"],
             )
+            await self.db.commit()
+
+            try:
+                from app.services.database_semantic_service import DatabaseSemanticService
+
+                semantic_start = time.monotonic()
+                await DatabaseSemanticService(self.db).generate_and_store_semantics(db_id)
+                _log_stage_duration("database semantic generation", semantic_start, db_id=db_id)
+                await self.db.commit()
+            except Exception as semantic_exc:
+                logger.exception(
+                    "Database semantic generation failed for db_id=%s: %s",
+                    db_id,
+                    semantic_exc,
+                )
+
+            try:
+                from app.services.column_semantic_service import ColumnSemanticService
+
+                governance_start = time.monotonic()
+                await ColumnSemanticService(self.db).generate_for_database(db_id, force=False)
+                _log_stage_duration("pii classification", governance_start, db_id=db_id)
+                await self.db.commit()
+            except Exception as pii_exc:
+                logger.exception(
+                    "Incremental PII rescan after metadata sync failed for db_id=%s: %s",
+                    db_id,
+                    pii_exc,
+                )
 
             try:
                 from app.schema_engine.relationship_graph import RelationshipGraphEngine
@@ -98,6 +127,7 @@ class SyncService:
                 graph_start = time.monotonic()
                 await graph_engine.build_relationship_graph(db_id, persist=True)
                 _log_stage_duration("relationship graph build", graph_start, db_id=db_id)
+                await self.db.commit()
             except Exception as graph_exc:
                 logger.exception(
                     "Relationship graph build failed for db_id=%s: %s",
@@ -139,19 +169,6 @@ class SyncService:
                 "Sync complete for db_id=%s: %d schemas, %d tables, %d columns in %.2fs",
                 db_id, counts["schemas"], counts["tables"], counts["columns"], elapsed,
             )
-
-            try:
-                from app.services.column_semantic_service import ColumnSemanticService
-
-                pii_start = time.monotonic()
-                await ColumnSemanticService(self.db).generate_for_database(db_id, force=False)
-                _log_stage_duration("pii classification", pii_start, db_id=db_id)
-            except Exception as pii_exc:
-                logger.exception(
-                    "Incremental PII rescan after metadata sync failed for db_id=%s: %s",
-                    db_id,
-                    pii_exc,
-                )
 
             # Convert to DTO inside session before returning
             return SyncResponse(

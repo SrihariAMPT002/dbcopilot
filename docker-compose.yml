@@ -1,6 +1,6 @@
 # =============================================================
 # DB Copilot - Docker Compose
-# MVP services: postgres + fastapi + streamlit + qdrant
+# MVP services: postgres + fastapi + react frontend + qdrant
 # Future services: redis + celery-worker (commented out)
 # =============================================================
 
@@ -72,27 +72,27 @@ services:
       sh -c "alembic upgrade head && 
              uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app"
 
-  streamlit:
+  frontend:
     build:
       context: . 
-      dockerfile: Dockerfile.streamlit
-    container_name: dbcopilot-streamlit
+      dockerfile: Dockerfile.frontend
+    container_name: dbcopilot-frontend
     restart: unless-stopped
     env_file: .env
     environment:
       API_BASE_URL: ${API_BASE_URL:-http://fastapi:8000/api/v1}
-      STREAMLIT_PORT: ${STREAMLIT_PORT:-8501}
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/api/v1}
     ports:
-      - "${STREAMLIT_PORT:-8501}:8501"
+      - "${FRONTEND_PORT:-5173}:5173"
     networks:
       - dbcopilot-net
     depends_on:
       fastapi:
         condition: service_healthy
     volumes:
-      - ./ui:/app
+      - ./frontend:/app
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5173"]
       interval: 30s
       timeout: 10s
       retries: 3

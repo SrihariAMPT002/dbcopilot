@@ -22,8 +22,11 @@ from app.models.metadata import (
     DatabaseSchema,
     DatabaseSemantic,
     DatabaseTable,
+    GovernancePackage,
     SchemaRelationshipGraph,
     SchemaSemantic,
+    RelationshipPackage,
+    SemanticPackage,
 )
 from app.models.nosql_metadata import NoSQLCollection, NoSQLRelationship, NoSQLSchemaField
 from app.models.readiness_snapshot import ReadinessSnapshot, ReadinessStatus
@@ -494,6 +497,24 @@ class ReadinessService:
         )
         return result.scalars().first()
 
+    async def _fetch_governance_packages(self, database_id: int) -> list[GovernancePackage]:
+        result = await self.db.execute(
+            select(GovernancePackage).where(GovernancePackage.database_id == database_id)
+        )
+        return list(result.scalars().all())
+
+    async def _fetch_semantic_package(self, database_id: int) -> SemanticPackage | None:
+        result = await self.db.execute(
+            select(SemanticPackage).where(SemanticPackage.database_id == database_id)
+        )
+        return result.scalars().first()
+
+    async def _fetch_relationship_packages(self, database_id: int) -> list[RelationshipPackage]:
+        result = await self.db.execute(
+            select(RelationshipPackage).where(RelationshipPackage.database_id == database_id)
+        )
+        return list(result.scalars().all())
+
     @staticmethod
     def _ratio_score(numerator: int, denominator: int) -> int:
         if denominator <= 0:
@@ -507,6 +528,9 @@ class ReadinessService:
         return int(round(sum(1 for value in values if value) / len(values) * 100))
 
     async def _collect_stats(self, database_id: int) -> dict[str, Any]:
+        governance_packages = await self._fetch_governance_packages(database_id)
+        semantic_package = await self._fetch_semantic_package(database_id)
+        relationship_packages = await self._fetch_relationship_packages(database_id)
         schemas = await self.db.scalar(
             select(func.count(DatabaseSchema.id)).where(DatabaseSchema.connected_db_id == database_id)
         ) or 0
@@ -735,6 +759,8 @@ class ReadinessService:
             "suggested_use_cases": len(database_semantic.suggested_use_cases) if database_semantic else 0,
             "confidence_score": database_semantic.confidence_score if database_semantic else 0.0,
             "generation_status": database_semantic.generation_status.value if database_semantic else "not_generated",
+            "semantic_package_present": semantic_package is not None,
+            "semantic_package_domain": semantic_package.business_domain if semantic_package else None,
         }
 
         metadata_stats = {
@@ -755,6 +781,7 @@ class ReadinessService:
             "schema_semantics": int(schema_semantics),
             "semantic_table_coverage": self._ratio_score(int(schema_semantics), int(tables)),
             "profile": semantic_profile,
+            "semantic_package_coverage": 100 if semantic_package else 0,
         }
 
         relationship_stats = {
@@ -765,6 +792,8 @@ class ReadinessService:
             "relationship_intelligence": int(relationship_ai_rows),
             "isolated_tables": max(0, int(tables) - len(graph_table_ids)),
             "graph_table_ids": len(graph_table_ids),
+            "relationship_packages": len(relationship_packages),
+            "relationship_package_coverage": self._ratio_score(len(relationship_packages), max(1, int(tables) or 1)),
         }
 
         pii_identified_coverage = self._ratio_score(int(column_semantics), int(columns))
@@ -788,6 +817,8 @@ class ReadinessService:
             "ownership_coverage": 0,
             "ownership_metadata_present": False,
             "pii_coverage": pii_identified_coverage,
+            "governance_packages": len(governance_packages),
+            "governance_package_coverage": self._ratio_score(len(governance_packages), max(1, int(tables) or 1)),
         }
 
         kpi_count = 0
@@ -884,6 +915,10 @@ class ReadinessService:
             "prompt_artifact_errors": prompt_artifact_errors,
             "embedding_coverage": self._ratio_score(int(embedding_status.get("completed_tables", 0)), int(max(1, tables))),
             "semantic_dependency_coverage": semantic_stats["semantic_table_coverage"],
+            "package_coverage": self._ratio_score(
+                int(bool(governance_packages)) + int(bool(semantic_package)) + int(bool(relationship_packages)),
+                3,
+            ),
         }
 
         if tables > 0:
@@ -1156,6 +1191,7 @@ class ReadinessService:
         glossary_coverage = self._ratio_score(profile["business_glossary"], glossary_target)
         use_case_coverage = self._ratio_score(profile["suggested_use_cases"], 4)
         confidence = int(round(max(0.0, min(1.0, float(profile["confidence_score"]))) * 100))
+        package_coverage = semantic.get("semantic_package_coverage", 0)
 
         return max(
             0,
@@ -1167,7 +1203,8 @@ class ReadinessService:
                         + 0.30 * semantic_table_coverage
                         + 0.20 * glossary_coverage
                         + 0.15 * use_case_coverage
-                        + 0.10 * confidence
+                        + 0.05 * confidence
+                        + 0.05 * package_coverage
                     )
                 ),
             ),
@@ -1183,6 +1220,7 @@ class ReadinessService:
             return 100
 
         relationship = stats["relationships"]
+        package_coverage = relationship.get("relationship_package_coverage", 0)
         graph_edges = relationship["graph_edges"]
         relationship_coverage = self._ratio_score(graph_edges, max(1, raw_relationships))
         graph_table_coverage = relationship["graph_table_coverage"]
@@ -1200,7 +1238,8 @@ class ReadinessService:
                         + 0.25 * relationship_coverage
                         + 0.20 * density
                         + 0.10 * cycle_penalty
-                        + 0.10 * isolation_penalty
+                        + 0.05 * isolation_penalty
+                        + 0.05 * package_coverage
                     )
                 ),
             ),
@@ -1219,6 +1258,7 @@ class ReadinessService:
         )
         embedding_coverage = ai_context["embedding_coverage"]
         semantic_dependency_coverage = ai_context["semantic_dependency_coverage"]
+        package_coverage = ai_context.get("package_coverage", 0)
 
         return max(
             0,
@@ -1229,6 +1269,7 @@ class ReadinessService:
                         0.50 * artifact_coverage
                         + 0.30 * embedding_coverage
                         + 0.20 * semantic_dependency_coverage
+                        + 0.05 * package_coverage
                     )
                 ),
             ),
@@ -1240,6 +1281,7 @@ class ReadinessService:
         pii_classified = governance["pii_classified_coverage"]
         prompt_protection = 100 if governance["prompt_protection_enabled"] else 0
         embedding_protection = 100 if governance["embedding_protection_enabled"] else 0
+        package_coverage = governance.get("governance_package_coverage", 0)
 
         return max(
             0,
@@ -1251,6 +1293,7 @@ class ReadinessService:
                         + 0.30 * pii_classified
                         + 0.20 * prompt_protection
                         + 0.20 * embedding_protection
+                        + 0.05 * package_coverage
                     )
                 ),
             ),
@@ -1258,9 +1301,14 @@ class ReadinessService:
 
     def _kpi_score(self, stats: dict[str, Any]) -> int:
         kpi = stats["kpi"]
+        package_coverage = max(
+            int(stats["governance"].get("governance_package_coverage", 0) or 0),
+            int(stats["semantic"].get("semantic_package_coverage", 0) or 0),
+            int(stats["relationships"].get("relationship_package_coverage", 0) or 0),
+        )
         rules = self._kpi_rules()
         if not kpi["enabled"] or kpi["kpi_count"] < int(rules.get("min_kpi_count", 1)):
-            return 0
+            return min(package_coverage, 40)
 
         coverage = float(kpi.get("coverage_percentage", 0.0) or 0.0)
         if coverage <= 0:
@@ -1286,6 +1334,7 @@ class ReadinessService:
                         float(weights.get("coverage", 0.40)) * max(kpi["coverage_score"], coverage)
                         + float(weights.get("freshness", 0.35)) * freshness
                         + float(weights.get("confidence", 0.25)) * confidence
+                        + 0.05 * package_coverage
                     )
                 ),
             ),

@@ -583,6 +583,83 @@ class SchemaRelationshipGraph(Base):
         )
 
 
+class GovernancePackage(Base):
+    """Persisted canonical governance package for a table."""
+
+    __tablename__ = "governance_packages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    database_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("connected_databases.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    table_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("database_tables.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    table_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    schema_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    table_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    business_purpose: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    _pii_columns: Mapped[str] = mapped_column("pii_columns", Text, nullable=False, default="[]")
+    _risk_columns: Mapped[str] = mapped_column("risk_columns", Text, nullable=False, default="[]")
+    _sensitive_columns: Mapped[str] = mapped_column("sensitive_columns", Text, nullable=False, default="[]")
+    overall_risk: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    confidence_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    prompt_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    prompt_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    raw_failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    @property
+    def pii_columns(self) -> list[dict]:
+        try:
+            return json.loads(self._pii_columns) if self._pii_columns else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @pii_columns.setter
+    def pii_columns(self, value: list[dict]) -> None:
+        self._pii_columns = json.dumps(value or [])
+
+    @property
+    def risk_columns(self) -> list[dict]:
+        try:
+            return json.loads(self._risk_columns) if self._risk_columns else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @risk_columns.setter
+    def risk_columns(self, value: list[dict]) -> None:
+        self._risk_columns = json.dumps(value or [])
+
+    @property
+    def sensitive_columns(self) -> list[dict]:
+        try:
+            return json.loads(self._sensitive_columns) if self._sensitive_columns else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @sensitive_columns.setter
+    def sensitive_columns(self, value: list[dict]) -> None:
+        self._sensitive_columns = json.dumps(value or [])
+
+
 class DatabaseSemantic(Base):
     """
     Database-level semantic enrichment.
@@ -722,6 +799,226 @@ class DatabaseSemantic(Base):
     @semantic_summary.setter
     def semantic_summary(self, value: str | None) -> None:
         self.business_summary = value
+
+
+class SemanticPackage(Base):
+    """Persisted canonical semantic package for a database."""
+
+    __tablename__ = "semantic_packages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    database_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("connected_databases.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    business_domain: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    semantic_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    _business_entities: Mapped[str] = mapped_column("business_entities", Text, nullable=False, default="[]")
+    _business_processes: Mapped[str] = mapped_column("business_processes", Text, nullable=False, default="[]")
+    _business_capabilities: Mapped[str] = mapped_column("business_capabilities", Text, nullable=False, default="[]")
+    _business_glossary: Mapped[str] = mapped_column("business_glossary", Text, nullable=False, default="[]")
+    confidence_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    prompt_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    prompt_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    @property
+    def business_entities(self) -> list[str]:
+        try:
+            return json.loads(self._business_entities) if self._business_entities else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @business_entities.setter
+    def business_entities(self, value: list[str]) -> None:
+        self._business_entities = json.dumps(value or [])
+
+    @property
+    def business_processes(self) -> list[str]:
+        try:
+            return json.loads(self._business_processes) if self._business_processes else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @business_processes.setter
+    def business_processes(self, value: list[str]) -> None:
+        self._business_processes = json.dumps(value or [])
+
+    @property
+    def business_capabilities(self) -> list[str]:
+        try:
+            return json.loads(self._business_capabilities) if self._business_capabilities else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @business_capabilities.setter
+    def business_capabilities(self, value: list[str]) -> None:
+        self._business_capabilities = json.dumps(value or [])
+
+    @property
+    def business_glossary(self) -> list[dict]:
+        try:
+            return json.loads(self._business_glossary) if self._business_glossary else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @business_glossary.setter
+    def business_glossary(self, value: list[dict]) -> None:
+        self._business_glossary = json.dumps(value or [])
+
+
+class TableSemanticPackage(Base):
+    """Persisted canonical semantic package for a table."""
+
+    __tablename__ = "table_semantic_packages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    database_id: Mapped[int] = mapped_column(Integer, ForeignKey("connected_databases.id", ondelete="CASCADE"), nullable=False, index=True)
+    table_id: Mapped[int] = mapped_column(Integer, ForeignKey("database_tables.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    business_purpose: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    business_entity: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    business_capability: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    business_process: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    _business_keywords: Mapped[str] = mapped_column("business_keywords", Text, nullable=False, default="[]")
+    semantic_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    confidence_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    prompt_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    prompt_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    @property
+    def business_keywords(self) -> list[str]:
+        try:
+            return json.loads(self._business_keywords) if self._business_keywords else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @business_keywords.setter
+    def business_keywords(self, value: list[str]) -> None:
+        self._business_keywords = json.dumps(value or [])
+
+
+class RelationshipPackage(Base):
+    """Persisted canonical relationship intelligence package."""
+
+    __tablename__ = "relationship_packages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    database_id: Mapped[int] = mapped_column(Integer, ForeignKey("connected_databases.id", ondelete="CASCADE"), nullable=False, index=True)
+    cluster_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    domain_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    cluster_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    _entity_graph: Mapped[str] = mapped_column("entity_graph", Text, nullable=False, default="[]")
+    _business_process_flows: Mapped[str] = mapped_column("business_process_flows", Text, nullable=False, default="[]")
+    _hidden_relationships: Mapped[str] = mapped_column("hidden_relationships", Text, nullable=False, default="[]")
+    _upstream_dependencies: Mapped[str] = mapped_column("upstream_dependencies", Text, nullable=False, default="[]")
+    _downstream_dependencies: Mapped[str] = mapped_column("downstream_dependencies", Text, nullable=False, default="[]")
+    _lifecycle_flows: Mapped[str] = mapped_column("lifecycle_flows", Text, nullable=False, default="[]")
+    confidence_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    prompt_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    prompt_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    @property
+    def entity_graph(self) -> list[dict]:
+        try:
+            return json.loads(self._entity_graph) if self._entity_graph else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @entity_graph.setter
+    def entity_graph(self, value: list[dict]) -> None:
+        self._entity_graph = json.dumps(value or [])
+
+    @property
+    def business_process_flows(self) -> list[dict]:
+        try:
+            return json.loads(self._business_process_flows) if self._business_process_flows else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @business_process_flows.setter
+    def business_process_flows(self, value: list[dict]) -> None:
+        self._business_process_flows = json.dumps(value or [])
+
+    @property
+    def hidden_relationships(self) -> list[dict]:
+        try:
+            return json.loads(self._hidden_relationships) if self._hidden_relationships else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @hidden_relationships.setter
+    def hidden_relationships(self, value: list[dict]) -> None:
+        self._hidden_relationships = json.dumps(value or [])
+
+    @property
+    def upstream_dependencies(self) -> list[dict]:
+        try:
+            return json.loads(self._upstream_dependencies) if self._upstream_dependencies else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @upstream_dependencies.setter
+    def upstream_dependencies(self, value: list[dict]) -> None:
+        self._upstream_dependencies = json.dumps(value or [])
+
+    @property
+    def downstream_dependencies(self) -> list[dict]:
+        try:
+            return json.loads(self._downstream_dependencies) if self._downstream_dependencies else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @downstream_dependencies.setter
+    def downstream_dependencies(self, value: list[dict]) -> None:
+        self._downstream_dependencies = json.dumps(value or [])
+
+    @property
+    def lifecycle_flows(self) -> list[dict]:
+        try:
+            return json.loads(self._lifecycle_flows) if self._lifecycle_flows else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @lifecycle_flows.setter
+    def lifecycle_flows(self, value: list[dict]) -> None:
+        self._lifecycle_flows = json.dumps(value or [])
+
+
+class RelationshipClusterTelemetry(Base):
+    """Telemetry for cluster analysis and prompt stability."""
+
+    __tablename__ = "relationship_cluster_telemetry"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    database_id: Mapped[int] = mapped_column(Integer, ForeignKey("connected_databases.id", ondelete="CASCADE"), nullable=False, index=True)
+    cluster_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    domain_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    cluster_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    relationship_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    estimated_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    actual_input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    actual_output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    prompt_truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    finish_reason: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    response_quality: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    prompt_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    prompt_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class KPIIntelligence(Base):

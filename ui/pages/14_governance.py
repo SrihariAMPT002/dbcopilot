@@ -60,12 +60,40 @@ st.subheader("Governance packages")
 for item in package.get("packages", []):
     with st.expander(f"{item.get('schema_name')}.{item.get('table_name')}", expanded=False):
         st.write(item.get("table_purpose") or item.get("business_meaning") or "No table purpose recorded.")
-        if item.get("pii_columns"):
+        pii_columns = item.get("pii_columns") or []
+        risk_columns = item.get("risk_columns") or []
+        if pii_columns:
             st.markdown("**PII columns**")
-            st.dataframe(item["pii_columns"], use_container_width=True, hide_index=True)
-        if item.get("risk_columns"):
+            st.dataframe(
+                [
+                    {
+                        "Column": col.get("column_name"),
+                        "PII Type": col.get("pii_type") or "PII",
+                        "Risk Level": str(col.get("risk_level") or "low").title(),
+                        "Business Meaning": col.get("business_meaning") or "",
+                        "Governance Reasoning": col.get("governance_reasoning") or "",
+                    }
+                    for col in pii_columns
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+        if risk_columns:
             st.markdown("**Risk columns**")
-            st.dataframe(item["risk_columns"], use_container_width=True, hide_index=True)
+            st.dataframe(
+                [
+                    {
+                        "Column": col.get("column_name"),
+                        "PII Type": col.get("pii_type") or "PII",
+                        "Risk Level": str(col.get("risk_level") or "high").title(),
+                        "Business Meaning": col.get("business_meaning") or "",
+                        "Governance Reasoning": col.get("governance_reasoning") or "",
+                    }
+                    for col in risk_columns
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
 
 with st.expander("Raw governance package JSON"):
     st.code(json.dumps(package, indent=2, default=str), language="json")

@@ -7,20 +7,21 @@ metadata:
 language: English
 system_message: |
   You are a metadata-driven data governance classifier.
-  Infer PII sensitivity, risk level, and business meaning from schema metadata and table context.
-  Return compact JSON only. Do not invent columns or policy rulebooks.
+  Infer PII sensitivity, risk level, and business meaning from table metadata only.
+  Be conservative and return compact JSON only.
 user_prompt: |
-  Classify every column in this table.
+  Classify every column in this table for governance and PII readiness.
+  Use metadata only. Do not rely on rulebooks, regulatory mappings, policy payloads, external taxonomies, or database-wide context.
+  If metadata is sparse or ambiguous, choose the lowest-risk classification that is still defensible.
 
   Database: {{ database_name }}
-  Business domain: {{ business_domain }}
   Schema: {{ schema_name }}
   Table: {{ table_name }}
   Table description: {{ table_description }}
 
   Columns:
   {% for col in columns %}
-  - {{ col.name }} ({{ col.data_type }}){% if col.description %}: {{ col.description }}{% endif %}
+  - {{ col.name }} ({{ col.data_type }}){% if col.primary_key %} [PK]{% endif %}{% if col.foreign_key %} [FK]{% endif %}
   {% endfor %}
 
   Return JSON only:
@@ -41,4 +42,4 @@ user_prompt: |
   }
 constraints:
   output_format: json
-  max_tokens: 1800
+  max_completion_tokens: 2000

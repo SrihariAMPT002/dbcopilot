@@ -1,6 +1,8 @@
 """Explicit stage contracts for the DB Copilot execution pipeline.
 
-Phase 1 only defines schemas and metadata. No runtime behavior is changed here.
+These contracts are the canonical target shapes for the AI intelligence platform.
+They are intentionally lightweight and are meant to describe, not execute, the
+pipeline.
 """
 
 from __future__ import annotations
@@ -75,6 +77,8 @@ class GovernanceStageOutput(BaseModel):
     database_id: int
     table_id: Optional[int] = None
     table_name: Optional[str] = None
+    table_summary: Optional[str] = None
+    business_purpose: Optional[str] = None
     is_pii: bool = False
     pii_type: Optional[str] = None
     risk_level: Optional[str] = None
@@ -111,12 +115,11 @@ class RelationshipsStageOutput(BaseModel):
     database_id: int
     cluster_id: Optional[str] = None
     cluster_label: Optional[str] = None
-    business_relationship_summary: Optional[str] = None
-    business_entity_graph: List[Dict[str, Any]] = Field(default_factory=list)
-    business_process_flows: List[Dict[str, Any]] = Field(default_factory=list)
-    upstream_dependencies: List[Dict[str, Any]] = Field(default_factory=list)
-    downstream_dependencies: List[Dict[str, Any]] = Field(default_factory=list)
-    confidence_score: float = 0.0
+    cluster_summary: Optional[str] = None
+    cluster_confidence: float = 0.0
+    entity_graph: List[Dict[str, Any]] = Field(default_factory=list)
+    hidden_relationships: List[Dict[str, Any]] = Field(default_factory=list)
+    lifecycle_flows: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class KPIStageInput(BaseModel):

@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     api_prefix: str = Field(default="/api/v1")
     workers: int = Field(default=1)
     allowed_origins: List[str] = Field(
-        default=[
+        default_factory=lambda: [
             "http://localhost:3000",
             "http://localhost:5173",
             "http://127.0.0.1:5173",
@@ -111,6 +111,15 @@ class Settings(BaseSettings):
         if upper not in allowed:
             raise ValueError(f"log_level must be one of {allowed}")
         return upper
+
+    @field_validator("allowed_origins", mode="before")
+    @classmethod
+    def parse_allowed_origins(cls, v):
+        if v is None or v == "":
+            return []
+        if isinstance(v, str):
+            return [item.strip() for item in v.split(",") if item.strip()]
+        return v
 
     @property
     def is_development(self) -> bool:
