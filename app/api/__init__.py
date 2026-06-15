@@ -18,6 +18,7 @@ from app.api.routes import (
     artifacts,
     mongodb,
     governance,
+    databases,
 )
 
 api_router = APIRouter()
@@ -38,3 +39,4 @@ api_router.include_router(pipeline.router)
 api_router.include_router(artifacts.router)
 api_router.include_router(mongodb.router)
 api_router.include_router(governance.router)
+api_router.include_router(databases.router)

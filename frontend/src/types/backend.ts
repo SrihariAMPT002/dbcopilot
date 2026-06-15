@@ -15,6 +15,121 @@ export type Connection = {
   last_error?: string | null;
 };
 
+export type DatabaseSummary = {
+  database_id: number;
+  database_name: string;
+  db_type: string;
+  status: string;
+  connected_at?: string | null;
+};
+
+export type DefaultDatabaseResponse = {
+  database_id?: number | null;
+  database_name?: string | null;
+  db_type?: string | null;
+  connected_at?: string | null;
+};
+
+export type ConnectionRequest = {
+  name: string;
+  db_type: string;
+  host: string;
+  port: number;
+  database_name: string;
+  username: string;
+  password: string;
+  ssl_enabled: boolean;
+};
+
+export type TestConnectionResponse = {
+  success: boolean;
+  message: string;
+  latency_ms?: number | null;
+  server_version?: string | null;
+  databases_accessible?: number | null;
+};
+
+export type SchemaResponse = {
+  id: number;
+  connected_db_id: number;
+  name: string;
+  description?: string | null;
+  created_at?: string;
+  table_count: number;
+};
+
+export type TableResponse = {
+  id: number;
+  schema_id: number;
+  name: string;
+  table_type: string;
+  row_count?: number | null;
+  description?: string | null;
+  created_at?: string;
+  column_count: number;
+};
+
+export type ColumnResponse = {
+  id: number;
+  table_id: number;
+  name: string;
+  data_type: string;
+  ordinal_position?: number | null;
+  is_nullable: boolean;
+  is_primary_key: boolean;
+  is_foreign_key: boolean;
+  is_unique: boolean;
+  is_indexed: boolean;
+  default_value?: string | null;
+  max_length?: number | null;
+  description?: string | null;
+};
+
+export type RelationshipResponse = {
+  id: number;
+  table_id: number;
+  column_name: string;
+  referenced_table_name: string;
+  referenced_column_name: string;
+  referenced_schema?: string | null;
+  constraint_name?: string | null;
+};
+
+export type SyncLogResponse = {
+  id: number;
+  connected_db_id: number;
+  status: string;
+  started_at: string;
+  completed_at?: string | null;
+  duration_seconds?: number | null;
+  schemas_synced: number;
+  tables_synced: number;
+  columns_synced: number;
+  relationships_synced: number;
+  error_message?: string | null;
+};
+
+export type JobQueueResponse = {
+  database_id: number;
+  job_id: number;
+  job_type: string;
+  status: string;
+  message: string;
+};
+
+export type PipelineRunResponse = {
+  database_id: number;
+  created_job_ids: number[];
+  message: string;
+};
+
+export type HealthResponse = {
+  status: string;
+  version: string;
+  db_healthy: boolean;
+  timestamp: string;
+};
+
 export type GovernanceColumn = {
   column_name: string;
   is_pii: boolean;

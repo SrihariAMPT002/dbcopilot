@@ -28,9 +28,9 @@ export function AppSidebar() {
     path === "/" ? pathname === "/" : pathname === path || pathname.startsWith(path + "/");
 
   return (
-    <Sidebar collapsible="icon" className="border-r border-sidebar-border">
-      <SidebarHeader className="border-b border-sidebar-border">
-        <div className={cn("flex items-center gap-2 px-2 py-1.5", collapsed && "justify-center px-0")}>
+    <Sidebar collapsible="icon" className="relative z-40 min-h-screen border-r border-sidebar-border">
+      <SidebarHeader className="border-b border-sidebar-border px-3 py-2">
+        <div className={cn("flex items-center gap-2", collapsed && "justify-center")}>
           <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-primary to-primary-glow text-primary-foreground shadow-[var(--shadow-glow)]">
             <Database className="h-4 w-4" />
           </div>
@@ -64,12 +64,13 @@ export function AppSidebar() {
                         isActive={active}
                         tooltip={item.title}
                         className={cn(
+                          "pointer-events-auto",
                           "data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-primary data-[active=true]:font-medium",
                           "data-[active=true]:before:absolute data-[active=true]:before:left-0 data-[active=true]:before:top-1.5 data-[active=true]:before:h-[calc(100%-12px)] data-[active=true]:before:w-[2px] data-[active=true]:before:rounded-full data-[active=true]:before:bg-sidebar-primary",
                           "relative",
                         )}
                       >
-                        <Link to={item.to}>
+                        <Link to={item.to} className="flex w-full items-center gap-2">
                           <item.icon className="h-4 w-4 shrink-0" />
                           <span className="truncate">{item.title}</span>
                         </Link>
@@ -85,7 +86,7 @@ export function AppSidebar() {
 
       <SidebarFooter className="border-t border-sidebar-border">
         {!collapsed ? (
-          <div className="flex flex-col gap-2 px-2 py-2">
+          <div className="flex flex-col gap-2 px-3 py-2">
             <div className="flex items-center justify-between gap-2 rounded-md bg-sidebar-accent/60 px-2 py-1.5">
               <div className="flex min-w-0 items-center gap-2">
                 <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--success)] shadow-[0_0_8px_var(--success)]" />

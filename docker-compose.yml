@@ -74,8 +74,10 @@ services:
 
   frontend:
     build:
-      context: . 
+      context: .
       dockerfile: Dockerfile.frontend
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/api/v1}
     container_name: dbcopilot-frontend
     restart: unless-stopped
     env_file: .env
@@ -83,16 +85,14 @@ services:
       API_BASE_URL: ${API_BASE_URL:-http://fastapi:8000/api/v1}
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/api/v1}
     ports:
-      - "${FRONTEND_PORT:-5173}:5173"
+      - "${FRONTEND_PORT:-5173}:80"
     networks:
       - dbcopilot-net
     depends_on:
       fastapi:
         condition: service_healthy
-    volumes:
-      - ./frontend:/app
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5173"]
+      test: ["CMD", "curl", "-f", "http://localhost"]
       interval: 30s
       timeout: 10s
       retries: 3

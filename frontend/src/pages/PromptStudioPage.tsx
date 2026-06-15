@@ -8,10 +8,12 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { usePromptBundle, usePromptInventory, usePromptTemplates } from "@/hooks/usePromptStudio";
+import { useDatabaseContext } from "@/context/database-context";
 
 export function PromptStudioPage() {
   const [tab, setTab] = useState("system");
-  const dbId = 1;
+  const { selectedDatabaseId } = useDatabaseContext();
+  const dbId = selectedDatabaseId ?? 1;
   const { data: templates } = usePromptTemplates();
   const { data: inventory } = usePromptInventory();
   const { data: bundle } = usePromptBundle(dbId);

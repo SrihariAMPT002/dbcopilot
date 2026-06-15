@@ -7,9 +7,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CoverageBar } from "@/components/coverage-bar";
 import { useKPIs } from "@/hooks/useKpis";
+import { useDatabaseContext } from "@/context/database-context";
 
 export function KPIPage() {
-  const dbId = 1;
+  const { selectedDatabaseId } = useDatabaseContext();
+  const dbId = selectedDatabaseId ?? 1;
   const { data } = useKPIs(dbId);
   const latest = data?.latest ? (Object.entries(data.latest) as Array<[string, unknown]>) : [];
 

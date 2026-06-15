@@ -6,9 +6,11 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useSemantics } from "@/hooks/useSemantics";
+import { useDatabaseContext } from "@/context/database-context";
 
 export function SemanticsPage() {
-  const dbId = 1;
+  const { selectedDatabaseId } = useDatabaseContext();
+  const dbId = selectedDatabaseId ?? 1;
   const { data } = useSemantics(dbId);
   const entities = data?.business_entities ?? [];
   const processes = data?.business_processes ?? [];

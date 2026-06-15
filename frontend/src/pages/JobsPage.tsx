@@ -1,28 +1,244 @@
-import { useState } from "react";
-import { RefreshCw, Search, ChevronRight, ChevronDown, Clock, Hash, Cpu, Activity, Filter } from "lucide-react";
+import { Fragment, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { RefreshCw, Filter, Clock, Hash, Cpu, Activity, ChevronRight, ChevronDown } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { StatusBadge, type StatusKind } from "@/components/status-badge";
 import { CoverageBar } from "@/components/coverage-bar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { EmptyState } from "@/components/empty-state";
+import { connectionsApi } from "@/api/connections";
+import { jobsApi } from "@/api/jobs";
+import { metadataApi } from "@/api/metadata";
+import type { PipelineJob } from "@/types/backend";
+import { useDatabaseContext } from "@/context/database-context";
 
-type Job = { id: string; name: string; kind: "sync" | "ai" | "pipeline"; source: string; status: StatusKind; progress: number; duration: string; traceId: string; promptId?: string; model?: string; tokens?: number; retries: number; error?: string };
-const jobs: Job[] = [
-  { id: "job_8a21", name: "Metadata sync", kind: "sync", source: "warehouse_prod", status: "success", progress: 100, duration: "2m 41s", traceId: "trc_4f81e9", retries: 0 },
-  { id: "job_8a22", name: "Governance package", kind: "ai", source: "warehouse_prod", status: "success", progress: 100, duration: "6m 11s", traceId: "trc_4f81ea", promptId: "prm_v14", model: "gpt-4.1", tokens: 184_201, retries: 0 },
-  { id: "job_8a23", name: "Semantic package", kind: "ai", source: "warehouse_prod", status: "running", progress: 72, duration: "4m 02s", traceId: "trc_4f81eb", promptId: "prm_v14", model: "gpt-4.1", tokens: 121_402, retries: 0 },
-  { id: "job_8a24", name: "Relationship discovery", kind: "ai", source: "crm_replica", status: "running", progress: 41, duration: "12m 14s", traceId: "trc_4f81ec", promptId: "prm_v14", model: "claude-3.7", tokens: 88_412, retries: 0 },
-  { id: "job_8a25", name: "KPI extraction", kind: "ai", source: "finance_dw", status: "failed", progress: 64, duration: "8m 51s", traceId: "trc_4f81ed", promptId: "prm_v13", model: "gpt-4.1", tokens: 102_840, retries: 2, error: "Timeout on lineage walker after 8m. Step: kpi.lineage.expand depth=3." },
-  { id: "job_8a26", name: "Embedding upsert", kind: "ai", source: "warehouse_prod", status: "success", progress: 100, duration: "1m 22s", traceId: "trc_4f81ee", model: "text-embedding-3-large", tokens: 412_889, retries: 0 },
-  { id: "job_8a27", name: "Full pipeline", kind: "pipeline", source: "events_lake", status: "queued", progress: 0, duration: "—", traceId: "trc_4f81ef", retries: 0 },
-];
+export function JobsPage() {
+  const queryClient = useQueryClient();
+  const { data: connections = [] } = useQuery({ queryKey: ["connections"], queryFn: connectionsApi.list });
+  const { selectedDatabaseId: selectedDb, setSelectedDatabaseId } = useDatabaseContext();
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [jobTypeFilter, setJobTypeFilter] = useState("ALL");
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<number>(1);
 
-export function JobsPage() { const [open, setOpen] = useState<string | null>("job_8a25"); return (<div className="space-y-6"><PageHeader eyebrow="Platform" title="Jobs & operations" description="All sync jobs, AI jobs, and pipeline executions with trace IDs, model usage, and error logs." actions={<><Button variant="outline" size="sm" className="gap-1.5"><Filter className="h-3.5 w-3.5" /> Filter</Button><Button variant="outline" size="sm" className="gap-1.5"><RefreshCw className="h-3.5 w-3.5" /> Refresh</Button></>} /><Card><CardHeader><CardTitle className="text-base">Active pipeline</CardTitle><CardDescription>warehouse_prod · run_2026_06_15_0942 · started 14 min ago</CardDescription></CardHeader><CardContent><ol className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">{[{ s: "Sync", v: 100, st: "success" as StatusKind }, { s: "Governance", v: 100, st: "success" as StatusKind }, { s: "Semantics", v: 72, st: "running" as StatusKind }, { s: "Relationships", v: 41, st: "running" as StatusKind }, { s: "KPI", v: 0, st: "queued" as StatusKind }, { s: "Embeddings", v: 100, st: "success" as StatusKind }, { s: "Prompt Studio", v: 0, st: "queued" as StatusKind }].map((p) => (<li key={p.s} className="rounded-md border border-border bg-card p-3"><div className="mb-2 flex items-center justify-between gap-2"><span className="truncate text-xs font-medium text-foreground">{p.s}</span><StatusBadge status={p.st} /></div><CoverageBar value={p.v} /></li>))}</ol></CardContent></Card><Card><CardHeader className="flex flex-row items-end justify-between gap-3 space-y-0"><div><CardTitle className="text-base">Job history</CardTitle><CardDescription>Click a job to inspect trace, prompt, model, and logs.</CardDescription></div><div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" /><Input placeholder="Search jobs…" className="h-9 pl-9" /></div></CardHeader><CardContent><Tabs defaultValue="all"><TabsList><TabsTrigger value="all">All</TabsTrigger><TabsTrigger value="sync">Sync</TabsTrigger><TabsTrigger value="ai">AI</TabsTrigger><TabsTrigger value="pipeline">Pipelines</TabsTrigger></TabsList><TabsContent value="all" className="pt-4"><div className="overflow-x-auto"><Table><TableHeader><TableRow className="bg-muted/40 hover:bg-muted/40"><TableHead className="w-8"></TableHead><TableHead>Job</TableHead><TableHead>Source</TableHead><TableHead className="min-w-[140px]">Progress</TableHead><TableHead>Status</TableHead><TableHead>Duration</TableHead><TableHead>Retries</TableHead></TableRow></TableHeader><TableBody>{jobs.map((j) => { const expanded = open === j.id; return (<><TableRow key={j.id} className="cursor-pointer hover:bg-muted/30" onClick={() => setOpen(expanded ? null : j.id)}><TableCell className="text-muted-foreground">{expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</TableCell><TableCell><div className="flex min-w-0 items-center gap-2"><Badge variant="outline" className="text-[10px] uppercase tracking-wider">{j.kind}</Badge><span className="truncate text-sm font-medium text-foreground">{j.name}</span></div><div className="font-mono text-[11px] text-muted-foreground">{j.id}</div></TableCell><TableCell className="text-sm text-muted-foreground">{j.source}</TableCell><TableCell><CoverageBar value={j.progress} tone={j.status === "failed" ? "danger" : "primary"} /></TableCell><TableCell><StatusBadge status={j.status} /></TableCell><TableCell className="text-xs text-muted-foreground">{j.duration}</TableCell><TableCell className="text-xs tabular-nums text-muted-foreground">{j.retries}</TableCell></TableRow>{expanded && (<TableRow key={j.id + "-x"} className="bg-muted/20 hover:bg-muted/20"><TableCell></TableCell><TableCell colSpan={6}><JobDetail job={j} /></TableCell></TableRow>)}</>);})}</TableBody></Table></div></TabsContent></Tabs></CardContent></Card></div>); }
+  const { data: jobs = [] } = useQuery({
+    queryKey: ["jobs", statusFilter],
+    queryFn: () => jobsApi.list(300),
+  });
 
-function JobDetail({ job }: { job: Job }) { return (<div className="grid grid-cols-1 gap-3 p-2 lg:grid-cols-[1fr_1fr]"><div className="space-y-2"><div className="grid grid-cols-2 gap-2"><Meta icon={Hash} label="Trace ID" value={job.traceId} mono /><Meta icon={Clock} label="Duration" value={job.duration} />{job.promptId && <Meta icon={Activity} label="Prompt ID" value={job.promptId} mono />}{job.model && <Meta icon={Cpu} label="Model" value={job.model} />}{typeof job.tokens === "number" && <Meta icon={Hash} label="Tokens" value={job.tokens.toLocaleString()} />}<Meta icon={Hash} label="Retries" value={String(job.retries)} /></div></div><div className="space-y-2"><div className="text-[11px] uppercase tracking-wider text-muted-foreground">Logs</div><ScrollArea className="max-h-44 rounded-md border border-border bg-[var(--muted)]/40"><pre className="whitespace-pre-wrap p-3 font-mono text-[11px] leading-relaxed text-foreground">{`[09:42:01] starting ${job.name} (${job.kind})\n[09:42:03] source=${job.source} trace=${job.traceId}\n[09:42:08] discovered 318 tables, 6422 columns\n[09:42:14] generating prompt assembly v14\n${job.status === "failed" ? `[09:50:51] ERROR ${job.error}\n[09:50:51] retrying (attempt ${job.retries + 1})` : `[09:48:22] progress ${job.progress}%`}\n`}</pre></ScrollArea></div></div>); }
-function Meta({ icon: Icon, label, value, mono }: { icon: typeof Hash; label: string; value: string; mono?: boolean }) { return (<div className="rounded-md border border-border bg-card p-2.5"><div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground"><Icon className="h-3 w-3" /> {label}</div><div className={`mt-1 truncate text-sm text-foreground ${mono ? "font-mono text-[12px]" : ""}`}>{value}</div></div>); }
+  const filteredJobs = useMemo(() => {
+    let rows = jobs;
+    if (selectedDb) rows = rows.filter((j) => j.database_id === selectedDb);
+    if (statusFilter !== "ALL") rows = rows.filter((j) => j.status === statusFilter);
+    if (jobTypeFilter !== "ALL") rows = rows.filter((j) => j.job_type === jobTypeFilter);
+    return rows;
+  }, [jobTypeFilter, jobs, selectedDb, statusFilter]);
+
+  const dbJobs = filteredJobs;
+  const counts = useMemo(
+    () => dbJobs.reduce<Record<string, number>>((acc, job) => ({ ...acc, [job.status]: (acc[job.status] ?? 0) + 1 }), {}),
+    [dbJobs],
+  );
+
+  const runMutation = useMutation({
+    mutationFn: () => metadataApi.diagnose(Number(selectedDb ?? 0)),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
+  });
+
+  const selectedJob = dbJobs.find((j) => j.id === selectedJobId);
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Platform"
+        title="Jobs & operations"
+        description="All sync jobs, AI jobs, and pipeline executions with trace IDs, model usage, and error logs."
+        actions={
+          <>
+            <Button variant="outline" size="sm" className="gap-1.5">
+              <Filter className="h-3.5 w-3.5" /> Filter
+            </Button>
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => queryClient.invalidateQueries({ queryKey: ["jobs"] })}>
+              <RefreshCw className="h-3.5 w-3.5" /> Refresh
+            </Button>
+          </>
+        }
+      />
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Active pipeline</CardTitle>
+          <CardDescription>Current execution across sync, governance, semantics, relationships, KPI, and embeddings.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {dbJobs.length ? (
+            <ol className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+              {["SYNC", "GOVERNANCE", "SEMANTIC_ENRICHMENT", "RELATIONSHIP_GRAPH", "KPI", "EMBEDDINGS", "PROMPT_GENERATION"].map((stage) => (
+                <li key={stage} className="rounded-md border border-border bg-card p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="truncate text-xs font-medium text-foreground">{stage.replaceAll("_", " ")}</span>
+                    <StatusBadge status={(counts["RUNNING"] ? "running" : "queued") as StatusKind} />
+                  </div>
+                  <CoverageBar value={stage === "SYNC" ? 100 : 0} />
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <EmptyState icon={Activity} title="No active pipeline" description="Run a sync to populate pipeline stages and execution history." />
+          )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader className="flex flex-row items-end justify-between gap-3 space-y-0">
+          <div>
+            <CardTitle className="text-base">Job history</CardTitle>
+            <CardDescription>Click a job to inspect trace, prompt, model, and logs.</CardDescription>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Input value={String(selectedDb ?? "")} onChange={(e) => setSelectedDatabaseId(Number(e.target.value) || null)} placeholder="Database id" className="h-9 w-32" />
+            <Input value={String(selectedJobId)} onChange={(e) => setSelectedJobId(Number(e.target.value) || 1)} placeholder="Job ID" className="h-9 w-24" />
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="mb-3 flex flex-wrap gap-2">
+            {["ALL", "QUEUED", "RUNNING", "FAILED", "COMPLETED", "CANCELLED"].map((s) => (
+              <Button key={s} variant={statusFilter === s ? "default" : "outline"} size="sm" onClick={() => setStatusFilter(s)}>
+                {s}
+              </Button>
+            ))}
+          </div>
+          <div className="mb-3 flex flex-wrap gap-2">
+            {["ALL", "SYNC", "SEMANTIC_ENRICHMENT", "EMBEDDINGS", "RELATIONSHIP_GRAPH", "PROMPT_GENERATION", "READINESS", "ARTIFACT_PACKAGING", "AI_CONTEXT"].map((s) => (
+              <Button key={s} variant={jobTypeFilter === s ? "default" : "outline"} size="sm" onClick={() => setJobTypeFilter(s)}>
+                {s}
+              </Button>
+            ))}
+          </div>
+          <Tabs defaultValue="all">
+            <TabsList>
+              <TabsTrigger value="all">All</TabsTrigger>
+              <TabsTrigger value="sync">Sync</TabsTrigger>
+              <TabsTrigger value="ai">AI</TabsTrigger>
+              <TabsTrigger value="pipeline">Pipelines</TabsTrigger>
+            </TabsList>
+            <TabsContent value="all" className="pt-4">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/40 hover:bg-muted/40">
+                      <TableHead className="w-8"></TableHead>
+                      <TableHead>Job</TableHead>
+                      <TableHead>Source</TableHead>
+                      <TableHead className="min-w-[140px]">Progress</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Duration</TableHead>
+                      <TableHead>Retries</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {dbJobs.length ? (
+                      dbJobs.map((j) => {
+                        const isOpen = expanded === j.id;
+                        return (
+                          <Fragment key={j.id}>
+                            <TableRow className="cursor-pointer hover:bg-muted/30" onClick={() => setExpanded(isOpen ? null : j.id)}>
+                              <TableCell className="text-muted-foreground">{isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</TableCell>
+                              <TableCell>
+                                <div className="flex min-w-0 items-center gap-2">
+                                  <Badge variant="outline" className="text-[10px] uppercase tracking-wider">{j.job_type}</Badge>
+                                  <span className="truncate text-sm font-medium text-foreground">Job #{j.id}</span>
+                                </div>
+                                <div className="font-mono text-[11px] text-muted-foreground">{j.id}</div>
+                              </TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{j.database_id}</TableCell>
+                              <TableCell><CoverageBar value={j.progress_percentage} tone={j.status === "FAILED" ? "danger" : "primary"} /></TableCell>
+                              <TableCell><StatusBadge status={j.status.toLowerCase() as StatusKind} /></TableCell>
+                              <TableCell className="text-xs text-muted-foreground">{j.started_at ? "running" : "n/a"}</TableCell>
+                              <TableCell className="text-xs tabular-nums text-muted-foreground">0</TableCell>
+                            </TableRow>
+                            {isOpen ? (
+                              <TableRow className="bg-muted/20 hover:bg-muted/20">
+                                <TableCell />
+                                <TableCell colSpan={6}>
+                                  <JobDetail job={j} />
+                                </TableCell>
+                              </TableRow>
+                            ) : null}
+                          </Fragment>
+                        );
+                      })
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={7} className="py-10">
+                          <EmptyState icon={Activity} title="No jobs yet" description="Execution history will appear here after sync and AI runs complete." />
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </TabsContent>
+          </Tabs>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => runMutation.mutate()}>
+              Run diagnostics
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setExpanded(selectedJobId)}>
+              Inspect Job
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+      {selectedJob ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Selected job</CardTitle>
+            <CardDescription>Streamlit-style drilldown for trace, prompt, model, and logs.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <JobDetail job={selectedJob} />
+          </CardContent>
+        </Card>
+      ) : null}
+    </div>
+  );
+}
+
+function JobDetail({ job }: { job: PipelineJob }) {
+  return (
+    <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr]">
+      <div className="grid grid-cols-2 gap-2">
+        <Meta icon={Hash} label="Job ID" value={String(job.id)} mono />
+        <Meta icon={Clock} label="Started" value={job.started_at ?? "n/a"} mono />
+        <Meta icon={Cpu} label="Type" value={job.job_type} />
+        <Meta icon={Activity} label="Status" value={job.status} />
+      </div>
+      <div className="space-y-2">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Logs</div>
+        <ScrollArea className="max-h-44 rounded-md border border-border bg-[var(--muted)]/40">
+          <pre className="whitespace-pre-wrap p-3 font-mono text-[11px] leading-relaxed text-foreground">
+            {`[job ${job.id}] ${job.job_type} ${job.status}
+progress=${job.progress_percentage}%
+failure=${job.failure_reason ?? "n/a"}`}
+          </pre>
+        </ScrollArea>
+      </div>
+    </div>
+  );
+}
+
+function Meta({ icon: Icon, label, value, mono }: { icon: typeof Hash; label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="rounded-md border border-border bg-card p-2.5">
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+        <Icon className="h-3 w-3" /> {label}
+      </div>
+      <div className={`mt-1 truncate text-sm text-foreground ${mono ? "font-mono text-[12px]" : ""}`}>{value}</div>
+    </div>
+  );
+}

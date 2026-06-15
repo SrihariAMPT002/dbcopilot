@@ -5,9 +5,11 @@ import { Badge } from "@/components/ui/badge";
 import { CoverageBar } from "@/components/coverage-bar";
 import { Button } from "@/components/ui/button";
 import { useReadiness } from "@/hooks/useReadiness";
+import { useDatabaseContext } from "@/context/database-context";
 
 export function ReadinessPage() {
-  const dbId = 1;
+  const { selectedDatabaseId } = useDatabaseContext();
+  const dbId = selectedDatabaseId ?? 1;
   const { data } = useReadiness(dbId);
   const scores = [
     { label: "Governance", value: data?.scores.metadata_score ?? 0, icon: ShieldCheck },
