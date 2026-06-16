@@ -9,7 +9,7 @@ models:
     provider: azure_openai
     model_name: gpt-5-nano
     api_version: "2025-01-01-preview"
-    max_completion_tokens: 3500
+    max_completion_tokens: 16000
     frequency_penalty: 0
     presence_penalty: 0
     description: "Used for database-level semantic intelligence generation"
@@ -19,7 +19,7 @@ models:
     provider: azure_openai
     model_name: gpt-5-nano
     api_version: "2025-01-01-preview"
-    max_completion_tokens: 3000
+    max_completion_tokens: 6000
     frequency_penalty: 0
     presence_penalty: 0
     description: "Used for table-level semantic enrichment"
@@ -29,7 +29,7 @@ models:
     provider: azure_openai
     model_name: gpt-5-nano
     api_version: "2025-01-01-preview"
-    max_completion_tokens: 6000
+    max_completion_tokens: 20000
     frequency_penalty: 0
     presence_penalty: 0
     description: "Used for detecting relationships between tables"
@@ -39,7 +39,7 @@ models:
     provider: azure_openai
     model_name: gpt-5-nano
     api_version: "2025-01-01-preview"
-    max_completion_tokens: 5000
+    max_completion_tokens: 16000
     frequency_penalty: 0
     presence_penalty: 0
     description: "Used for AI readiness assessment and recommendations"
@@ -86,3 +86,5 @@ api:
   max_retries: 3
   retry_backoff_factor: 2
   retry_backoff_max: 60
+  max_input_tokens: 150000
+  max_completion_tokens: 20000

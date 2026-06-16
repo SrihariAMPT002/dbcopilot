@@ -28,6 +28,7 @@ from app.models.metadata import (
     RelationshipPackage,
     SemanticPackage,
 )
+from app.services.database_guard import ensure_connected
 from app.models.nosql_metadata import NoSQLCollection, NoSQLRelationship, NoSQLSchemaField
 from app.models.readiness_snapshot import ReadinessSnapshot, ReadinessStatus
 from app.core.config import settings
@@ -43,6 +44,7 @@ from app.services.remediation_service import RemediationService
 from app.models.prompt_package import PromptPackage
 from app.models.embedding_document import EmbeddingDocument
 from app.models.retrieval_evaluation import RetrievalEvaluation
+from app.models.retrieval_log import RetrievalLog
 from app.models.semantic_cache import SemanticCache
 from app.models.agent_memory import AgentMemory
 from app.models.prompt_evaluation import PromptEvaluation
@@ -180,6 +182,24 @@ class ReadinessService:
 
     def _enabled_packages(self) -> list[str]:
         return [name for name in self._readiness_dimensions() if self._package_enabled(name)]
+
+    def _package_completeness(self, stats: dict[str, Any]) -> dict[str, Any]:
+        enabled_packages = self._enabled_packages()
+        package_flags = {
+            "governance": bool(stats.get("governance_packages")),
+            "semantic": bool(stats.get("semantic_package_present")),
+            "relationship": bool(stats.get("relationship_packages")),
+            "kpi": int(stats.get("kpi_cluster_count", 0) or 0) > 0,
+            "prompt": int(stats.get("prompt_artifacts_rendered", 0) or 0) > 0,
+            "embedding": int(stats.get("embeddings", {}).get("completed_tables", 0) or 0) > 0,
+            "readiness": int(stats.get("readiness_snapshots", 0) or 0) > 0,
+        }
+        covered = sum(1 for key in package_flags if package_flags[key])
+        return {
+            "enabled_packages": enabled_packages,
+            "coverage_ratio": round(covered / max(1, len(enabled_packages)), 3),
+            "package_flags": package_flags,
+        }
 
     def _readiness_prompt_names(self) -> list[str]:
         return [prompt_path for prompt_path in self.registry.list_prompts() if prompt_path.startswith("readiness/")]
@@ -335,32 +355,36 @@ class ReadinessService:
     async def _latest_package_change_at(self, database_id: int) -> datetime | None:
         candidates: list[datetime | None] = []
 
-        async def _max_updated(model: Any, clause: Any = None) -> None:
-            stmt = select(func.max(model.updated_at)).where(model.database_id == database_id)
+        async def _max_timestamp(model: Any, *, timestamp_column: str = "updated_at", clause: Any = None) -> None:
+            column = getattr(model, timestamp_column, None)
+            if column is None:
+                column = getattr(model, "created_at", None)
+            if column is None or not hasattr(model, "database_id"):
+                return
+            stmt = select(func.max(column)).where(model.database_id == database_id)
             if clause is not None:
                 stmt = stmt.where(clause)
             result = await self.db.execute(stmt)
             candidates.append(result.scalar_one_or_none())
 
-        await _max_updated(GovernancePackage)
-        await _max_updated(SemanticPackage)
-        await _max_updated(RelationshipPackage)
-        await _max_updated(KPIIntelligence)
-        await _max_updated(KPIArtifact)
-        await _max_updated(ReadinessSnapshot)
+        await _max_timestamp(GovernancePackage)
+        await _max_timestamp(SemanticPackage)
+        await _max_timestamp(RelationshipPackage)
+        await _max_timestamp(KPIIntelligence)
+        await _max_timestamp(KPIArtifact)
+        await _max_timestamp(ReadinessSnapshot)
 
         extra_models = [
             PromptPackage,
             EmbeddingDocument,
             RetrievalEvaluation,
+            RetrievalLog,
             SemanticCache,
             AgentMemory,
             PromptEvaluation,
         ]
         for model in extra_models:
-            stmt = select(func.max(model.updated_at)).where(model.database_id == database_id)
-            result = await self.db.execute(stmt)
-            candidates.append(result.scalar_one_or_none())
+            await _max_timestamp(model)
 
         values = [value for value in candidates if value is not None]
         return max(values) if values else None
@@ -513,13 +537,7 @@ class ReadinessService:
         )
 
     async def _fetch_database(self, database_id: int) -> ConnectedDatabase:
-        result = await self.db.execute(
-            select(ConnectedDatabase).where(ConnectedDatabase.id == database_id)
-        )
-        database = result.scalars().first()
-        if not database:
-            raise ValueError(f"Database {database_id} not found")
-        return database
+        return await ensure_connected(self.db, database_id)
 
     async def _latest_snapshot(self, database_id: int) -> ReadinessSnapshot | None:
         result = await self.db.execute(
@@ -617,6 +635,7 @@ class ReadinessService:
         return int(round(sum(1 for value in values if value) / len(values) * 100))
 
     async def _collect_stats(self, database_id: int) -> dict[str, Any]:
+        snapshot = None
         governance_packages = await self._fetch_governance_packages(database_id)
         semantic_package = await self._fetch_semantic_package(database_id)
         relationship_packages = await self._fetch_relationship_packages(database_id)
@@ -1010,6 +1029,18 @@ class ReadinessService:
             ),
         }
 
+        package_completeness = self._package_completeness(
+            {
+                "governance_packages": len(governance_packages),
+                "semantic_package_present": semantic_package is not None,
+                "relationship_packages": len(relationship_packages),
+                "kpi_cluster_count": kpi_cluster_count,
+                "prompt_artifacts_rendered": prompt_artifacts_rendered,
+                "embeddings": embedding_status,
+                "readiness_snapshots": 0,
+            }
+        )
+
         if tables > 0:
             readiness_context = {
                 "database_name": database.display_name or database.name,
@@ -1037,6 +1068,7 @@ class ReadinessService:
                     "prompt_protection_enabled": prompt_protection_enabled,
                     "embedding_protection_enabled": embedding_protection_enabled,
                 },
+                "package_completeness": package_completeness,
             }
             for template_id in readiness_prompt_names:
                 try:
@@ -1054,6 +1086,7 @@ class ReadinessService:
             "relationships": relationship_stats,
             "relationship_intelligence": int(relationship_ai_rows),
             "ai_context": ai_context_stats,
+            "package_completeness": package_completeness,
             "governance": governance_stats,
             "kpi": kpi_stats,
             "embeddings": {
@@ -1100,6 +1133,7 @@ class ReadinessService:
                 "enabled_packages": self._enabled_packages(),
                 "total_enabled": len(self._enabled_packages()),
                 "expected_packages": len(self._readiness_dimensions()),
+                "completeness": breakdown.details.get("package_completeness", {}),
             },
         }
 
@@ -1122,7 +1156,7 @@ class ReadinessService:
                     {"role": "user", "content": rendered.user_prompt},
                 ],
                 request_kwargs={
-                    "max_completion_tokens": 1200,
+                    "response_format": {"type": "json_object"},
                     "response_format": {"type": "json_object"},
                 },
                 completeness_score=breakdown.metadata_readiness_score / 100.0,

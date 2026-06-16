@@ -8,6 +8,7 @@ from typing import List
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.schemas.api_schemas import APIResponse
 
 from app.db import get_db
 from app.db.session import db_session

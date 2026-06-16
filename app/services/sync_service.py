@@ -35,6 +35,7 @@ from app.models.metadata import (
 )
 from app.models.pipeline_execution import PipelineExecution, StageExecution
 from app.schemas.api_schemas import SyncResponse, SyncLogResponse
+from app.services.kpi_intelligence_service import KPIIntelligenceService
 from app.utils import normalize_column_max_length, safe_flush
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,7 @@ class SyncService:
 
     async def _run_tracked_stage(
         self,
-        pipeline_execution: PipelineExecution,
+        pipeline_execution_id: int,
         *,
         stage_name: str,
         execution_order: int,
@@ -60,7 +61,7 @@ class SyncService:
         runner,
     ) -> bool:
         stage_execution = StageExecution(
-            pipeline_execution_id=pipeline_execution.id,
+            pipeline_execution_id=pipeline_execution_id,
             database_id=db_id,
             stage_name=stage_name,
             status="running",
@@ -69,6 +70,7 @@ class SyncService:
         )
         self.db.add(stage_execution)
         await safe_flush(self.db)
+        stage_execution_id = stage_execution.id
         success = True
         stage_start = time.monotonic()
         try:
@@ -80,10 +82,12 @@ class SyncService:
         except Exception as exc:
             success = False
             await self.db.rollback()
-            stage_execution.status = "failed"
-            stage_execution.end_time = datetime.now(timezone.utc)
-            stage_execution.duration_seconds = time.monotonic() - stage_start
-            stage_execution.error_message = str(exc)
+            failed_stage = await self.db.get(StageExecution, stage_execution_id)
+            if failed_stage is not None:
+                failed_stage.status = "failed"
+                failed_stage.end_time = datetime.now(timezone.utc)
+                failed_stage.duration_seconds = time.monotonic() - stage_start
+                failed_stage.error_message = str(exc)
             logger.exception("Tracked stage failed | db_id=%s stage=%s", db_id, stage_name)
         await safe_flush(self.db)
         return success
@@ -149,6 +153,7 @@ class SyncService:
         self.db.add(sync_log)
         await safe_flush(self.db)
         await self.db.refresh(sync_log)
+        sync_log_id = sync_log.id
 
         # Update connection status
         conn.status = ConnectionStatus.active
@@ -162,11 +167,12 @@ class SyncService:
         self.db.add(pipeline_execution)
         await safe_flush(self.db)
         await self.db.refresh(pipeline_execution)
+        pipeline_execution_id = pipeline_execution.id
 
         start = time.monotonic()
         try:
             metadata_stage = StageExecution(
-                pipeline_execution_id=pipeline_execution.id,
+                pipeline_execution_id=pipeline_execution_id,
                 database_id=db_id,
                 stage_name="metadata",
                 status="running",
@@ -196,11 +202,11 @@ class SyncService:
             metadata_stage.duration_seconds = time.monotonic() - start
             await safe_flush(self.db)
 
-            stage_statuses: list[bool] = []
+            stage_successes: list[bool] = []
 
-            stage_statuses.append(
+            stage_successes.append(
                 await self._run_tracked_stage(
-                    pipeline_execution,
+                    pipeline_execution_id,
                     stage_name="governance",
                     execution_order=1,
                     db_id=db_id,
@@ -210,9 +216,9 @@ class SyncService:
             )
             await self.db.commit()
 
-            stage_statuses.append(
+            stage_successes.append(
                 await self._run_tracked_stage(
-                    pipeline_execution,
+                    pipeline_execution_id,
                     stage_name="semantics",
                     execution_order=2,
                     db_id=db_id,
@@ -222,9 +228,9 @@ class SyncService:
             )
             await self.db.commit()
 
-            stage_statuses.append(
+            stage_successes.append(
                 await self._run_tracked_stage(
-                    pipeline_execution,
+                    pipeline_execution_id,
                     stage_name="relationships",
                     execution_order=3,
                     db_id=db_id,
@@ -234,9 +240,9 @@ class SyncService:
             )
             await self.db.commit()
 
-            stage_statuses.append(
+            stage_successes.append(
                 await self._run_tracked_stage(
-                    pipeline_execution,
+                    pipeline_execution_id,
                     stage_name="kpi",
                     execution_order=4,
                     db_id=db_id,
@@ -246,9 +252,9 @@ class SyncService:
             )
             await self.db.commit()
 
-            stage_statuses.append(
+            stage_successes.append(
                 await self._run_tracked_stage(
-                    pipeline_execution,
+                    pipeline_execution_id,
                     stage_name="prompt",
                     execution_order=5,
                     db_id=db_id,
@@ -258,9 +264,9 @@ class SyncService:
             )
             await self.db.commit()
 
-            stage_statuses.append(
+            stage_successes.append(
                 await self._run_tracked_stage(
-                    pipeline_execution,
+                    pipeline_execution_id,
                     stage_name="embeddings",
                     execution_order=6,
                     db_id=db_id,
@@ -270,9 +276,9 @@ class SyncService:
             )
             await self.db.commit()
 
-            stage_statuses.append(
+            stage_successes.append(
                 await self._run_tracked_stage(
-                    pipeline_execution,
+                    pipeline_execution_id,
                     stage_name="readiness",
                     execution_order=7,
                     db_id=db_id,
@@ -328,12 +334,12 @@ class SyncService:
             sync_log.tables_synced = counts["tables"]
             sync_log.columns_synced = counts["columns"]
             sync_log.relationships_synced = counts["relationships"]
-            pipeline_execution.status = "completed" if all(stage_statuses) else "failed"
+            pipeline_execution.status = "completed" if all(stage_successes) else "failed"
             pipeline_execution.end_time = datetime.now(timezone.utc)
             pipeline_execution.duration_seconds = elapsed
             pipeline_execution.model_name = None
             pipeline_execution.token_usage_json = None
-            pipeline_execution.error_message = None if all(stage_statuses) else "One or more stages failed"
+            pipeline_execution.error_message = None if all(stage_successes) else "One or more stages failed"
 
             conn.status = ConnectionStatus.active
             conn.last_sync_at = datetime.now(timezone.utc)
@@ -368,7 +374,7 @@ class SyncService:
             sync_log.error_message = error_msg[:1000]
 
             failure_log = SyncLogResponse(
-                id=sync_log.id,
+                id=sync_log_id,
                 connected_db_id=sync_log.connected_db_id,
                 status=sync_log.status.value,
                 started_at=sync_log.started_at,

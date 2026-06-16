@@ -87,7 +87,7 @@ class PromptBuilder:
             lines.append(f"Rows: {table.row_count:,}")
         lines.append("")
         lines.append("Columns:")
-        for col in sorted(table.columns, key=lambda c: c.ordinal_position or 0):
+        for col in sorted(table.columns or [], key=lambda c: c.ordinal_position or 0):
             col_str = f"  * {col.name}: {col.data_type}"
             constraints = []
             if col.is_primary_key:
@@ -106,7 +106,7 @@ class PromptBuilder:
         if table.relationships_from:
             lines.append("")
             lines.append("Relationships:")
-            for rel in table.relationships_from:
+            for rel in table.relationships_from or []:
                 lines.append(f"  * {rel.column_name} -> {rel.referenced_table_name}.{rel.referenced_column_name}")
         return lines
 

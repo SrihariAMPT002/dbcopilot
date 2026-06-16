@@ -32,6 +32,7 @@ from app.models.metadata import (
     SchemaSemantic,
     SemanticPackage,
 )
+from app.services.database_guard import ensure_connected
 from app.models.kpi_package import KPIPackage
 from app.services.ai_observability_service import AIObservabilityService
 from app.services.kpi_candidate_service import KPICandidateService
@@ -576,7 +577,7 @@ class KPIIntelligenceService:
                 {"role": "user", "content": rendered_prompt.user_prompt},
             ],
             request_kwargs={
-                "max_completion_tokens": 4000,
+                "response_format": {"type": "json_object"},
                 "response_format": {"type": "json_object"},
             },
             completeness_score=0.0,
@@ -612,7 +613,8 @@ class KPIIntelligenceService:
         db_semantic, table_semantics = semantics
         kpis: list[dict[str, Any]] = []
         for semantic, table in table_semantics:
-            measurable_cols = [c for c in table.columns if any(token in c.name.lower() for token in ["count", "amount", "total", "revenue", "price", "qty", "quantity", "balance", "score"])]
+            table_columns = list(table.columns or [])
+            measurable_cols = [c for c in table_columns if any(token in c.name.lower() for token in ["count", "amount", "total", "revenue", "price", "qty", "quantity", "balance", "score"])]
             if not measurable_cols:
                 continue
             base_name = f"{table.name} performance"
@@ -631,7 +633,7 @@ class KPIIntelligenceService:
                     "formula": f"SUM({measurable_cols[0].name})",
                     "source_tables": [f"{table.schema.name}.{table.name}"],
                     "source_columns": [col.name for col in measurable_cols[:5]],
-                    "dimensions": [c.name for c in table.columns[:5] if c.name not in {col.name for col in measurable_cols}],
+                    "dimensions": [c.name for c in table_columns[:5] if c.name not in {col.name for col in measurable_cols}],
                     "filters": [],
                     "confidence": round(min(0.95, confidence), 2),
                     "owner": db_semantic.business_domain if db_semantic and db_semantic.business_domain else None,
@@ -848,7 +850,16 @@ class KPIIntelligenceService:
         await self.db.flush()
 
     async def _fetch_database(self, database_id: int) -> ConnectedDatabase:
-        result = await self.db.execute(select(ConnectedDatabase).where(ConnectedDatabase.id == database_id))
+        result = await self.db.execute(
+            select(ConnectedDatabase).options(
+                selectinload(ConnectedDatabase.schemas)
+                .selectinload(DatabaseSchema.tables)
+                .selectinload(DatabaseTable.columns),
+                selectinload(ConnectedDatabase.schemas)
+                .selectinload(DatabaseSchema.tables)
+                .selectinload(DatabaseTable.relationships_from),
+            ).where(ConnectedDatabase.id == database_id)
+        )
         database = result.scalars().first()
         if not database:
             raise ValueError(f"Database {database_id} not found")

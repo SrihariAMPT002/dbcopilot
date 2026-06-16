@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # from app.api.routes import exports as exports_route
 from app.models.artifact_manifest import ArtifactManifest, ArtifactType, ExportStatus
 from app.models.metadata import ConnectedDatabase
+from app.services.database_guard import get_database_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -268,10 +269,7 @@ class ArtifactService:
         return 1 if latest is None else int(latest.version) + 1
 
     async def _ensure_database(self, db_id: int) -> None:
-        result = await self.db.execute(
-            select(ConnectedDatabase.id).where(ConnectedDatabase.id == db_id)
-        )
-        if result.scalar_one_or_none() is None:
+        if await get_database_or_none(self.db, db_id) is None:
             raise ValueError(f"Database {db_id} not found")
 
     @staticmethod

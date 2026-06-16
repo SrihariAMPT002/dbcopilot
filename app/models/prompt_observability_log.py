@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.metadata import Base
@@ -20,9 +20,15 @@ class PromptObservabilityLog(Base):
     )
     trace_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    estimated_input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    actual_input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    estimated_output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    actual_output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     prompt_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     completion_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     reasoning_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    prompt_size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    completion_truncated: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     latency_ms: Mapped[Optional[float]] = mapped_column(nullable=True)
     finish_reason: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     execution_status: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
@@ -30,4 +36,3 @@ class PromptObservabilityLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     prompt_package = relationship("PromptPackage", back_populates="observability_logs")
-

@@ -29,7 +29,10 @@ class GraphFeatureService:
         degree = dict(graph.degree())
         betweenness = nx.betweenness_centrality(undirected) if undirected.number_of_nodes() > 1 else {}
         closeness = nx.closeness_centrality(undirected) if undirected.number_of_nodes() > 1 else {}
-        pagerank = nx.pagerank(undirected) if undirected.number_of_nodes() > 1 else {}
+        try:
+            pagerank = nx.pagerank(undirected) if undirected.number_of_nodes() > 1 else {}
+        except Exception:
+            pagerank = {node: 0.0 for node in undirected.nodes()}
         communities = self._communities(undirected)
         hubs = self._hub_analysis(degree, pagerank, tables)
         density = nx.density(undirected) if undirected.number_of_nodes() > 1 else 0.0
@@ -87,4 +90,3 @@ class GraphFeatureService:
             }
             for idx, table in enumerate(ranked[:10])
         ]
-

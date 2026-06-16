@@ -18,8 +18,9 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
@@ -40,6 +41,7 @@ from app.models.metadata import (
     BusinessGlossary,
     SemanticGenerationStatus,
 )
+from app.services.database_guard import ensure_connected
 from app.schema_engine.embeddings import _traceable
 from app.models.metadata import SchemaSemantic
 from app.services.ai_observability_service import AIObservabilityService, AIObservationResult
@@ -48,6 +50,7 @@ from app.services.semantic_feature_service import SemanticFeatureService
 from app.services.domain_inference_service import DomainInferenceService
 from app.services.semantic_validator_service import SemanticValidatorService
 from app.services.business_glossary_service import BusinessGlossaryService
+from app.services.schema_chunking_service import SchemaChunkingService
 from app.utils import safe_flush
 
 logger = logging.getLogger(__name__)
@@ -55,6 +58,8 @@ logger = logging.getLogger(__name__)
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 MAX_TABLES_IN_PACKAGE = 40
+MAX_SCHEMAS_IN_PACKAGE = 8
+MAX_RELATIONSHIPS_IN_PACKAGE = 120
 CONFIDENCE_POOR_NAMING_PENALTY = 0.15
 CONFIDENCE_INCOMPLETE_RELATIONSHIPS_PENALTY = 0.10
 
@@ -122,6 +127,11 @@ class DatabaseSemanticService:
         self.domain_inference = DomainInferenceService()
         self.semantic_validator = SemanticValidatorService()
         self.glossary_service = BusinessGlossaryService()
+        self.chunker = SchemaChunkingService(
+            max_schemas=MAX_SCHEMAS_IN_PACKAGE,
+            max_tables_per_schema=MAX_TABLES_IN_PACKAGE,
+            max_columns_per_table=12,
+        )
 
     @staticmethod
     def _trace_id_as_string(trace_id: Any) -> str | None:
@@ -282,7 +292,7 @@ class DatabaseSemanticService:
             raise ValueError(f"Database {source_id} not found")
 
         # Check if database has metadata
-        if not database.schemas or len(database.schemas) == 0:
+        if await self._schema_count(source_id) <= 0:
             logger.warning("Database %d has no schemas", source_id)
             raise ValueError("no_metadata")
 
@@ -301,7 +311,7 @@ class DatabaseSemanticService:
         response_text = ai_result.content or ""
         enrichment = self._parse_enrichment_response(source_id, response_text)
         enrichment.trace_id = self._trace_id_as_string(getattr(ai_result, "trace_id", None))
-        enrichment.confidence_score = self._calculate_confidence_score(database, enrichment)
+        enrichment.confidence_score = await self._calculate_confidence_score(database, enrichment)
 
         logger.info(
             "Completed semantic generation for database %d with confidence %.2f",
@@ -333,7 +343,7 @@ class DatabaseSemanticService:
         )
 
         try:
-            if not database.schemas or len(database.schemas) == 0:
+            if await self._schema_count(source_id) <= 0:
                 logger.warning("Database %d has no schemas", source_id)
                 semantic_row, _ = await self.get_or_create_semantic(
                     source_id,
@@ -355,7 +365,7 @@ class DatabaseSemanticService:
                 )
                 raise ValueError("empty_ai_response")
             enrichment = self._parse_enrichment_response(source_id, response_text)
-            enrichment.confidence_score = self._calculate_confidence_score(database, enrichment)
+            enrichment.confidence_score = await self._calculate_confidence_score(database, enrichment)
             enrichment.trace_id = self._trace_id_as_string(getattr(ai_result, "trace_id", None))
             enrichment.prompt_id = getattr(ai_result, "prompt_id", None)
             enrichment.prompt_version = getattr(ai_result, "prompt_version", None)
@@ -390,7 +400,6 @@ class DatabaseSemanticService:
         """Fetch database with all schemas, tables, columns, and relationships loaded."""
         result = await self.db.execute(
             select(ConnectedDatabase)
-            .where(ConnectedDatabase.id == source_id)
             .options(
                 selectinload(ConnectedDatabase.schemas)
                 .selectinload(DatabaseSchema.tables)
@@ -400,10 +409,25 @@ class DatabaseSemanticService:
                 .selectinload(DatabaseTable.relationships_from),
                 selectinload(ConnectedDatabase.schemas)
                 .selectinload(DatabaseSchema.tables)
-                .selectinload(DatabaseTable.schema),
+                .selectinload(DatabaseTable.embedding),
             )
+            .where(ConnectedDatabase.id == source_id)
         )
-        return result.scalars().unique().first()
+        database = result.scalars().unique().first()
+        if not database:
+            return None
+        return database
+
+    async def _fetch_schemas(self, database_id: int) -> list[DatabaseSchema]:
+        result = await self.db.execute(
+            select(DatabaseSchema)
+            .options(
+                selectinload(DatabaseSchema.tables).selectinload(DatabaseTable.columns),
+                selectinload(DatabaseSchema.tables).selectinload(DatabaseTable.relationships_from),
+            )
+            .where(DatabaseSchema.connected_db_id == database_id)
+        )
+        return list(result.scalars().unique().all())
 
     # ── Semantic package input ─────────────────────────────────────────────
 
@@ -411,62 +435,36 @@ class DatabaseSemanticService:
         """Build compact metadata + governance package input for business intelligence generation."""
         governance_package = await ColumnSemanticService(self.db).build_governance_package(database.id)
         pii_map = await ColumnSemanticService(self.db).get_pii_map(database.id)
+        schema_count = await self._schema_count(database.id)
+        table_map = await self._table_name_map(database.id)
         relationships_result = await self.db.execute(
             select(DatabaseRelationship).join(DatabaseTable, DatabaseRelationship.table_id == DatabaseTable.id)
         )
         relationships = relationships_result.scalars().all()
+        relationship_samples = relationships[:MAX_RELATIONSHIPS_IN_PACKAGE]
         domain_scores = self.domain_inference.infer(
             governance_package=governance_package,
             relationship_context=[
-                {"source_table": rel.table.name if rel.table else None, "target_table": rel.referenced_table_name}
-                for rel in relationships
+                {"source_table": table_map.get(rel.table_id), "target_table": rel.referenced_table_name}
+                for rel in relationship_samples
             ],
-            statistics={"schema_count": len(database.schemas or [])},
+            statistics={"schema_count": schema_count},
         )
 
-        tables: list[dict[str, Any]] = []
-        total_columns = 0
-        total_relationships = 0
-
-        for schema in database.schemas or []:
-            for table in (schema.tables or [])[:MAX_TABLES_IN_PACKAGE]:
-                pii_columns = []
-                for column in table.columns or []:
-                    total_columns += 1
-                    semantic_row = pii_map.get(column.id)
-                    if semantic_row and semantic_row.is_pii:
-                        pii_columns.append(
-                            {
-                                "name": column.name,
-                                "pii_type": semantic_row.pii_type,
-                                "risk_level": semantic_row.risk_level,
-                                "business_meaning": semantic_row.business_meaning,
-                            }
-                        )
-                total_relationships += len(table.relationships_from or [])
-                table_entry = {
-                    "schema_name": schema.name,
-                    "table_name": table.name,
-                    "table_type": table.table_type.value if hasattr(table.table_type, "value") else str(table.table_type),
-                    "column_count": len(table.columns or []),
-                    "relationship_count": len(table.relationships_from or []),
-                    "pii_column_count": len(pii_columns),
-                    "pii_columns": pii_columns,
-                }
-                table_description = self._normalize_description(table.description)
-                if table_description:
-                    table_entry["description"] = table_description
-                tables.append(table_entry)
-
+        hierarchical_context = self.chunker.build(database, pii_map=pii_map)
         metadata = {
             "database_name": database.display_name or database.name,
             "database_type": database.db_type.value,
-            "schema_count": len(database.schemas or []),
-            "table_count": sum(len(schema.tables or []) for schema in (database.schemas or [])),
-            "column_count": total_columns,
-            "relationship_count": total_relationships,
-            "naming_patterns": self._analyze_naming_patterns(database),
-            "tables": tables,
+            "schema_count": hierarchical_context["totals"]["schema_count"],
+            "table_count": hierarchical_context["totals"]["table_count"],
+            "column_count": hierarchical_context["totals"]["column_count"],
+            "relationship_count": hierarchical_context["totals"]["relationship_count"],
+            "relationship_chunk_count": (len(relationships) + MAX_RELATIONSHIPS_IN_PACKAGE - 1) // MAX_RELATIONSHIPS_IN_PACKAGE if relationships else 0,
+            "relationship_truncated": len(relationships) > MAX_RELATIONSHIPS_IN_PACKAGE,
+            "naming_patterns": await self._analyze_naming_patterns(database.id),
+            "schema_summaries": hierarchical_context["schema_summaries"],
+            "schema_chunk_count": hierarchical_context["schema_chunk_count"],
+            "truncated": hierarchical_context["truncated"],
         }
         return {
             "metadata": metadata,
@@ -478,9 +476,14 @@ class DatabaseSemanticService:
                     "column_name": rel.column_name,
                     "referenced_column_name": rel.referenced_column_name,
                 }
-                for rel in relationships
+                for rel in relationship_samples
             ],
             "domain_scores": domain_scores,
+            "relationship_summary": {
+                "total_relationships": len(relationships),
+                "sampled_relationships": len(relationship_samples),
+                "truncated": len(relationships) > MAX_RELATIONSHIPS_IN_PACKAGE,
+            },
         }
 
     @staticmethod
@@ -491,7 +494,7 @@ class DatabaseSemanticService:
         text = description.strip()
         return text or None
 
-    def _analyze_naming_patterns(self, database: ConnectedDatabase) -> dict[str, Any]:
+    async def _analyze_naming_patterns(self, database_id: int) -> dict[str, Any]:
         """Analyze naming patterns to assess metadata quality."""
         patterns = {
             "table_prefixes": set(),
@@ -502,15 +505,12 @@ class DatabaseSemanticService:
         poor_naming_count = 0
         total_tables = 0
 
-        for schema in database.schemas or []:
+        schemas = await self._fetch_schemas(database_id)
+        for schema in schemas:
             for table in schema.tables or []:
                 total_tables += 1
-
-                # Check for poor naming (e.g., tbl_001, col_a)
                 if self._is_poor_name(table.name):
                     poor_naming_count += 1
-
-                # Extract table prefix
                 parts = table.name.split("_")
                 if len(parts) > 1:
                     patterns["table_prefixes"].add(parts[0])
@@ -523,6 +523,31 @@ class DatabaseSemanticService:
             patterns["poor_naming_ratio"] = poor_naming_ratio
 
         return patterns
+
+    async def _schema_count(self, database_id: int) -> int:
+        result = await self.db.execute(
+            select(func.count(DatabaseSchema.id)).where(DatabaseSchema.connected_db_id == database_id)
+        )
+        return int(result.scalar_one() or 0)
+
+    async def _fetch_schemas(self, database_id: int) -> list[DatabaseSchema]:
+        result = await self.db.execute(
+            select(DatabaseSchema)
+            .options(
+                selectinload(DatabaseSchema.tables).selectinload(DatabaseTable.columns),
+                selectinload(DatabaseSchema.tables).selectinload(DatabaseTable.relationships_from),
+            )
+            .where(DatabaseSchema.connected_db_id == database_id)
+        )
+        return list(result.scalars().unique().all())
+
+    async def _table_name_map(self, database_id: int) -> dict[int, str]:
+        result = await self.db.execute(
+            select(DatabaseTable.id, DatabaseTable.name)
+            .join(DatabaseSchema, DatabaseTable.schema_id == DatabaseSchema.id)
+            .where(DatabaseSchema.connected_db_id == database_id)
+        )
+        return {int(table_id): str(name) for table_id, name in result.all()}
 
     def _is_poor_name(self, name: str) -> bool:
         """Check if a name suggests poor schema design (e.g., 'tbl_001', 'col_a')."""
@@ -568,6 +593,7 @@ class DatabaseSemanticService:
             "metadata": semantic_input.get("metadata") or {},
             "governance_package": semantic_input.get("governance_package") or {},
             "relationships": semantic_input.get("relationships") or [],
+            "relationship_summary": semantic_input.get("relationship_summary") or {},
             "domain_scores": semantic_input.get("domain_scores") or {},
             "database_name": database.display_name or database.name,
         }
@@ -740,7 +766,8 @@ class DatabaseSemanticService:
             return
 
         table_lookup: dict[tuple[str, str], DatabaseTable] = {}
-        for schema in database.schemas or []:
+        schemas = await self._fetch_schemas(database.id)
+        for schema in schemas:
             for table in schema.tables or []:
                 table_lookup[(schema.name, table.name)] = table
 
@@ -912,7 +939,7 @@ class DatabaseSemanticService:
 
     # ── Confidence scoring ─────────────────────────────────────────────────
 
-    def _calculate_confidence_score(
+    async def _calculate_confidence_score(
         self, database: ConnectedDatabase, enrichment: DatabaseSemanticEnrichment
     ) -> float:
         """
@@ -928,7 +955,7 @@ class DatabaseSemanticService:
         score = 1.0
 
         # Penalty for poor naming
-        naming_patterns = self._analyze_naming_patterns(database)
+        naming_patterns = await self._analyze_naming_patterns(database.id)
         if naming_patterns.get("has_poor_naming"):
             poor_ratio = naming_patterns.get("poor_naming_ratio", 0.3)
             penalty = CONFIDENCE_POOR_NAMING_PENALTY * min(poor_ratio, 1.0)
@@ -936,10 +963,9 @@ class DatabaseSemanticService:
             logger.debug("Applied poor naming penalty: %.2f", penalty)
 
         # Penalty for missing relationships
-        total_tables = sum(len(s.tables or []) for s in (database.schemas or []))
-        total_relationships = sum(
-            len(t.relationships_from or []) for s in (database.schemas or []) for t in (s.tables or [])
-        )
+        schemas = await self._fetch_schemas(database.id)
+        total_tables = sum(len(s.tables or []) for s in schemas)
+        total_relationships = sum(len(t.relationships_from or []) for s in schemas for t in (s.tables or []))
 
         if total_tables > 0:
             relationship_ratio = total_relationships / total_tables if total_tables > 0 else 0
@@ -973,10 +999,11 @@ class DatabaseSemanticService:
                 for item in enrichment.table_semantics:
                     schema_name = str(item.get("schema_name") or "")
                     table_name = str(item.get("table_name") or "")
+                    schemas = await self._fetch_schemas(database.id)
                     table = next(
                         (
                             tbl
-                            for schema in database.schemas or []
+                            for schema in schemas
                             for tbl in schema.tables or []
                             if schema.name == schema_name and tbl.name == table_name
                         ),

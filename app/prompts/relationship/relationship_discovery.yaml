@@ -39,7 +39,7 @@ user_prompt: |
   Return JSON only:
   {
     "cluster_summary": "one sentence",
-    "cluster_confidence": 0.0,
+    "confidence_score": 0.0,
     "entity_graph": [],
     "hidden_relationships": [],
     "upstream_dependencies": [],
@@ -48,4 +48,4 @@ user_prompt: |
   }
 constraints:
   output_format: json
-  max_completion_tokens: 8000
+  max_completion_tokens: 20000

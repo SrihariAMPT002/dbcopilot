@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.agent_memory import AgentMemory
 from app.models.metadata import ConnectedDatabase
+from app.services.database_guard import ensure_connected
 from app.schema_engine.embeddings import get_qdrant_client, qmodels
 from app.services.ai_observability_service import AIObservabilityService
 from app.services.vector_store_service import VectorStoreService
@@ -31,10 +32,7 @@ class AgentMemoryService:
         return json.dumps(value, ensure_ascii=False, default=str)
 
     async def _ensure_database(self, database_id: int) -> ConnectedDatabase:
-        database = await self.db.get(ConnectedDatabase, database_id)
-        if not database:
-            raise ValueError(f"Database {database_id} not found")
-        return database
+        return await ensure_connected(self.db, database_id)
 
     async def record_memory(
         self,

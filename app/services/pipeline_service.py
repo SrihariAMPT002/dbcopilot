@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.metadata import ConnectedDatabase, DatabaseLifecycleStatus
 from app.models.pipeline_job import JobStatus, JobType, PipelineJob
+from app.services.database_guard import ensure_connected
 
 
 @dataclass
@@ -169,14 +170,9 @@ class PipelineService:
         return result.scalars().all()
 
     async def _ensure_database(self, database_id: int) -> None:
-        result = await self.db.execute(
-            select(ConnectedDatabase).where(ConnectedDatabase.id == database_id)
-        )
-        row = result.scalars().first()
-        if row is None:
-            raise ValueError(f"Database {database_id} not found")
+        row = await ensure_connected(self.db, database_id)
         lifecycle_status = getattr(row, "lifecycle_status", DatabaseLifecycleStatus.active)
-        if lifecycle_status != DatabaseLifecycleStatus.active:
+        if getattr(lifecycle_status, "value", str(lifecycle_status)) != DatabaseLifecycleStatus.active.value:
             raise ValueError(
                 f"Database {database_id} is {getattr(lifecycle_status, 'value', str(lifecycle_status))} and cannot run jobs"
             )

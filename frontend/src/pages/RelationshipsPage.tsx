@@ -1,13 +1,15 @@
-import { Network, GitBranch, Workflow, Search, Layers, BarChart3, BadgeInfo } from "lucide-react";
-import { PageHeader } from "@/components/page-header";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { CoverageBar } from "@/components/coverage-bar";
-import { useRelationships } from "@/hooks/useRelationships";
+import { Network, Workflow, Layers, BarChart3, BadgeInfo, GitBranch } from "lucide-react";
+import { useMemo } from "react";
 import { useDatabaseContext } from "@/context/database-context";
+import { useRelationships } from "@/hooks/useRelationships";
+import { PageHeader } from "@/components/page-header";
+import { MetricCard } from "@/components/metric-card";
 import { TraceLink } from "@/components/common/TraceLink";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CoverageBar } from "@/components/coverage-bar";
 
-function MetricItem({ label, value }: { label: string; value: string | number }) {
+function Stat({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="rounded-md border border-border bg-muted/20 p-3">
       <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
@@ -25,22 +27,47 @@ export function RelationshipsPage() {
   const evidence = selectedCluster?.evidence ?? [];
   const graphMetrics = selectedCluster?.graph_metrics ?? {};
   const confidenceDetails = selectedCluster?.confidence_details ?? {};
+  const selectedConfidence = selectedCluster?.confidence_score ?? selectedCluster?.cluster_confidence ?? 0;
+  const evidenceChips = useMemo(
+    () => evidence.flatMap((item: any) => [item.metric, item.type, item.source]).filter(Boolean).slice(0, 12),
+    [evidence],
+  );
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        eyebrow="Intelligence"
-        title="Relationships"
-        description="Cluster summaries, graph metrics, evidence, and lifecycle flows from persisted relationship packages."
-      />
+      <PageHeader eyebrow="Intelligence" title="Relationships" description="Cluster summaries, graph metrics, evidence, and lifecycle flows from persisted relationship packages." />
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard label="Clusters" value={String(clusters.length)} icon={Network} tone="info" />
+        <MetricCard label="Graph nodes" value={String((graphMetrics as any).node_count ?? 0)} icon={Layers} tone="success" />
+        <MetricCard label="Graph edges" value={String((graphMetrics as any).edge_count ?? 0)} icon={GitBranch} tone="default" />
+        <MetricCard label="Cluster confidence" value={`${Math.round(selectedConfidence * 100)}%`} icon={BarChart3} tone="warning" />
+      </section>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-1">
-        <Card>
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <Card className="xl:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">Relationship packages</CardTitle>
             <CardDescription>Hidden relationships, process flows, lifecycle flows, and cluster scoring.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <section className="space-y-2">
+              <div className="text-sm font-semibold text-foreground">Cluster dependencies</div>
+              {clusters.length ? (
+                <div className="space-y-2">
+                  {clusters.slice(0, 5).map((c) => {
+                    const clusterConfidence = c.confidence_score ?? c.cluster_confidence ?? 0;
+                    return (
+                      <div key={c.cluster_id} className="rounded-md border border-border bg-card p-3">
+                        <div className="text-sm font-medium text-foreground">{c.cluster_summary ?? c.domain_name ?? c.cluster_id ?? "cluster"}</div>
+                        <CoverageBar value={Math.round(clusterConfidence * 100)} className="mt-2" />
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">No dependencies available.</div>
+              )}
+            </section>
             <section className="space-y-2">
               <div className="text-sm font-semibold text-foreground">Hidden relationships</div>
               {clusters.length ? clusters.flatMap((c) => (c.hidden_relationships ?? []).map((r) => ({ cluster_id: c.cluster_id, relationship: r }))).slice(0, 8).map((item: any, i: number) => (
@@ -54,63 +81,46 @@ export function RelationshipsPage() {
               )) : <div className="text-sm text-muted-foreground">No relationship packages found yet.</div>}
             </section>
             <section className="space-y-2">
-              <div className="text-sm font-semibold text-foreground">Process flows</div>
-              <div className="text-sm text-muted-foreground">{clusters.length ? (clusters[0].business_process_flows?.map((p: any) => p.summary ?? JSON.stringify(p)) ?? []).join(" | ") : "No process flows available."}</div>
-            </section>
-            <section className="space-y-2">
               <div className="text-sm font-semibold text-foreground">Lifecycle flows</div>
-              <div className="text-sm text-muted-foreground">{clusters.length ? (clusters[0].lifecycle_flows?.map((p: any) => p.summary ?? JSON.stringify(p)) ?? []).join(" | ") : "No lifecycle flows available."}</div>
-            </section>
-            <section className="space-y-2">
-              <div className="text-sm font-semibold text-foreground">Cluster dependencies</div>
-              {clusters.length ? <div className="space-y-2">{clusters.slice(0, 5).map((c) => (<div key={c.cluster_id} className="rounded-md border border-border bg-card p-3"><div className="text-sm font-medium text-foreground">{c.cluster_summary ?? c.domain_name ?? c.cluster_id}</div><CoverageBar value={Math.round((c.cluster_confidence ?? 0) * 100)} className="mt-2" /></div>))}</div> : <div className="text-sm text-muted-foreground">No dependencies available.</div>}
-            </section>
-            <section className="space-y-2">
-              <div className="text-sm font-semibold text-foreground">Cluster metrics</div>
-              {selectedCluster ? <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"><MetricItem label="Cluster confidence" value={`${Math.round((selectedCluster.cluster_confidence ?? 0) * 100)}%`} /><MetricItem label="Cluster size" value={selectedCluster.cluster_label ?? selectedCluster.cluster_id} /><MetricItem label="Graph nodes" value={String((graphMetrics as any).node_count ?? 0)} /><MetricItem label="Graph edges" value={String((graphMetrics as any).edge_count ?? 0)} /><MetricItem label="Density" value={String((graphMetrics as any).density ?? 0)} /><MetricItem label="Communities" value={String((graphMetrics as any).community_count ?? 0)} /><MetricItem label="Execution status" value={selectedCluster.analysis_status ?? "unknown"} /><MetricItem label="Confidence source" value={String((confidenceDetails as any).ai_confidence ?? selectedCluster.cluster_confidence ?? 0)} /></div> : <div className="text-sm text-muted-foreground">No cluster metrics available yet.</div>}
-            </section>
-            <section className="space-y-2">
-              <div className="text-sm font-semibold text-foreground">Evidence</div>
-              {evidence.length ? evidence.slice(0, 12).map((item: any, index: number) => (<div key={`${item.source ?? "evidence"}-${index}`} className="rounded-md border border-border bg-card p-3"><div className="flex flex-wrap items-center gap-2"><div className="text-sm font-medium text-foreground">{item.source ?? "graph"}</div><Badge variant="outline">{item.metric ?? item.type ?? "evidence"}</Badge></div><pre className="mt-2 overflow-x-auto text-xs text-muted-foreground">{JSON.stringify(item, null, 2)}</pre></div>)) : <div className="text-sm text-muted-foreground">No persisted relationship evidence yet.</div>}
+              <div className="flex flex-wrap gap-2">
+                {selectedCluster?.lifecycle_flows?.length ? selectedCluster.lifecycle_flows.slice(0, 8).map((flow: any, index: number) => (
+                  <Badge key={`${flow.name ?? index}`} variant="outline" className="text-[10px] uppercase">
+                    {flow.summary ?? flow.name ?? "lifecycle flow"}
+                  </Badge>
+                )) : <div className="text-sm text-muted-foreground">No lifecycle flows available.</div>}
+              </div>
             </section>
           </CardContent>
         </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Relationship traceability</CardTitle>
-          <CardDescription>Cluster confidence, graph metrics, evidence, and confidence details for the selected database.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4 lg:grid-cols-2">
-          <div className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              <MetricItem label="Cluster confidence" value={`${Math.round((selectedCluster?.cluster_confidence ?? 0) * 100)}%`} />
-              <MetricItem label="Graph nodes" value={String((graphMetrics as any).node_count ?? 0)} />
-              <MetricItem label="Graph edges" value={String((graphMetrics as any).edge_count ?? 0)} />
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Relationship evidence</CardTitle>
+            <CardDescription>Graph metrics, evidence chips, and confidence details.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-1">
+              <Stat label="Cluster size" value={selectedCluster?.cluster_label ?? selectedCluster?.cluster_id ?? "n/a"} />
+              <Stat label="Execution status" value={selectedCluster?.analysis_status ?? "unknown"} />
+              <Stat label="Confidence source" value={String((confidenceDetails as { ai_confidence?: number } | undefined)?.ai_confidence ?? selectedConfidence)} />
+              <Stat label="Communities" value={String((graphMetrics as { community_count?: number } | undefined)?.community_count ?? 0)} />
             </div>
-            <div className="space-y-2">
-              <div className="text-xs uppercase tracking-wider text-muted-foreground">Evidence payload</div>
-              <pre className="max-h-64 overflow-auto rounded-md border border-border bg-muted/20 p-3 text-[11px] leading-5 text-muted-foreground">
-                {JSON.stringify(evidence ?? [], null, 2)}
-              </pre>
-              <div className="mt-2">
-                <TraceLink traceId={(confidenceDetails as any)?.trace_id} label="Open trace" className="text-xs" />
+            <div>
+              <div className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">Evidence chips</div>
+              <div className="flex flex-wrap gap-2">
+                {evidenceChips.length ? evidenceChips.map((chip) => (
+                  <Badge key={chip} variant="outline" className="text-[10px] uppercase">
+                    {chip}
+                  </Badge>
+                )) : <div className="text-sm text-muted-foreground">No persisted relationship evidence yet.</div>}
               </div>
             </div>
-          </div>
-          <div className="space-y-3">
-            <div className="text-xs uppercase tracking-wider text-muted-foreground">Confidence details</div>
-            <pre className="max-h-64 overflow-auto rounded-md border border-border bg-muted/20 p-3 text-[11px] leading-5 text-muted-foreground">
-              {JSON.stringify(confidenceDetails ?? {}, null, 2)}
-            </pre>
-            <div className="text-xs uppercase tracking-wider text-muted-foreground">Lifecycle flows</div>
-            <pre className="max-h-48 overflow-auto rounded-md border border-border bg-muted/20 p-3 text-[11px] leading-5 text-muted-foreground">
-              {JSON.stringify(selectedCluster?.lifecycle_flows ?? [], null, 2)}
-            </pre>
-          </div>
-        </CardContent>
-      </Card>
+            <div className="rounded-md border border-border bg-muted/20 p-3">
+              <div className="text-xs uppercase tracking-wider text-muted-foreground">Trace</div>
+              <TraceLink traceId={(confidenceDetails as any)?.trace_id ?? selectedCluster?.trace_id} label="Open trace" className="mt-2 text-xs" />
+            </div>
+          </CardContent>
+        </Card>
+      </section>
     </div>
   );
 }

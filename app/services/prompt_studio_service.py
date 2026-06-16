@@ -25,6 +25,8 @@ from app.models.artifact_manifest import ArtifactType
 from app.models.column_semantic import ColumnSemantic
 from app.models.metadata import ConnectedDatabase, DatabaseSchema, DatabaseSemantic, DatabaseTable
 from app.models.metadata import KPIIntelligence, GovernancePackage, RelationshipPackage, SchemaRelationshipGraph, SemanticPackage
+from app.services.database_guard import ensure_connected
+from app.services.schema_chunking_service import SchemaChunkingService
 from app.services.ai_observability_service import AIObservabilityService
 from app.schema_engine.embeddings import EmbeddingEngine
 from app.services.artifact_service import ArtifactService
@@ -84,6 +86,7 @@ class PromptStudioService:
         self.db = db
         self.registry: PromptRegistry = get_prompt_registry()
         self.artifact_service = ArtifactService(db)
+        self.chunker = SchemaChunkingService(max_schemas=8, max_tables_per_schema=8, max_columns_per_table=12)
 
     @staticmethod
     def _is_sensitive_field(
@@ -182,8 +185,9 @@ class PromptStudioService:
             "governance": context.get("governance", {}),
             "readiness": context.get("readiness", {}),
             "business_glossary": (context.get("semantic") or {}).get("business_glossary", []),
-            "tables": context.get("tables", []),
-            "columns": context.get("columns", []),
+            "schema_summaries": context.get("schema_summaries", []),
+            "table_overview": context.get("tables", [])[:12],
+            "column_overview": context.get("columns", [])[:60],
             "schema_count": context.get("schema_count", 0),
             "table_count": context.get("table_count", 0),
             "column_count": context.get("column_count", 0),
@@ -202,6 +206,7 @@ class PromptStudioService:
                 "relationship_packages": context.get("relationship_packages", []),
                 "kpi": context.get("kpi", {}),
                 "readiness": context.get("readiness", {}),
+                "schema_summaries": context.get("schema_summaries", []),
                 "instruction": (
                     "Generate a production-grade prompt optimized for LLM use. "
                     "Remove duplicate facts, compress metadata, preserve business meaning, "
@@ -385,7 +390,7 @@ class PromptStudioService:
                     ),
                 },
             ],
-            request_kwargs={"max_completion_tokens": 2400},
+            request_kwargs={},
             completeness_score=max(0.25, self._compute_quality(generation_context)["context_quality_score"]),
             coverage_score=self._compute_quality(generation_context)["governance_coverage"],
             confidence_score=self._compute_quality(generation_context)["pii_coverage"],
@@ -515,6 +520,7 @@ class PromptStudioService:
         governance_packages = await self._fetch_governance_packages(database_id)
         relationship_packages = await self._fetch_relationship_packages(database_id)
         kpi_summary = await self._fetch_kpi_summary(database_id)
+        hierarchy = self.chunker.build(database, pii_map=pii_map)
         relationship_intelligence = self._relationship_intelligence_from_packages(relationship_packages)
         try:
             embedding_status = await EmbeddingEngine(self.db).get_embedding_status(database_id)
@@ -540,10 +546,10 @@ class PromptStudioService:
         except Exception:
             readiness_payload = {}
 
-        schema_count = len(database.schemas or [])
-        table_count = len(tables)
-        column_count = sum(len(table.columns or []) for table in tables)
-        relationship_count = sum(len(table.relationships_from or []) for table in tables)
+        schema_count = hierarchy["totals"]["schema_count"]
+        table_count = hierarchy["totals"]["table_count"]
+        column_count = hierarchy["totals"]["column_count"]
+        relationship_count = hierarchy["totals"]["relationship_count"]
 
         semantic_payload = {
             "business_domain": semantic.business_domain if semantic else None,
@@ -559,35 +565,42 @@ class PromptStudioService:
 
         table_payloads = []
         column_payloads = []
-        for table in tables:
-            relevant_columns = []
-            for column in sorted(table.columns or [], key=lambda c: c.ordinal_position or 0):
-                semantic_row = pii_map.get(column.id)
-                column_info = {
-                    "column_id": column.id,
-                    "schema_name": table.schema.name,
-                    "table_name": table.name,
-                    "name": column.name,
-                    "data_type": column.data_type,
-                    "description": column.description,
-                    "is_pii": bool(semantic_row and semantic_row.is_pii),
-                    "pii_type": semantic_row.pii_type if semantic_row else None,
-                    "risk_level": semantic_row.risk_level if semantic_row else None,
-                    "confidence_score": semantic_row.confidence_score if semantic_row else 0.0,
-                }
-                column_payloads.append(column_info)
-                if len(relevant_columns) < 8:
-                    relevant_columns.append(column.name)
-            table_payloads.append(
-                {
-                    "schema_name": table.schema.name,
-                    "table_name": table.name,
-                    "table_type": table.table_type.value,
-                    "relevant_columns": relevant_columns,
-                    "semantic_status": semantic.generation_status.value if semantic else "not_generated",
-                    "embedding_status": table.embedding.embedding_status.value if table.embedding else "pending",
-                }
-            )
+        table_lookup = {table.id: table for table in tables}
+        for schema_summary in hierarchy["schema_summaries"]:
+            for table_summary in schema_summary["tables"]:
+                relevant_columns = [column["column_name"] for column in table_summary.get("columns", [])[:8]]
+                table = next(
+                    (
+                        tbl
+                        for tbl in table_lookup.values()
+                        if tbl.schema.name == table_summary["schema_name"] and tbl.name == table_summary["table_name"]
+                    ),
+                    None,
+                )
+                table_payloads.append(
+                    {
+                        "schema_name": table_summary["schema_name"],
+                        "table_name": table_summary["table_name"],
+                        "table_type": table_summary["table_type"],
+                        "description": table_summary.get("description"),
+                        "column_count": table_summary.get("column_count", 0),
+                        "relationship_count": table_summary.get("relationship_count", 0),
+                        "pii_column_count": table_summary.get("pii_column_count", 0),
+                        "has_primary_key": table_summary.get("has_primary_key", False),
+                        "has_foreign_keys": table_summary.get("has_foreign_keys", False),
+                        "relevant_columns": relevant_columns,
+                        "semantic_status": semantic.generation_status.value if semantic else "not_generated",
+                        "embedding_status": table.embedding.embedding_status.value if table and table.embedding else "pending",
+                    }
+                )
+                for column in table_summary.get("columns", []):
+                    column_payloads.append(
+                        {
+                            "schema_name": table_summary["schema_name"],
+                            "table_name": table_summary["table_name"],
+                            **column,
+                        }
+                    )
 
         collection_names = [item.get("collection_name", "") for item in embedding_status.get("collections", [])]
         embeddings_payload = {
@@ -607,6 +620,7 @@ class PromptStudioService:
             "table_count": table_count,
             "column_count": column_count,
             "relationship_count": relationship_count,
+            "schema_summaries": hierarchy["schema_summaries"],
             "semantic": semantic_payload,
             "relationship_intelligence": relationship_intelligence,
             "relationship_packages": [self._relationship_package_to_dict(row) for row in relationship_packages],
@@ -627,21 +641,21 @@ class PromptStudioService:
     async def _fetch_database(self, database_id: int) -> ConnectedDatabase:
         result = await self.db.execute(
             select(ConnectedDatabase)
-            .where(ConnectedDatabase.id == database_id)
             .options(
-                selectinload(ConnectedDatabase.schemas).selectinload(DatabaseSchema.tables).selectinload(
-                    DatabaseTable.columns
-                ),
-                selectinload(ConnectedDatabase.schemas).selectinload(DatabaseSchema.tables).selectinload(
-                    DatabaseTable.embedding
-                ),
-                selectinload(ConnectedDatabase.schemas).selectinload(DatabaseSchema.tables).selectinload(
-                    DatabaseTable.relationships_from
-                ),
+                selectinload(ConnectedDatabase.schemas)
+                .selectinload(DatabaseSchema.tables)
+                .selectinload(DatabaseTable.columns),
+                selectinload(ConnectedDatabase.schemas)
+                .selectinload(DatabaseSchema.tables)
+                .selectinload(DatabaseTable.relationships_from),
+                selectinload(ConnectedDatabase.schemas)
+                .selectinload(DatabaseSchema.tables)
+                .selectinload(DatabaseTable.embedding),
             )
+            .where(ConnectedDatabase.id == database_id)
         )
-        database = result.scalars().first()
-        if not database:
+        database = result.scalar_one_or_none()
+        if database is None:
             raise ValueError(f"Database {database_id} not found")
         return database
 
@@ -674,6 +688,7 @@ class PromptStudioService:
             "downstream_dependencies": first.downstream_dependencies or [],
             "lifecycle_flows": first.lifecycle_flows or [],
             "cluster_summary": first.cluster_summary or "",
+            "confidence_score": first.confidence_score or 0.0,
             "cluster_confidence": first.confidence_score or 0.0,
             "domain_name": first.domain_name or "",
             "prompt_id": first.prompt_id or "",
@@ -800,7 +815,7 @@ class PromptStudioService:
                 {"role": "system", "content": rendered.system_message},
                 {"role": "user", "content": rendered.user_prompt},
             ],
-            request_kwargs={"max_completion_tokens": 1800},
+            request_kwargs={},
             completeness_score=quality["context_quality_score"],
             coverage_score=quality["governance_coverage"],
             confidence_score=quality["pii_coverage"],

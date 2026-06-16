@@ -117,7 +117,11 @@ class ConnectedDatabase(Base):
         index=True,
     )
     lifecycle_status: Mapped[DatabaseLifecycleStatus] = mapped_column(
-        Enum(DatabaseLifecycleStatus, name="database_lifecycle_status_enum"),
+        Enum(
+            DatabaseLifecycleStatus,
+            name="database_lifecycle_status_enum",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
         default=DatabaseLifecycleStatus.active,
         nullable=False,
         index=True,
@@ -620,6 +624,14 @@ class SchemaRelationshipGraph(Base):
         self.business_entity_graph = json.dumps(value or [])
 
     @property
+    def business_entity_graph_alias(self) -> list[dict]:
+        return self.entity_graph
+
+    @business_entity_graph_alias.setter
+    def business_entity_graph_alias(self, value: list[dict]) -> None:
+        self.entity_graph = value
+
+    @property
     def lifecycle_flows(self) -> list[dict]:
         try:
             return json.loads(self.entity_lifecycle_descriptions) if self.entity_lifecycle_descriptions else []
@@ -629,6 +641,14 @@ class SchemaRelationshipGraph(Base):
     @lifecycle_flows.setter
     def lifecycle_flows(self, value: list[dict]) -> None:
         self.entity_lifecycle_descriptions = json.dumps(value or [])
+
+    @property
+    def entity_lifecycle_descriptions_alias(self) -> list[dict]:
+        return self.lifecycle_flows
+
+    @entity_lifecycle_descriptions_alias.setter
+    def entity_lifecycle_descriptions_alias(self, value: list[dict]) -> None:
+        self.lifecycle_flows = value
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -735,6 +755,14 @@ class GovernancePackage(Base):
     @sensitive_columns.setter
     def sensitive_columns(self, value: list[dict]) -> None:
         self._sensitive_columns = json.dumps(value or [])
+
+    @property
+    def failure_reason(self) -> Optional[str]:
+        return self.raw_failure_reason
+
+    @failure_reason.setter
+    def failure_reason(self, value: Optional[str]) -> None:
+        self.raw_failure_reason = value
 
 
 class GovernanceEvidence(Base):
@@ -1223,6 +1251,24 @@ class RelationshipPackage(Base):
     @confidence_details.setter
     def confidence_details(self, value: dict) -> None:
         self._confidence_details = json.dumps(value or {})
+
+    @property
+    def cluster_confidence(self) -> float:
+        """Backward-compatible alias for the canonical confidence score."""
+        return float(self.confidence_score or 0.0)
+
+    @cluster_confidence.setter
+    def cluster_confidence(self, value: float) -> None:
+        self.confidence_score = float(value or 0.0)
+
+    @property
+    def failure_reason(self) -> Optional[str]:
+        """Backward-compatible alias for the raw failure reason."""
+        return self.raw_failure_reason
+
+    @failure_reason.setter
+    def failure_reason(self, value: Optional[str]) -> None:
+        self.raw_failure_reason = value
 
 
 class RelationshipClusterTelemetry(Base):

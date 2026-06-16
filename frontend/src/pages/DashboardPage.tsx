@@ -46,6 +46,15 @@ export function DashboardPage() {
   const warehouseDesigns = warehouseDesignsQuery.data?.warehouse_designs ?? [];
   const recommendations = recommendationsQuery.data?.recommendations ?? [];
   const predictiveReadiness = predictiveReadinessQuery.data?.predictive_readiness;
+  const readinessScores = readiness?.scores;
+  const firstStage = stageProgress?.stages?.[0] as
+    | {
+        estimated_input_tokens?: number | null;
+        actual_input_tokens?: number | null;
+        actual_output_tokens?: number | null;
+        completion_truncated?: boolean | null;
+      }
+    | undefined;
 
   const coverage = [
     { label: "Governance", value: Math.min(100, data?.governance_coverage ?? 0), icon: ShieldCheck, to: "/governance" },
@@ -72,7 +81,7 @@ export function DashboardPage() {
         { stage: "Relationships", value: data?.relationship_coverage ? 100 : 0, status: data?.relationship_coverage ? "success" : "neutral" },
         { stage: "KPI", value: data?.kpi_count ? 100 : 0, status: data?.kpi_count ? "success" : "neutral" },
         { stage: "Embeddings", value: data?.embeddings_total ? Math.min(100, (data.embeddings_ready / Math.max(1, data.embeddings_total)) * 100) : 0, status: data?.embeddings_ready ? "success" : "neutral" },
-        { stage: "Readiness", value: readiness?.scores.overall_score ?? data?.readiness_score ?? 0, status: (readiness?.readiness_status?.toLowerCase() as StatusKind) ?? "neutral" },
+        { stage: "Readiness", value: readinessScores?.overall_score ?? data?.readiness_score ?? 0, status: (readiness?.readiness_status?.toLowerCase() as StatusKind) ?? "neutral" },
       ];
   return (
     <div className="space-y-6">
@@ -110,6 +119,12 @@ export function DashboardPage() {
         <MetricCard label="Semantic cache" value={String(data?.semantic_cache_entries ?? semanticCache?.caches?.length ?? 0)} hint="Cached retrieval responses" icon={FileDiff} tone="info" />
         <MetricCard label="Retrieval evaluations" value={String(data?.retrieval_evaluations ?? retrievalEvaluation?.evaluations?.length ?? 0)} hint="Search and rerank quality" icon={Activity} tone="default" />
         <MetricCard label="Retrieval logs" value={String(data?.retrieval_logs ?? 0)} hint="Hybrid search runs" icon={History} tone="success" />
+      </section>
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard label="Estimated input" value={String(firstStage?.estimated_input_tokens ?? 0)} hint="prompt tokens" icon={Sparkles} tone="info" />
+        <MetricCard label="Actual input" value={String(firstStage?.actual_input_tokens ?? 0)} hint="observed prompt tokens" icon={Activity} tone="default" />
+        <MetricCard label="Actual output" value={String(firstStage?.actual_output_tokens ?? 0)} hint="observed completion tokens" icon={FileDiff} tone="success" />
+        <MetricCard label="Truncated" value={firstStage?.completion_truncated ? "yes" : "no"} hint="finish reason" icon={XCircle} tone="warning" />
       </section>
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <MetricCard
@@ -173,7 +188,13 @@ export function DashboardPage() {
                     Trace: {insight.trace_id ?? "n/a"} · Confidence: {Math.round((insight.confidence_score ?? 0) * 100)}%
                   </div>
                   <TraceLink traceId={insight.trace_id} label="Open trace" className="mt-2 text-[11px]" />
-                  <pre className="mt-2 overflow-x-auto text-[11px] text-muted-foreground">{JSON.stringify(insight.evidence ?? [], null, 2)}</pre>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(insight.evidence ?? []).slice(0, 5).map((item, index) => (
+                      <Badge key={`${insight.id ?? index}`} variant="outline" className="text-[10px] uppercase">
+                        {String((item as Record<string, unknown>).evidence_type ?? (item as Record<string, unknown>).source ?? "evidence")}
+                      </Badge>
+                    ))}
+                  </div>
                 </div>
               ))
             ) : (
@@ -370,7 +391,7 @@ export function DashboardPage() {
                 <circle cx="50" cy="50" r="44" fill="none" stroke="var(--muted)" strokeWidth="8" />
               </svg>
               <div className="text-center">
-                <div className="text-3xl font-semibold tracking-tight text-foreground">{readiness?.scores.overall_score ?? data?.readiness_score ?? 0}</div>
+                <div className="text-3xl font-semibold tracking-tight text-foreground">{readinessScores?.overall_score ?? data?.readiness_score ?? 0}</div>
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Ready</div>
               </div>
             </div>
@@ -378,15 +399,15 @@ export function DashboardPage() {
             <ul className="space-y-2 text-xs">
               <li className="flex items-center justify-between">
                 <span className="text-muted-foreground">Governance</span>
-                <span className="font-medium tabular-nums text-foreground">{readiness?.scores.metadata_score ?? 0}</span>
+                <span className="font-medium tabular-nums text-foreground">{readinessScores?.metadata_score ?? 0}</span>
               </li>
               <li className="flex items-center justify-between">
                 <span className="text-muted-foreground">Semantics</span>
-                <span className="font-medium tabular-nums text-foreground">{readiness?.scores.semantic_score ?? 0}</span>
+                <span className="font-medium tabular-nums text-foreground">{readinessScores?.semantic_score ?? 0}</span>
               </li>
               <li className="flex items-center justify-between">
                 <span className="text-muted-foreground">Agent context</span>
-                <span className="font-medium tabular-nums text-foreground">{readiness?.scores.prompt_score ?? 0}</span>
+                <span className="font-medium tabular-nums text-foreground">{readinessScores?.prompt_score ?? 0}</span>
               </li>
             </ul>
             <Button asChild variant="outline" size="sm" className="w-full">

@@ -58,7 +58,7 @@ class PredictiveReadinessService:
     async def _ai_enrich(self, database_id: int, payload: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
         try:
             rendered = self.registry.render_prompt("predictive_readiness_assessment", {"database_id": database_id, **payload, "predictive_readiness": fallback}, category="predictive")
-            result = await AIObservabilityService().generate(operation="chat", module="predictive_readiness", artifact_type="predictive_readiness_assessment", prompt_id=rendered.metadata.id, prompt_version=rendered.metadata.version, model_name=settings.azure_openai_deployment, messages=[{"role": "system", "content": rendered.system_message or "You are a predictive readiness engine."}, {"role": "user", "content": rendered.user_prompt}], request_kwargs={"max_completion_tokens": 6000, "response_format": {"type": "json_object"}}, completeness_score=0.0, coverage_score=0.0, confidence_score=0.0, execution_status="success", fallback_used=False, retry_count=0, extra_metadata={"feature": "predictive_readiness"})
+            result = await AIObservabilityService().generate(operation="chat", module="predictive_readiness", artifact_type="predictive_readiness_assessment", prompt_id=rendered.metadata.id, prompt_version=rendered.metadata.version, model_name=settings.azure_openai_deployment, messages=[{"role": "system", "content": rendered.system_message or "You are a predictive readiness engine."}, {"role": "user", "content": rendered.user_prompt}], request_kwargs={"response_format": {"type": "json_object"}}, completeness_score=0.0, coverage_score=0.0, confidence_score=0.0, execution_status="success", fallback_used=False, retry_count=0, extra_metadata={"feature": "predictive_readiness"})
             parsed = json.loads(result.content or "{}")
             if parsed:
                 return parsed
@@ -89,4 +89,5 @@ class PredictiveReadinessService:
 
     @staticmethod
     def _relationship_row(pkg: RelationshipPackage) -> dict[str, Any]:
-        return {"cluster_id": pkg.cluster_id, "cluster_confidence": pkg.cluster_confidence}
+        confidence = float(getattr(pkg, "confidence_score", getattr(pkg, "cluster_confidence", 0.0)) or 0.0)
+        return {"cluster_id": pkg.cluster_id, "confidence_score": confidence, "cluster_confidence": confidence}

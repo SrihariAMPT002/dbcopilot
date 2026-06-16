@@ -14,10 +14,12 @@ import json
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.metadata import ConnectedDatabase, DatabaseSchema, DatabaseTable, DatabaseType
 from app.models.pipeline_job import PipelineJob
 from app.models.pipeline_job import JobStatus, JobType
+from app.services.database_guard import ensure_connected
 from app.schema_engine.embeddings import EmbeddingEngine
 from app.schema_engine.enricher import SchemaEnricher
 from app.services.artifact_service import ArtifactService
@@ -206,18 +208,17 @@ class DatabasePipelineOrchestrator:
         return bool(job and job.retry_count < 2)
 
     async def _fetch_database(self, database_id: int) -> ConnectedDatabase:
-        result = await self.db.execute(
-            select(ConnectedDatabase).where(ConnectedDatabase.id == database_id)
-        )
-        db = result.scalars().first()
-        if not db:
-            raise ValueError(f"Database {database_id} not found")
-        return db
+        return await ensure_connected(self.db, database_id)
 
     async def _fetch_entities(self, database_id: int) -> list[DatabaseTable]:
         result = await self.db.execute(
             select(DatabaseTable)
             .join(DatabaseSchema)
+            .options(
+                selectinload(DatabaseTable.schema),
+                selectinload(DatabaseTable.columns),
+                selectinload(DatabaseTable.relationships_from),
+            )
             .where(DatabaseSchema.connected_db_id == database_id)
             .order_by(DatabaseSchema.name, DatabaseTable.name)
         )

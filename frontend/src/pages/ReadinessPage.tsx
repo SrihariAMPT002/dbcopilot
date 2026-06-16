@@ -33,15 +33,17 @@ export function ReadinessPage() {
     },
   });
 
+  const categoryScores = data?.category_scores;
+  const scores = data?.scores;
   const dimensions = [
-    { label: "Governance", score: data?.category_scores.governance_readiness_score ?? 0, icon: ShieldCheck },
-    { label: "Semantic", score: data?.category_scores.semantic_readiness_score ?? 0, icon: BookOpenText },
-    { label: "Relationship", score: data?.category_scores.relationship_readiness_score ?? 0, icon: Network },
-    { label: "Retrieval", score: data?.category_scores.ai_context_readiness_score ?? 0, icon: Boxes },
-    { label: "Prompt", score: data?.scores.prompt_score ?? 0, icon: Sparkles },
-    { label: "Agent", score: data?.scores.overall_score ?? 0, icon: Bot },
-    { label: "RAG", score: data?.category_scores.ai_context_readiness_score ?? 0, icon: Gauge },
-    { label: "Text-to-SQL", score: data?.category_scores.semantic_readiness_score ?? 0, icon: TrendingUp },
+    { label: "Governance", score: categoryScores?.governance_readiness_score ?? 0, icon: ShieldCheck },
+    { label: "Semantic", score: categoryScores?.semantic_readiness_score ?? 0, icon: BookOpenText },
+    { label: "Relationship", score: categoryScores?.relationship_readiness_score ?? 0, icon: Network },
+    { label: "Retrieval", score: categoryScores?.ai_context_readiness_score ?? 0, icon: Boxes },
+    { label: "Prompt", score: scores?.prompt_score ?? 0, icon: Sparkles },
+    { label: "Agent", score: scores?.overall_score ?? 0, icon: Bot },
+    { label: "RAG", score: categoryScores?.ai_context_readiness_score ?? 0, icon: Gauge },
+    { label: "Text-to-SQL", score: categoryScores?.semantic_readiness_score ?? 0, icon: TrendingUp },
   ];
 
   return (
@@ -66,7 +68,7 @@ export function ReadinessPage() {
       />
 
       <ReadinessOverview
-        overallScore={data?.scores.overall_score ?? 0}
+        overallScore={scores?.overall_score ?? 0}
         maturityLevel={data?.readiness_status ?? "pending"}
         confidence={data?.ai_confidence ?? 0}
         traceId={history?.snapshots?.[0]?.trace_id ?? null}
@@ -146,7 +148,7 @@ export function ReadinessPage() {
           <CardContent className="space-y-3 text-sm text-muted-foreground">
             <div className="rounded-md border border-border bg-card p-3">
               <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Overall score</div>
-              <div className="mt-1 text-2xl font-semibold text-foreground">{data?.scores.overall_score ?? 0}</div>
+              <div className="mt-1 text-2xl font-semibold text-foreground">{scores?.overall_score ?? 0}</div>
             </div>
             <div className="rounded-md border border-border bg-card p-3">
               <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Confidence</div>
@@ -170,7 +172,7 @@ export function ReadinessPage() {
             <div className="rounded-md border border-border bg-card p-3">
               <div className="text-sm font-medium text-foreground">Retrieval readiness</div>
               <div className="mt-1 text-sm text-muted-foreground">Coverage and retrieval quality are consumed from persisted metrics and snapshots.</div>
-              <div className="mt-2 text-sm">Current score: {data?.category_scores.ai_context_readiness_score ?? 0}</div>
+              <div className="mt-2 text-sm">Current score: {categoryScores?.ai_context_readiness_score ?? 0}</div>
             </div>
             <div className="rounded-md border border-border bg-card p-3">
               <div className="text-sm font-medium text-foreground">Agent readiness</div>

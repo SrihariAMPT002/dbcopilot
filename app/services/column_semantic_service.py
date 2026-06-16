@@ -29,6 +29,7 @@ from app.models.metadata import (
     GovernancePackage,
     SemanticGenerationStatus,
 )
+from app.services.database_guard import ensure_connected
 from app.config.package_registry import package_is_enabled
 from app.services.ai_observability_service import AIObservabilityService
 from app.config.prompts import get_prompt_registry
@@ -794,7 +795,10 @@ class ColumnSemanticService:
         row.prompt_version = prompt_version
         row.model_name = model_name
         row.trace_id = str(getattr(ai_result, "trace_id", None)) if ai_result is not None else None
-        row.raw_failure_reason = error_message
+        if hasattr(type(row), "failure_reason"):
+            row.failure_reason = error_message
+        else:
+            row.raw_failure_reason = error_message
         row.updated_at = datetime.now(timezone.utc)
         if row.id is None:
             row.created_at = datetime.now(timezone.utc)
@@ -858,7 +862,7 @@ class ColumnSemanticService:
             evidence_rows.append(
                 GovernanceEvidence(
                     governance_package_id=package.id,
-                    evidence_type="ai_reasoning",
+                    evidence_type="governance_reasoning",
                     evidence_source="azure_openai",
                     evidence_json=json.dumps(
                         {
@@ -902,10 +906,11 @@ class ColumnSemanticService:
             "finish_reason": row.finish_reason,
             "latency_ms": row.latency_ms,
             "prompt_id": row.prompt_id,
-            "prompt_version": row.prompt_version,
+            "prompt_version": getattr(row, "prompt_version", None),
             "model_name": row.model_name,
             "trace_id": row.trace_id,
-            "raw_failure_reason": row.raw_failure_reason,
+            "failure_reason": getattr(row, "failure_reason", getattr(row, "raw_failure_reason", None)),
+            "raw_failure_reason": getattr(row, "raw_failure_reason", None),
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }
@@ -1105,13 +1110,7 @@ class ColumnSemanticService:
         return semantic
 
     async def _fetch_database(self, database_id: int) -> ConnectedDatabase:
-        result = await self.db.execute(
-            select(ConnectedDatabase).where(ConnectedDatabase.id == database_id)
-        )
-        database = result.scalars().first()
-        if not database:
-            raise ValueError(f"Database {database_id} not found")
-        return database
+        return await ensure_connected(self.db, database_id)
 
     async def _count_columns(self, database_id: int) -> int:
         result = await self.db.execute(

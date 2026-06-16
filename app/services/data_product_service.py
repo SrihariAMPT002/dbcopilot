@@ -48,7 +48,7 @@ class DataProductService:
     async def _ai_enrich(self, database_id: int, payload: dict[str, Any], fallback: list[dict[str, Any]]) -> list[dict[str, Any]]:
         try:
             rendered = self.registry.render_prompt("data_product_discovery", {"database_id": database_id, **payload, "data_products": fallback}, category="data_products")
-            result = await AIObservabilityService().generate(operation="chat", module="data_products", artifact_type="data_product_discovery", prompt_id=rendered.metadata.id, prompt_version=rendered.metadata.version, model_name=settings.azure_openai_deployment, messages=[{"role": "system", "content": rendered.system_message or "You are a data product discovery engine."}, {"role": "user", "content": rendered.user_prompt}], request_kwargs={"max_completion_tokens": 3000, "response_format": {"type": "json_object"}}, completeness_score=0.0, coverage_score=0.0, confidence_score=0.0, execution_status="success", fallback_used=False, retry_count=0, extra_metadata={"feature": "data_products"})
+            result = await AIObservabilityService().generate(operation="chat", module="data_products", artifact_type="data_product_discovery", prompt_id=rendered.metadata.id, prompt_version=rendered.metadata.version, model_name=settings.azure_openai_deployment, messages=[{"role": "system", "content": rendered.system_message or "You are a data product discovery engine."}, {"role": "user", "content": rendered.user_prompt}], request_kwargs={"response_format": {"type": "json_object"}}, completeness_score=0.0, coverage_score=0.0, confidence_score=0.0, execution_status="success", fallback_used=False, retry_count=0, extra_metadata={"feature": "data_products"})
             parsed = json.loads(result.content or "{}")
             rows = parsed.get("data_products")
             if isinstance(rows, list) and rows:
@@ -75,4 +75,10 @@ class DataProductService:
 
     @staticmethod
     def _relationship_row(pkg: RelationshipPackage) -> dict[str, Any]:
-        return {"cluster_id": pkg.cluster_id, "domain_name": pkg.domain_name, "cluster_confidence": pkg.cluster_confidence, "entity_graph": pkg.entity_graph}
+        return {
+            "cluster_id": pkg.cluster_id,
+            "domain_name": pkg.domain_name,
+            "confidence_score": float(getattr(pkg, "confidence_score", getattr(pkg, "cluster_confidence", 0.0)) or 0.0),
+            "cluster_confidence": float(getattr(pkg, "confidence_score", getattr(pkg, "cluster_confidence", 0.0)) or 0.0),
+            "entity_graph": pkg.entity_graph,
+        }

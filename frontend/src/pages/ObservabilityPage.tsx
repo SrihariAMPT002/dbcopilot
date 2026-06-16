@@ -14,7 +14,6 @@ import { useLifecycleEvents, useObservabilityTraceDetail, useObservabilityTraces
 import { usePipelineExecutions } from "@/hooks/usePipelineExecutions";
 import { usePromptPackages } from "@/hooks/usePromptStudio";
 import { useConnections } from "@/hooks/useConnections";
-import { cn } from "@/lib/utils";
 
 export function ObservabilityPage() {
   const { selectedDatabaseId } = useDatabaseContext();
@@ -186,6 +185,12 @@ export function ObservabilityPage() {
                         <TableCell className="text-sm text-muted-foreground">{trace.model_name ?? "n/a"}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           P {trace.prompt_tokens} / C {trace.completion_tokens} / R {trace.reasoning_tokens}
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            <Badge variant="outline" className="text-[10px] uppercase">Est in {trace.estimated_input_tokens ?? 0}</Badge>
+                            <Badge variant="outline" className="text-[10px] uppercase">Act in {trace.actual_input_tokens ?? 0}</Badge>
+                            <Badge variant="outline" className="text-[10px] uppercase">Est out {trace.estimated_output_tokens ?? 0}</Badge>
+                            <Badge variant="outline" className="text-[10px] uppercase">Act out {trace.actual_output_tokens ?? 0}</Badge>
+                          </div>
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">{Math.round(trace.latency_ms)} ms</TableCell>
                         <TableCell>
@@ -213,6 +218,12 @@ export function ObservabilityPage() {
             <Metric label="Prompt tokens" value={String(traceDetail?.prompt_tokens ?? 0)} icon={TextQuote} />
             <Metric label="Completion tokens" value={String(traceDetail?.completion_tokens ?? 0)} icon={TextQuote} />
             <Metric label="Reasoning tokens" value={String(traceDetail?.reasoning_tokens ?? 0)} icon={TextQuote} />
+            <Metric label="Estimated input" value={String(traceDetail?.estimated_input_tokens ?? 0)} icon={TextQuote} />
+            <Metric label="Actual input" value={String(traceDetail?.actual_input_tokens ?? 0)} icon={TextQuote} />
+            <Metric label="Estimated output" value={String(traceDetail?.estimated_output_tokens ?? 0)} icon={TextQuote} />
+            <Metric label="Actual output" value={String(traceDetail?.actual_output_tokens ?? 0)} icon={TextQuote} />
+            <Metric label="Prompt size" value={`${traceDetail?.prompt_size_bytes ?? 0} bytes`} icon={TextQuote} />
+            <Metric label="Completion truncated" value={traceDetail?.completion_truncated ? "Yes" : "No"} icon={TextQuote} />
             <Metric label="Estimated cost" value={`$${(traceDetail?.estimated_cost_usd ?? 0).toFixed(4)}`} icon={Zap} />
             <Metric label="Latency" value={`${Math.round(traceDetail?.latency_ms ?? 0)} ms`} icon={Clock3} />
             <div className="rounded-md border border-border bg-card p-3 text-xs text-muted-foreground">
@@ -293,9 +304,9 @@ export function ObservabilityPage() {
                       {String(version.model_name ?? "unknown")}
                     </Badge>
                   </div>
-                  <pre className="mt-2 max-h-32 overflow-auto rounded bg-muted/30 p-2 text-[11px] text-muted-foreground">
-                    {String(version.generated_prompt ?? "")}
-                  </pre>
+                  <div className="mt-2 rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+                    {String(version.generated_prompt ?? "").slice(0, 420)}
+                  </div>
                 </div>
               ))
             ) : (
@@ -316,11 +327,30 @@ export function ObservabilityPage() {
             <Detail label="Database" value={String(traceDetail?.database_id ?? dbId)} />
             <Detail label="Finish reason" value={traceDetail?.finish_reason ?? "n/a"} />
             <Detail label="Validation result" value={traceDetail?.execution_status ?? "n/a"} />
+            <Detail label="Prompt tokens" value={String(traceDetail?.prompt_tokens ?? 0)} />
+            <Detail label="Completion tokens" value={String(traceDetail?.completion_tokens ?? 0)} />
+            <Detail label="Reasoning tokens" value={String(traceDetail?.reasoning_tokens ?? 0)} />
+            <Detail label="Estimated cost" value={`$${(traceDetail?.estimated_cost_usd ?? 0).toFixed(4)}`} />
             <div className="rounded-md border border-border bg-card p-3">
               <div className="flex items-center justify-between">
-                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Prompt observability JSON</div>
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Prompt observability</div>
                 <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[11px]" onClick={() => navigator.clipboard.writeText(JSON.stringify(promptObservability, null, 2))}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1 px-2 text-[11px]"
+                    onClick={() =>
+                      navigator.clipboard.writeText(
+                        [
+                          `trace_id=${traceDetail?.trace_id ?? "n/a"}`,
+                          `model=${traceDetail?.model_name ?? "n/a"}`,
+                          `finish_reason=${traceDetail?.finish_reason ?? "n/a"}`,
+                          `prompt_tokens=${traceDetail?.prompt_tokens ?? 0}`,
+                          `completion_tokens=${traceDetail?.completion_tokens ?? 0}`,
+                        ].join("\n"),
+                      )
+                    }
+                  >
                     <Copy className="h-3.5 w-3.5" /> Copy
                   </Button>
                   <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[11px]" onClick={() => downloadJson(`observability-trace-${selectedTraceId ?? "trace"}.json`, traceDetail ?? {})}>
@@ -328,9 +358,19 @@ export function ObservabilityPage() {
                   </Button>
                 </div>
               </div>
-              <pre className={cn("mt-2 max-h-72 overflow-auto rounded-md p-3 text-[11px] leading-5", traceDetail?.finish_reason === "length" ? "bg-destructive/10 text-destructive" : "bg-muted/20 text-muted-foreground")}>
-                {JSON.stringify(promptObservability, null, 2)}
-              </pre>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {promptObservability.length ? promptObservability.slice(0, 8).map((item: any, index: number) => (
+                  <div key={`${item.id ?? index}`} className="rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+                    <div className="font-medium text-foreground">{String(item.model_name ?? "prompt")} · {String(item.finish_reason ?? "n/a")}</div>
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      <Badge variant="outline" className="text-[10px] uppercase">Prompt {item.prompt_tokens ?? 0}</Badge>
+                      <Badge variant="outline" className="text-[10px] uppercase">Completion {item.completion_tokens ?? 0}</Badge>
+                      <Badge variant="outline" className="text-[10px] uppercase">Reasoning {item.reasoning_tokens ?? 0}</Badge>
+                      <Badge variant="outline" className="text-[10px] uppercase">Trunc {item.completion_truncated ? "yes" : "no"}</Badge>
+                    </div>
+                  </div>
+                )) : <div className="text-xs text-muted-foreground">No prompt observability records yet.</div>}
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -357,12 +397,18 @@ export function ObservabilityPage() {
               <Detail label="Prompt tokens" value={String(traceDetail?.prompt_tokens ?? 0)} />
               <Detail label="Completion tokens" value={String(traceDetail?.completion_tokens ?? 0)} />
               <Detail label="Reasoning tokens" value={String(traceDetail?.reasoning_tokens ?? 0)} />
+              <Detail label="Estimated input tokens" value={String(traceDetail?.estimated_input_tokens ?? 0)} />
+              <Detail label="Actual input tokens" value={String(traceDetail?.actual_input_tokens ?? 0)} />
+              <Detail label="Estimated output tokens" value={String(traceDetail?.estimated_output_tokens ?? 0)} />
+              <Detail label="Actual output tokens" value={String(traceDetail?.actual_output_tokens ?? 0)} />
+              <Detail label="Prompt size bytes" value={String(traceDetail?.prompt_size_bytes ?? 0)} />
+              <Detail label="Completion truncated" value={traceDetail?.completion_truncated ? "Yes" : "No"} />
               <Detail label="Estimated cost" value={`$${(traceDetail?.estimated_cost_usd ?? 0).toFixed(4)}`} />
             </div>
-            <TraceJsonPanel title="Prompt observability" value={traceDetail?.prompt_observability ?? []} />
-            <TraceJsonPanel title="Stage executions" value={traceDetail?.stage_executions ?? []} />
-            <TraceJsonPanel title="Pipeline executions" value={traceDetail?.pipeline_executions ?? []} />
-            <TraceJsonPanel title="Prompt versions" value={traceDetail?.prompt_versions ?? []} />
+            <TraceSummaryChips title="Prompt observability" value={traceDetail?.prompt_observability ?? []} />
+            <TraceSummaryChips title="Stage executions" value={traceDetail?.stage_executions ?? []} />
+            <TraceSummaryChips title="Pipeline executions" value={traceDetail?.pipeline_executions ?? []} />
+            <TraceSummaryChips title="Prompt versions" value={traceDetail?.prompt_versions ?? []} />
           </div>
         </SheetContent>
       </Sheet>
@@ -400,13 +446,17 @@ function TraceSummary({ label, value }: { label: string; value: string }) {
   );
 }
 
-function TraceJsonPanel({ title, value }: { title: string; value: Array<Record<string, unknown>> }) {
+function TraceSummaryChips({ title, value }: { title: string; value: Array<Record<string, unknown>> }) {
   return (
     <div className="space-y-2">
       <div className="text-xs uppercase tracking-wider text-muted-foreground">{title}</div>
-      <pre className="max-h-64 overflow-auto rounded-md border border-border bg-muted/20 p-3 text-[11px] leading-5 text-muted-foreground">
-        {JSON.stringify(value, null, 2)}
-      </pre>
+      <div className="flex flex-wrap gap-2">
+        {value.length ? value.slice(0, 8).map((item, index) => (
+          <Badge key={`${title}-${index}`} variant="outline" className="text-[10px] uppercase">
+            {String(item.trace_id ?? item.status ?? item.version ?? item.model_name ?? item.stage_name ?? "item")}
+          </Badge>
+        )) : <div className="text-xs text-muted-foreground">No records available.</div>}
+      </div>
     </div>
   );
 }

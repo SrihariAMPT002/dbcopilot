@@ -8,11 +8,13 @@ from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.models.embedding_document import EmbeddingDocument
 from app.models.metadata import ConnectedDatabase, DatabaseSchema, DatabaseTable, GovernancePackage, RelationshipPackage, SemanticPackage
 from app.models.prompt_package import PromptPackage
+from app.services.database_guard import ensure_connected
 from app.utils import now_utc
 
 
@@ -29,14 +31,18 @@ class EmbeddingDocumentService:
         return " ".join(text.split())
 
     async def _fetch_database(self, database_id: int) -> ConnectedDatabase:
-        database = await self.db.get(ConnectedDatabase, database_id)
-        if not database:
-            raise ValueError(f"Database {database_id} not found")
-        return database
+        return await ensure_connected(self.db, database_id)
 
     async def _fetch_tables(self, database_id: int) -> list[DatabaseTable]:
         result = await self.db.execute(
-            select(DatabaseTable).join(DatabaseSchema).where(DatabaseSchema.connected_db_id == database_id)
+            select(DatabaseTable)
+            .join(DatabaseSchema)
+            .options(
+                selectinload(DatabaseTable.schema),
+                selectinload(DatabaseTable.columns),
+                selectinload(DatabaseTable.relationships_from),
+            )
+            .where(DatabaseSchema.connected_db_id == database_id)
         )
         return list(result.scalars().all())
 

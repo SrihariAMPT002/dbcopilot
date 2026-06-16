@@ -272,6 +272,27 @@ async def test_get_or_compute_hydrates_snapshot_ai_fields():
     assert service._collect_stats.await_count == 1
 
 
+@pytest.mark.asyncio
+async def test_collect_stats_empty_database_has_zero_snapshot_count():
+    session = AsyncMock()
+    service = ReadinessService(session)
+
+    service._fetch_governance_packages = AsyncMock(return_value=[])
+    service._fetch_semantic_package = AsyncMock(return_value=None)
+    service._fetch_relationship_packages = AsyncMock(return_value=[])
+    service.db.scalar = AsyncMock(return_value=0)
+
+    stats = await service._collect_stats(1)
+
+    assert stats["metadata"]["schemas"] == 0
+    assert stats["semantic"]["schema_semantics"] == 0
+    assert stats["relationships"]["graph_edges"] == 0
+    assert stats["ai_context"]["prompt_artifacts_rendered"] == 0
+    assert stats["governance"]["column_semantics"] == 0
+    assert stats["kpi"]["kpi_cluster_count"] == 0
+    assert stats["embeddings"]["completed_tables"] == 0
+
+
 def test_readiness_dimensions_match_enabled_packages():
     readiness = get_config_manager().get_readiness_rules()["readiness"]
     dimensions = readiness["dimensions"]

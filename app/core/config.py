@@ -102,6 +102,7 @@ class Settings(BaseSettings):
 
     # Intelligence Package Registry
     intelligence_packages_enabled: bool = Field(default=True)
+    strict_schema_validation: bool = Field(default=True)
 
     @field_validator("log_level")
     @classmethod

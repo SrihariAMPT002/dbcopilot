@@ -91,7 +91,7 @@ class RetrievalRerankerService:
                 {"role": "system", "content": "You are a retrieval reranking engine. Return compact JSON only."},
                 {"role": "user", "content": json.dumps(prompt, ensure_ascii=False, indent=2)},
             ],
-            request_kwargs={"max_completion_tokens": 1000},
+            request_kwargs={},
             extra_metadata={"feature": "retrieval_rerank"},
         )
         content = result.content or ""
@@ -109,6 +109,7 @@ class RetrievalRerankerService:
             )
         reranked.sort(key=lambda item: item.final_score, reverse=True)
         log = RetrievalLog(
+            database_id=database_id,
             query=query,
             retrieved_documents=self._compact(candidates[:top_k]),
             reranked_documents=self._compact([item.original for item in reranked]),

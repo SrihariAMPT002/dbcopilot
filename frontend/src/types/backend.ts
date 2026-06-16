@@ -200,7 +200,7 @@ export type GovernancePackage = {
   prompt_version?: string | null;
   model_name?: string | null;
   trace_id?: string | null;
-  raw_failure_reason?: string | null;
+  failure_reason?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -285,6 +285,7 @@ export type RelationshipPackageCluster = {
   domain_name?: string | null;
   cluster_label?: string | null;
   cluster_summary?: string | null;
+  confidence_score?: number;
   cluster_confidence?: number;
   entity_graph?: Array<Record<string, unknown>>;
   hidden_relationships?: Array<Record<string, unknown>>;
@@ -919,6 +920,12 @@ export type PipelineExecution = {
   trace_id?: string | null;
   model_name?: string | null;
   token_usage_json?: string | null;
+  estimated_input_tokens?: number | null;
+  actual_input_tokens?: number | null;
+  estimated_output_tokens?: number | null;
+  actual_output_tokens?: number | null;
+  prompt_size_bytes?: number | null;
+  completion_truncated?: boolean | null;
   error_message?: string | null;
   triggered_by?: string | null;
   created_at?: string | null;
@@ -937,6 +944,12 @@ export type StageExecution = {
   trace_id?: string | null;
   model_name?: string | null;
   token_usage_json?: string | null;
+  estimated_input_tokens?: number | null;
+  actual_input_tokens?: number | null;
+  estimated_output_tokens?: number | null;
+  actual_output_tokens?: number | null;
+  prompt_size_bytes?: number | null;
+  completion_truncated?: boolean | null;
   error_message?: string | null;
   execution_order?: number | null;
   created_at?: string | null;
@@ -992,6 +1005,12 @@ export type ObservabilityTraceItem = {
   prompt_tokens: number;
   completion_tokens: number;
   reasoning_tokens: number;
+  estimated_input_tokens?: number | null;
+  actual_input_tokens?: number | null;
+  estimated_output_tokens?: number | null;
+  actual_output_tokens?: number | null;
+  prompt_size_bytes?: number | null;
+  completion_truncated?: boolean | null;
   latency_ms: number;
   finish_reason?: string | null;
   execution_status?: string | null;
@@ -1017,6 +1036,12 @@ export type ObservabilityTraceDetailResponse = {
   prompt_tokens: number;
   completion_tokens: number;
   reasoning_tokens: number;
+  estimated_input_tokens?: number | null;
+  actual_input_tokens?: number | null;
+  estimated_output_tokens?: number | null;
+  actual_output_tokens?: number | null;
+  prompt_size_bytes?: number | null;
+  completion_truncated?: boolean | null;
   estimated_cost_usd: number;
   prompt_versions: Array<Record<string, unknown>>;
   pipeline_executions: Array<Record<string, unknown>>;

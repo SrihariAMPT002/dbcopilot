@@ -173,7 +173,7 @@ class BusinessInsightService:
                     {"role": "system", "content": rendered.system_message or "You are a business insight generation engine."},
                     {"role": "user", "content": rendered.user_prompt},
                 ],
-                request_kwargs={"max_completion_tokens": 3000, "response_format": {"type": "json_object"}},
+                request_kwargs={"response_format": {"type": "json_object"}},
                 completeness_score=0.0,
                 coverage_score=0.0,
                 confidence_score=0.0,

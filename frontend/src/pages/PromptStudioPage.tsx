@@ -60,6 +60,18 @@ export function PromptStudioPage() {
   const [artifactType, setArtifactType] = useState("system_prompt");
   const [generatedPrompt, setGeneratedPrompt] = useState<string>("");
   const [selectedPackageId, setSelectedPackageId] = useState<number | null>(null);
+  const [selectedEvaluation, setSelectedEvaluation] = useState<{
+    completeness_score: number;
+    safety_score: number;
+    grounding_score: number;
+    hallucination_risk: number;
+    sql_safety_score: number;
+    rag_quality_score: number;
+    agent_quality_score: number;
+    prompt_quality_score: number;
+    reasoning_summary?: string | null;
+    trace_id?: string | null;
+  } | null>(null);
   const { selectedDatabaseId } = useDatabaseContext();
   const dbId = selectedDatabaseId ?? 1;
   const queryClient = useQueryClient();
@@ -79,6 +91,7 @@ export function PromptStudioPage() {
   const previousVersion = promptVersions?.versions?.[1]?.generated_prompt ?? "";
   const currentVersion = promptVersions?.versions?.[0]?.generated_prompt ?? selectedPackage?.generated_prompt ?? generatedPrompt ?? "";
   const promptDiff = useMemo(() => buildLineDiff(previousVersion, currentVersion), [previousVersion, currentVersion]);
+  const formatPct = (value: number | null | undefined) => (typeof value === "number" ? `${Math.round(value * 100)}%` : "N/A");
 
   useEffect(() => {
     if (!selectedPackageId && promptPackageList.length > 0) {
@@ -120,7 +133,8 @@ export function PromptStudioPage() {
 
   const onEvaluate = async () => {
     if (!selectedPackage) return;
-    await evaluate.mutateAsync({ prompt_package_id: selectedPackage.id });
+    const result = await evaluate.mutateAsync({ prompt_package_id: selectedPackage.id });
+    setSelectedEvaluation(result);
     await queryClient.invalidateQueries({ queryKey: ["prompt-packages", dbId] });
   };
 
@@ -222,10 +236,10 @@ export function PromptStudioPage() {
                   </Button>
                 </div>
               </div>
-              <div className="relative overflow-hidden rounded-md border border-border bg-[var(--muted)]/40">
+                <div className="relative overflow-hidden rounded-md border border-border bg-[var(--muted)]/40">
                 <div className="border-b border-border bg-card/60 px-3 py-2 text-[11px] text-muted-foreground font-mono">generated_prompt.md</div>
                 <ScrollArea className="max-h-[360px]">
-                  <pre className="whitespace-pre-wrap p-4 font-mono text-xs leading-relaxed text-foreground">{contexts.generated}</pre>
+                  <div className="whitespace-pre-wrap p-4 font-mono text-xs leading-relaxed text-foreground">{contexts.generated}</div>
                 </ScrollArea>
               </div>
             </section>
@@ -252,7 +266,7 @@ export function PromptStudioPage() {
                             </div>
                             <Badge variant="outline" className="text-[10px]">trace {version.trace_id ?? "n/a"}</Badge>
                           </div>
-                          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-muted-foreground">{version.generated_prompt}</pre>
+                          <div className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-muted-foreground">{version.generated_prompt}</div>
                         </div>
                       ))}
                     </div>
@@ -272,42 +286,24 @@ export function PromptStudioPage() {
                     <Gauge className="h-3.5 w-3.5" /> Evaluate selected
                   </Button>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Prompt quality</CardTitle></CardHeader><CardContent><div className="text-2xl font-semibold">{Math.round((selectedPackage?.confidence_score ?? 0) * 100)}%</div></CardContent></Card>
-                    <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Safety</CardTitle></CardHeader><CardContent><div className="text-2xl font-semibold">100%</div></CardContent></Card>
-                    <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Grounding</CardTitle></CardHeader><CardContent><div className="text-2xl font-semibold">100%</div></CardContent></Card>
+                    <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Prompt quality</CardTitle></CardHeader><CardContent><div className="text-2xl font-semibold">{selectedEvaluation ? formatPct(selectedEvaluation.prompt_quality_score) : formatPct(selectedPackage?.confidence_score)}</div></CardContent></Card>
+                    <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Safety</CardTitle></CardHeader><CardContent><div className="text-2xl font-semibold">{selectedEvaluation ? formatPct(selectedEvaluation.safety_score) : "N/A"}</div></CardContent></Card>
+                    <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Grounding</CardTitle></CardHeader><CardContent><div className="text-2xl font-semibold">{selectedEvaluation ? formatPct(selectedEvaluation.grounding_score) : "N/A"}</div></CardContent></Card>
                   </div>
-                </CardContent>
-              </Card>
-            </section>
-
-            <section className="grid gap-4 lg:grid-cols-2">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-sm"><Brain className="h-4 w-4" /> Optimization</CardTitle>
-                  <CardDescription>Prompt optimization for safety, grounding, token efficiency, and reuse.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <Button variant="outline" size="sm" className="gap-1.5" onClick={onOptimize} disabled={!selectedPackage}>
-                    <Wand2 className="h-3.5 w-3.5" /> Optimize selected
-                  </Button>
-                  <div className="text-sm text-muted-foreground">AI optimization refines the selected prompt for safety, grounding, token efficiency, and reuse.</div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-sm"><Workflow className="h-4 w-4" /> Template vs generated diff</CardTitle>
-                  <CardDescription>Highlighted line comparison between the previous and current prompt versions.</CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-4 md:grid-cols-2">
-                  <Card>
-                    <CardHeader><CardTitle className="text-sm flex items-center gap-2"><ListOrdered className="h-4 w-4" /> Previous version</CardTitle></CardHeader>
-                    <CardContent><ScrollArea className="max-h-72"><div className="space-y-1 pr-3 font-mono text-[11px]">{promptDiff.length ? promptDiff.map((line, index) => (<div key={`prev-${index}`} className={cn("whitespace-pre-wrap rounded px-2 py-1", line.type === "removed" ? "bg-red-500/10 text-red-700 dark:text-red-300" : "text-muted-foreground")}>{line.type === "removed" ? `- ${line.oldLine ?? ""}` : line.oldLine ?? line.newLine ?? ""}</div>)) : <div className="text-sm text-muted-foreground">No previous version available.</div>}</div></ScrollArea></CardContent>
-                  </Card>
-                  <Card>
-                    <CardHeader><CardTitle className="text-sm flex items-center gap-2"><FileDiff className="h-4 w-4" /> Generated prompt</CardTitle></CardHeader>
-                    <CardContent><ScrollArea className="max-h-72"><div className="space-y-1 pr-3 font-mono text-[11px]">{promptDiff.length ? promptDiff.map((line, index) => (<div key={`curr-${index}`} className={cn("whitespace-pre-wrap rounded px-2 py-1", line.type === "added" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "text-muted-foreground")}>{line.type === "added" ? `+ ${line.newLine ?? ""}` : line.newLine ?? line.oldLine ?? ""}</div>)) : <div className="text-sm text-muted-foreground">No generated prompt yet.</div>}</div></ScrollArea></CardContent>
-                  </Card>
+                  {selectedEvaluation ? (
+                    <div className="rounded-md border border-border bg-card p-3 text-sm text-muted-foreground">
+                      <div className="font-medium text-foreground">Latest evaluation</div>
+                      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        <div>Completeness {formatPct(selectedEvaluation.completeness_score)}</div>
+                        <div>SQL safety {formatPct(selectedEvaluation.sql_safety_score)}</div>
+                        <div>RAG quality {formatPct(selectedEvaluation.rag_quality_score)}</div>
+                        <div>Agent quality {formatPct(selectedEvaluation.agent_quality_score)}</div>
+                      </div>
+                      {selectedEvaluation.reasoning_summary ? <div className="mt-2 text-xs">{selectedEvaluation.reasoning_summary}</div> : null}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">No evaluation has been run for the selected prompt package yet.</div>
+                  )}
                 </CardContent>
               </Card>
             </section>
@@ -357,6 +353,66 @@ export function PromptStudioPage() {
                 </CardContent>
               </Card>
             </section>
+
+            <section className="grid gap-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-sm"><Brain className="h-4 w-4" /> Optimization</CardTitle>
+                  <CardDescription>Prompt optimization for safety, grounding, token efficiency, and reuse.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <Button variant="outline" size="sm" className="gap-1.5" onClick={onOptimize} disabled={!selectedPackage}>
+                    <Wand2 className="h-3.5 w-3.5" /> Optimize selected
+                  </Button>
+                  <div className="text-sm text-muted-foreground">AI optimization refines the selected prompt for safety, grounding, token efficiency, and reuse.</div>
+                </CardContent>
+              </Card>
+
+              <Card className="xl:col-span-2">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-sm"><Workflow className="h-4 w-4" /> Template vs generated diff</CardTitle>
+                  <CardDescription>Full-width line-by-line comparison between the template seed and the latest generated prompt.</CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4 xl:grid-cols-2">
+                  <div className="space-y-2 rounded-lg border border-border bg-card p-3">
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground"><ListOrdered className="h-4 w-4" /> Template / previous version</div>
+                    <ScrollArea className="h-[620px] rounded-md border border-border bg-background">
+                      <div className="space-y-1 p-3 font-mono text-[11px]">
+                        {promptDiff.length ? promptDiff.map((line, index) => (
+                          <div
+                            key={`prev-${index}`}
+                            className={cn(
+                              "whitespace-pre-wrap rounded px-2 py-1 leading-5",
+                              line.type === "removed" ? "bg-red-500/10 text-red-700 dark:text-red-300" : "text-muted-foreground",
+                            )}
+                          >
+                            {line.type === "removed" ? `- ${line.oldLine ?? ""}` : line.oldLine ?? line.newLine ?? ""}
+                          </div>
+                        )) : <div className="text-sm text-muted-foreground">No previous version available.</div>}
+                      </div>
+                    </ScrollArea>
+                  </div>
+                  <div className="space-y-2 rounded-lg border border-border bg-card p-3">
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground"><FileDiff className="h-4 w-4" /> Generated prompt</div>
+                    <ScrollArea className="h-[620px] rounded-md border border-border bg-background">
+                      <div className="space-y-1 p-3 font-mono text-[11px]">
+                        {promptDiff.length ? promptDiff.map((line, index) => (
+                          <div
+                            key={`curr-${index}`}
+                            className={cn(
+                              "whitespace-pre-wrap rounded px-2 py-1 leading-5",
+                              line.type === "added" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "text-muted-foreground",
+                            )}
+                          >
+                            {line.type === "added" ? `+ ${line.newLine ?? ""}` : line.newLine ?? line.oldLine ?? ""}
+                          </div>
+                        )) : <div className="text-sm text-muted-foreground">No generated prompt yet.</div>}
+                      </div>
+                    </ScrollArea>
+                  </div>
+                </CardContent>
+              </Card>
+            </section>
           </CardContent>
         </Card>
 
@@ -402,15 +458,15 @@ export function PromptStudioPage() {
             <CardContent className="space-y-3 text-sm text-muted-foreground">
               <div className="rounded-md border border-border bg-card p-3">
                 <div className="text-xs uppercase tracking-wider text-muted-foreground">System</div>
-                <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap text-[11px] leading-5">{contexts.system}</pre>
+                <div className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap text-[11px] leading-5">{contexts.system}</div>
               </div>
               <div className="rounded-md border border-border bg-card p-3">
                 <div className="text-xs uppercase tracking-wider text-muted-foreground">Database</div>
-                <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap text-[11px] leading-5">{contexts.database}</pre>
+                <div className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap text-[11px] leading-5">{contexts.database}</div>
               </div>
               <div className="rounded-md border border-border bg-card p-3">
                 <div className="text-xs uppercase tracking-wider text-muted-foreground">Agent</div>
-                <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap text-[11px] leading-5">{contexts.agent}</pre>
+                <div className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap text-[11px] leading-5">{contexts.agent}</div>
               </div>
               <div className="rounded-md border border-border bg-card p-3">
                 <div className="text-xs uppercase tracking-wider text-muted-foreground">RAG / SQL</div>

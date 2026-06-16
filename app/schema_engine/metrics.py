@@ -241,18 +241,20 @@ class MetricsEngine:
         score = 0.0
 
         # Base score from column count
-        col_count = len(table.columns) if table.columns else 0
+        columns = list(getattr(table, "columns", []) or [])
+        relationships = list(getattr(table, "relationships_from", []) or [])
+        col_count = len(columns)
         score += min(col_count * 5, 40)  # Max 40 points
 
         # Bonus for relationships
-        rel_count = len(table.relationships_from) if table.relationships_from else 0
+        rel_count = len(relationships)
         score += min(rel_count * 10, 30)  # Max 30 points
 
         # Check for complex types
-        if table.columns:
+        if columns:
             complex_types = {"array", "json", "jsonb", "xml", "enum"}
             complex_col_count = sum(
-                1 for col in table.columns if any(t in col.data_type.lower() for t in complex_types)
+                1 for col in columns if any(t in (getattr(col, "data_type", "") or "").lower() for t in complex_types)
             )
             score += min(complex_col_count * 5, 20)  # Max 20 points
 
@@ -282,8 +284,7 @@ class MetricsEngine:
 
         total_relationships = 0
         for table in tables:
-            if table.relationships_from:
-                total_relationships += len(table.relationships_from)
+            total_relationships += len(getattr(table, "relationships_from", []) or [])
 
         # Maximum possible relationships in a complete graph
         max_relationships = len(tables) * (len(tables) - 1) / 2

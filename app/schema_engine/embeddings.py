@@ -267,7 +267,14 @@ class EmbeddingEngine:
 
     async def _fetch_database(self, database_id: int) -> ConnectedDatabase:
         result = await self.db.execute(
-            select(ConnectedDatabase).where(ConnectedDatabase.id == database_id)
+            select(ConnectedDatabase).options(
+                selectinload(ConnectedDatabase.schemas)
+                .selectinload(DatabaseSchema.tables)
+                .selectinload(DatabaseTable.columns),
+                selectinload(ConnectedDatabase.schemas)
+                .selectinload(DatabaseSchema.tables)
+                .selectinload(DatabaseTable.relationships_from),
+            ).where(ConnectedDatabase.id == database_id)
         )
         database = result.scalars().first()
         if not database:

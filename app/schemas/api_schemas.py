@@ -249,6 +249,7 @@ class GovernancePackageResponse(BaseModel):
     prompt_version: Optional[str] = None
     model_name: Optional[str] = None
     trace_id: Optional[str] = None
+    failure_reason: Optional[str] = None
     raw_failure_reason: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -915,14 +916,66 @@ class PromptObservabilityLogResponse(BaseModel):
     prompt_package_id: int
     trace_id: Optional[str] = None
     model_name: Optional[str] = None
+    estimated_input_tokens: Optional[int] = None
+    actual_input_tokens: Optional[int] = None
+    estimated_output_tokens: Optional[int] = None
+    actual_output_tokens: Optional[int] = None
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
     reasoning_tokens: Optional[int] = None
+    prompt_size_bytes: Optional[int] = None
+    completion_truncated: Optional[bool] = None
     latency_ms: Optional[float] = None
     finish_reason: Optional[str] = None
     execution_status: Optional[str] = None
     failure_reason: Optional[str] = None
     created_at: Optional[datetime] = None
+
+
+class PipelineExecutionResponse(BaseModel):
+    id: int
+    database_id: int
+    status: str
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    duration_seconds: Optional[float] = None
+    trace_id: Optional[str] = None
+    model_name: Optional[str] = None
+    token_usage_json: Optional[str] = None
+    estimated_input_tokens: Optional[int] = None
+    actual_input_tokens: Optional[int] = None
+    estimated_output_tokens: Optional[int] = None
+    actual_output_tokens: Optional[int] = None
+    prompt_size_bytes: Optional[int] = None
+    completion_truncated: Optional[bool] = None
+    error_message: Optional[str] = None
+    triggered_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class StageExecutionResponse(BaseModel):
+    id: int
+    pipeline_execution_id: int
+    database_id: int
+    stage_name: str
+    status: str
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    duration_seconds: Optional[float] = None
+    trace_id: Optional[str] = None
+    model_name: Optional[str] = None
+    token_usage_json: Optional[str] = None
+    estimated_input_tokens: Optional[int] = None
+    actual_input_tokens: Optional[int] = None
+    estimated_output_tokens: Optional[int] = None
+    actual_output_tokens: Optional[int] = None
+    prompt_size_bytes: Optional[int] = None
+    completion_truncated: Optional[bool] = None
+    error_message: Optional[str] = None
+    execution_order: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class PromptEvaluationResponse(BaseModel):

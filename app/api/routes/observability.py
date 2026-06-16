@@ -163,7 +163,16 @@ async def _load_trace_list(
                 finish_reason=row.status,
                 execution_status=row.status,
                 created_at=row.start_time,
-                details={"token_usage_json": row.token_usage_json or "{}", "error_message": row.error_message},
+                details={
+                    "token_usage_json": row.token_usage_json or "{}",
+                    "estimated_input_tokens": row.estimated_input_tokens,
+                    "actual_input_tokens": row.actual_input_tokens,
+                    "estimated_output_tokens": row.estimated_output_tokens,
+                    "actual_output_tokens": row.actual_output_tokens,
+                    "prompt_size_bytes": row.prompt_size_bytes,
+                    "completion_truncated": row.completion_truncated,
+                    "error_message": row.error_message,
+                },
             )
         )
 
@@ -190,7 +199,17 @@ async def _load_trace_list(
                 finish_reason=row.status,
                 execution_status=row.status,
                 created_at=row.start_time,
-                details={"pipeline_execution_id": row.pipeline_execution_id, "execution_order": row.execution_order, "error_message": row.error_message},
+                details={
+                    "pipeline_execution_id": row.pipeline_execution_id,
+                    "execution_order": row.execution_order,
+                    "estimated_input_tokens": row.estimated_input_tokens,
+                    "actual_input_tokens": row.actual_input_tokens,
+                    "estimated_output_tokens": row.estimated_output_tokens,
+                    "actual_output_tokens": row.actual_output_tokens,
+                    "prompt_size_bytes": row.prompt_size_bytes,
+                    "completion_truncated": row.completion_truncated,
+                    "error_message": row.error_message,
+                },
             )
         )
 
@@ -314,6 +333,12 @@ async def _get_trace_detail(database_id: int, trace_id: str, db: AsyncSession) -
                 "duration_seconds": row.duration_seconds,
                 "model_name": row.model_name,
                 "trace_id": row.trace_id,
+                "estimated_input_tokens": row.estimated_input_tokens,
+                "actual_input_tokens": row.actual_input_tokens,
+                "estimated_output_tokens": row.estimated_output_tokens,
+                "actual_output_tokens": row.actual_output_tokens,
+                "prompt_size_bytes": row.prompt_size_bytes,
+                "completion_truncated": row.completion_truncated,
                 "triggered_by": row.triggered_by,
                 "error_message": row.error_message,
             }
@@ -329,6 +354,12 @@ async def _get_trace_detail(database_id: int, trace_id: str, db: AsyncSession) -
                 "duration_seconds": row.duration_seconds,
                 "model_name": row.model_name,
                 "trace_id": row.trace_id,
+                "estimated_input_tokens": row.estimated_input_tokens,
+                "actual_input_tokens": row.actual_input_tokens,
+                "estimated_output_tokens": row.estimated_output_tokens,
+                "actual_output_tokens": row.actual_output_tokens,
+                "prompt_size_bytes": row.prompt_size_bytes,
+                "completion_truncated": row.completion_truncated,
                 "execution_order": row.execution_order,
                 "error_message": row.error_message,
             }
@@ -343,6 +374,12 @@ async def _get_trace_detail(database_id: int, trace_id: str, db: AsyncSession) -
                 "prompt_tokens": row.prompt_tokens,
                 "completion_tokens": row.completion_tokens,
                 "reasoning_tokens": row.reasoning_tokens,
+                "estimated_input_tokens": row.estimated_input_tokens,
+                "actual_input_tokens": row.actual_input_tokens,
+                "estimated_output_tokens": row.estimated_output_tokens,
+                "actual_output_tokens": row.actual_output_tokens,
+                "prompt_size_bytes": row.prompt_size_bytes,
+                "completion_truncated": row.completion_truncated,
                 "latency_ms": row.latency_ms,
                 "finish_reason": row.finish_reason,
                 "execution_status": row.execution_status,

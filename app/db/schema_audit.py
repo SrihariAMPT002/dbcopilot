@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
 from sqlalchemy import inspect
 from sqlalchemy.sql.sqltypes import Boolean, DateTime, Enum, Float, Integer, String, Text
 
 import app.models  # noqa: F401  # ensure ORM models are registered on Base.metadata
 from app.models.metadata import Base
+from app.models.metadata import GovernancePackage
 
 
 def _type_signature(column_type: Any) -> str:
@@ -29,16 +30,64 @@ def _type_signature(column_type: Any) -> str:
     return column_type.__class__.__name__
 
 
+def _safe_get(obj: Any, key: str, default: Any = None) -> Any:
+    if isinstance(obj, Mapping):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _safe_columns(obj: Any) -> list[Any]:
+    columns = _safe_get(obj, "columns", [])
+    if isinstance(columns, Mapping):
+        return list(columns.values())
+    return list(columns or [])
+
+
+def normalize_index(obj: Any) -> tuple[str, tuple[str, ...], bool]:
+    name = str(_safe_get(obj, "name", ""))
+    columns = _safe_get(obj, "column_names", None)
+    if columns is None:
+        columns = [getattr(col, "name", col) for col in _safe_columns(obj)]
+    unique = bool(_safe_get(obj, "unique", False))
+    return name, tuple(str(col) for col in columns), unique
+
+
+def normalize_column(obj: Any) -> tuple[str, str, bool]:
+    name = str(_safe_get(obj, "name", ""))
+    column_type = _safe_get(obj, "type", _safe_get(obj, "data_type", None))
+    nullable = bool(_safe_get(obj, "nullable", True))
+    return name, _type_signature(column_type) if column_type is not None else "Unknown", nullable
+
+
+def normalize_fk(obj: Any) -> tuple[str, tuple[str, ...], str, tuple[str, ...]]:
+    name = str(_safe_get(obj, "name", ""))
+    constrained_columns = tuple(str(col) for col in (_safe_get(obj, "constrained_columns", []) or []))
+    referred_table = str(_safe_get(obj, "referred_table", ""))
+    referred_columns = tuple(str(col) for col in (_safe_get(obj, "referred_columns", []) or []))
+    if not constrained_columns and hasattr(obj, "parent") and hasattr(obj, "column"):
+        constrained_columns = (str(getattr(obj.parent, "name", "")),)
+        referred_table = str(getattr(getattr(obj.column, "table", None), "name", referred_table))
+        referred_columns = (str(getattr(obj.column, "name", "")),)
+        if not name:
+            name = str(getattr(getattr(obj, "constraint", None), "name", ""))
+    return name, constrained_columns, referred_table, referred_columns
+
+
+def normalize_constraint(obj: Any) -> tuple[str, tuple[str, ...]]:
+    name = str(_safe_get(obj, "name", ""))
+    columns = _safe_get(obj, "column_names", None)
+    if columns is None:
+        columns = [getattr(col, "name", col) for col in _safe_columns(obj)]
+    return name, tuple(str(col) for col in columns)
+
+
 def _index_signature(index: Any) -> tuple[str, tuple[str, ...], bool]:
-    return (
-        index.name,
-        tuple(index.columns.keys()),
-        bool(getattr(index, "unique", False)),
-    )
+    return normalize_index(index)
 
 
 def _index_columns_signature(index: Any) -> tuple[tuple[str, ...], bool]:
-    return (tuple(index.columns.keys()), bool(getattr(index, "unique", False)))
+    _, columns, unique = normalize_index(index)
+    return columns, unique
 
 
 @dataclass
@@ -54,14 +103,13 @@ class SchemaAuditTableReport:
 
     @property
     def has_errors(self) -> bool:
-        return bool(
-            self.missing_columns
-            or self.type_mismatches
-            or self.missing_indexes
-            or self.duplicate_indexes
-            or self.missing_foreign_keys
-            or self.missing_unique_constraints
-        )
+        return self.has_critical_errors()
+
+    def has_critical_errors(self) -> bool:
+        return bool(self.missing_columns or self.type_mismatches or self.missing_foreign_keys)
+
+    def has_warnings(self) -> bool:
+        return bool(self.extra_columns or self.missing_indexes or self.duplicate_indexes or self.missing_unique_constraints)
 
 
 @dataclass
@@ -73,38 +121,59 @@ class SchemaAuditReport:
 
     @property
     def has_errors(self) -> bool:
-        return any(table.has_errors for table in self.table_reports)
+        return self.has_critical_errors()
+
+    def has_critical_errors(self) -> bool:
+        return any(table.has_critical_errors() for table in self.table_reports)
+
+    def has_warnings(self) -> bool:
+        return any(table.has_warnings() for table in self.table_reports) or bool(self.requires_manual_review)
 
     def format_message(self) -> str:
         lines: list[str] = []
         for table in self.table_reports:
-            if not (
-                table.missing_columns
-                or table.extra_columns
-                or table.type_mismatches
-                or table.missing_indexes
-                or table.duplicate_indexes
-                or table.missing_foreign_keys
-                or table.missing_unique_constraints
-            ):
+            if not table.has_critical_errors():
                 continue
             parts: list[str] = []
             if table.missing_columns:
                 parts.append(f"missing columns {', '.join(table.missing_columns)}")
-            if table.extra_columns:
-                parts.append(f"extra columns {', '.join(table.extra_columns)}")
             if table.type_mismatches:
                 parts.append(f"type mismatches {', '.join(table.type_mismatches)}")
-            if table.missing_indexes:
-                parts.append(f"missing indexes {', '.join(table.missing_indexes)}")
-            if table.duplicate_indexes:
-                parts.append(f"duplicate indexes {', '.join(table.duplicate_indexes)}")
             if table.missing_foreign_keys:
                 parts.append(f"missing foreign keys {', '.join(table.missing_foreign_keys)}")
-            if table.missing_unique_constraints:
-                parts.append(f"missing unique constraints {', '.join(table.missing_unique_constraints)}")
             lines.append(f"{table.table_name}: " + "; ".join(parts))
         return "Schema drift detected: " + " | ".join(lines) if lines else "Schema audit passed."
+
+
+def audit_ai_model_contracts() -> list[str]:
+    """Return human-readable contract issues for optional AI fields."""
+    issues: list[str] = []
+    required_attrs = {
+        GovernancePackage: [
+            "table_summary",
+            "business_purpose",
+            "confidence_score",
+            "evidence",
+            "rule_matches",
+            "sample_patterns",
+            "prompt_tokens",
+            "completion_tokens",
+            "reasoning_tokens",
+            "finish_reason",
+            "latency_ms",
+            "prompt_id",
+            "prompt_version",
+            "model_name",
+            "trace_id",
+            "raw_failure_reason",
+            "failure_reason",
+        ]
+    }
+    for model, attrs in required_attrs.items():
+        for attr in attrs:
+            if not hasattr(model, attr):
+                issues.append(f"{model.__name__}.{attr} is missing from the ORM contract")
+    return issues
 
 
 def audit_schema(sync_conn) -> SchemaAuditReport:
@@ -121,7 +190,7 @@ def audit_schema(sync_conn) -> SchemaAuditReport:
             continue
 
         db_columns = {col["name"]: col for col in inspector.get_columns(table_name)}
-        model_columns = {col.name: col for col in table.columns}
+        model_columns = {normalize_column(col)[0]: col for col in table.columns}
         table_report = SchemaAuditTableReport(table_name=table_name)
 
         for column_name, column in model_columns.items():
@@ -136,7 +205,7 @@ def audit_schema(sync_conn) -> SchemaAuditReport:
         db_only_columns = sorted(set(db_columns) - set(model_columns))
         table_report.extra_columns.extend(db_only_columns)
 
-        model_indexes = {_index_signature(index) for index in table.indexes}
+        model_indexes = {normalize_index(index) for index in table.indexes}
         db_index_rows = inspector.get_indexes(table_name)
         db_indexes = {_index_signature(index) for index in db_index_rows}
         db_index_signatures = [_index_columns_signature(index) for index in db_index_rows]
@@ -158,10 +227,10 @@ def audit_schema(sync_conn) -> SchemaAuditReport:
         model_unique_constraints = set()
         for constraint in table.constraints:
             if getattr(constraint, "unique", False):
-                model_unique_constraints.add(tuple(sorted(constraint.columns.keys())))
+                model_unique_constraints.add(tuple(sorted(normalize_constraint(constraint)[1])))
         for index in table.indexes:
             if getattr(index, "unique", False):
-                model_unique_constraints.add(tuple(sorted(index.columns.keys())))
+                model_unique_constraints.add(tuple(sorted(normalize_index(index)[1])))
         db_unique_constraints = {
             tuple(sorted(constraint["column_names"]))
             for constraint in inspector.get_unique_constraints(table_name)
@@ -170,15 +239,13 @@ def audit_schema(sync_conn) -> SchemaAuditReport:
         if missing_unique:
             table_report.missing_unique_constraints.extend([", ".join(columns) for columns in missing_unique])
 
-        model_fks = {
-            (
-                fk.parent.name,
-                fk.column.table.name,
-                fk.column.name,
-            )
-            for col in table.columns
-            for fk in col.foreign_keys
-        }
+        model_fks = set()
+        for col in table.columns:
+            for fk in col.foreign_keys:
+                _, constrained_columns, referred_table, referred_columns = normalize_fk(fk)
+                source_column = constrained_columns[0] if constrained_columns else getattr(col, "name", "")
+                target_column = referred_columns[0] if referred_columns else ""
+                model_fks.add((source_column, referred_table, target_column))
         db_fks = {
             (
                 (fk.get("constrained_columns") or [""])[0],

@@ -156,7 +156,13 @@ export function JobsPage() {
                       {insight.impact_level ?? "unknown"}
                     </Badge>
                   </div>
-                  <pre className="mt-2 max-h-24 overflow-auto rounded bg-muted/40 p-2 text-[10px] text-muted-foreground">{JSON.stringify(insight.evidence ?? [], null, 2)}</pre>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(insight.evidence ?? []).slice(0, 5).map((item, index) => (
+                      <Badge key={`${insight.id ?? index}`} variant="outline" className="text-[10px] uppercase">
+                        {String((item as Record<string, unknown>).evidence_type ?? (item as Record<string, unknown>).type ?? "evidence")}
+                      </Badge>
+                    ))}
+                  </div>
                 </div>
               ))
             ) : (
@@ -187,6 +193,11 @@ export function JobsPage() {
                   <div className="mt-1 text-xs text-muted-foreground">
                     Started: {execution.start_time ?? "n/a"} · Duration: {execution.duration_seconds?.toFixed(2) ?? "n/a"}s
                   </div>
+                  <div className="mt-2 flex flex-wrap gap-2 text-[10px] uppercase">
+                    <Badge variant="outline">In {execution.estimated_input_tokens ?? 0}</Badge>
+                    <Badge variant="outline">Out {execution.actual_output_tokens ?? 0}</Badge>
+                    <Badge variant="outline">Trunc {execution.completion_truncated ? "yes" : "no"}</Badge>
+                  </div>
                 </div>
               ))
             ) : (
@@ -215,6 +226,11 @@ export function JobsPage() {
                   </div>
                   <TraceLink traceId={stage.trace_id} label="Open trace" className="mt-2 text-[11px]" />
                   <div className="mt-1 text-xs text-muted-foreground">Error: {stage.error_message ?? "none"}</div>
+                  <div className="mt-2 flex flex-wrap gap-2 text-[10px] uppercase">
+                    <Badge variant="outline">Est {stage.estimated_input_tokens ?? 0}</Badge>
+                    <Badge variant="outline">Act {stage.actual_input_tokens ?? 0}</Badge>
+                    <Badge variant="outline">Trunc {stage.completion_truncated ? "yes" : "no"}</Badge>
+                  </div>
                 </div>
               ))
             ) : (
@@ -371,9 +387,9 @@ function JobDetail({ job }: { job: PipelineJob }) {
       <div className="space-y-2">
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Logs</div>
         <ScrollArea className="max-h-44 rounded-md border border-border bg-[var(--muted)]/40">
-          <pre className="whitespace-pre-wrap p-3 font-mono text-[11px] leading-relaxed text-foreground">{`[job ${job.id}] ${job.job_type} ${job.status}
+          <div className="whitespace-pre-wrap p-3 font-mono text-[11px] leading-relaxed text-foreground">{`[job ${job.id}] ${job.job_type} ${job.status}
 progress=${job.progress_percentage}%
-failure=${job.failure_reason ?? "n/a"}`}</pre>
+failure=${job.failure_reason ?? "n/a"}`}</div>
         </ScrollArea>
         <TraceLink traceId={job.trace_id} label="Open trace" className="text-xs" />
       </div>

@@ -1,4 +1,9 @@
 packages:
+  metadata:
+    enabled: true
+    ui_visibility: false
+    readiness_enabled: true
+    artifacts: []
   governance:
     enabled: true
     ui_visibility: true
@@ -46,3 +51,9 @@ packages:
     ui_visibility: true
     readiness_enabled: true
     artifacts: []
+  ai_context:
+    enabled: true
+    ui_visibility: true
+    readiness_enabled: true
+    artifacts:
+      - ai_context

@@ -23,7 +23,10 @@ router = APIRouter(prefix="/governance", tags=["Governance"])
 )
 async def get_governance_packages(database_id: int, db: AsyncSession = Depends(get_db)) -> dict:
     service = ColumnSemanticService(db)
-    await service._fetch_database(database_id)
+    try:
+        await service._fetch_database(database_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return await service.build_governance_package(database_id)
 
 
@@ -47,7 +50,10 @@ async def get_governance_package(table_id: int, db: AsyncSession = Depends(get_d
 )
 async def get_governance_pii_summary(database_id: int, db: AsyncSession = Depends(get_db)) -> GovernancePiiSummaryResponse:
     service = ColumnSemanticService(db)
-    await service._fetch_database(database_id)
+    try:
+        await service._fetch_database(database_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     summary = await service.get_governance_pii_summary(database_id)
     return GovernancePiiSummaryResponse.model_validate(summary)
 

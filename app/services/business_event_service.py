@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.config.prompts import get_prompt_registry
 from app.core.config import settings
@@ -68,7 +69,10 @@ class BusinessEventService:
         table_tokens = [token for token in lowered.replace("-", "_").split("_") if token]
         has_temporal = any(token in (col.name or "").lower() for token in ("created", "updated", "date", "time", "timestamp"))
         has_status = any(token in (col.name or "").lower() for token in ("status", "state", "stage", "event"))
-        has_identifier = any(token.endswith("_id") or token == "id" for token in (col.name or "").lower() for col in table.columns)
+        has_identifier = any(
+            (col.name or "").lower().endswith("_id") or (col.name or "").lower() == "id"
+            for col in (table.columns or [])
+        )
 
         signal = sum(1 for token in self.EVENT_HINTS if token in lowered)
         score = 0.35 + 0.1 * signal
@@ -126,7 +130,7 @@ class BusinessEventService:
                     {"role": "system", "content": rendered.system_message or "You are a business event inference engine."},
                     {"role": "user", "content": rendered.user_prompt},
                 ],
-                request_kwargs={"max_completion_tokens": 2000, "response_format": {"type": "json_object"}},
+                request_kwargs={"response_format": {"type": "json_object"}},
                 completeness_score=0.0,
                 coverage_score=0.0,
                 confidence_score=0.0,
@@ -160,7 +164,14 @@ class BusinessEventService:
 
     async def _fetch_tables(self, database_id: int) -> list[DatabaseTable]:
         result = await self.db.execute(
-            select(DatabaseTable).join(DatabaseSchema).where(DatabaseSchema.connected_db_id == database_id)
+            select(DatabaseTable)
+            .join(DatabaseSchema)
+            .options(
+                selectinload(DatabaseTable.schema),
+                selectinload(DatabaseTable.columns),
+                selectinload(DatabaseTable.relationships_from),
+            )
+            .where(DatabaseSchema.connected_db_id == database_id)
         )
         return list(result.scalars().all())
 
@@ -176,8 +187,8 @@ class BusinessEventService:
     def _source_tables(self, table: DatabaseTable, relationships: list[DatabaseRelationship]) -> list[str]:
         source_tables = {table.name}
         for rel in relationships:
-            if getattr(rel, "table", None) and rel.table.name:
-                source_tables.add(rel.table.name)
+            if rel.table_id == table.id:
+                source_tables.add(table.name)
         return sorted(name for name in source_tables if name)[:5]
 
     @staticmethod

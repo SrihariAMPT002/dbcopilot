@@ -8,6 +8,7 @@ language: English
 constraints:
   format: json
   must_use_existing_metadata: true
+  max_completion_tokens: 16000
 system_message: |
   You are a KPI intelligence engine. Infer business KPIs from the provided database metadata.
 user_prompt: |

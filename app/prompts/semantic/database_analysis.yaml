@@ -47,5 +47,5 @@ user_prompt: |
     ]
   }
 constraints:
-  max_completion_tokens: 4000
+  max_completion_tokens: 16000
   output_format: json

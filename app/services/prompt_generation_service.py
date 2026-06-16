@@ -104,7 +104,7 @@ class PromptGenerationService:
                     "content": prompt_registry.user_prompt,
                 },
             ],
-            request_kwargs={"max_completion_tokens": 2400},
+            request_kwargs={},
             completeness_score=1.0,
             coverage_score=1.0,
             confidence_score=1.0,
@@ -153,15 +153,24 @@ class PromptGenerationService:
         self.db.add(version)
 
         usage = result.token_usage or {}
+        observability_metadata = result.metadata or {}
         observability_row = PromptObservabilityLog(
             prompt_package_id=package.id,
             trace_id=result.trace_id,
             model_name=result.model_name,
+            estimated_input_tokens=int(observability_metadata.get("estimated_input_tokens") or 0) or None,
+            actual_input_tokens=int(observability_metadata.get("actual_input_tokens") or 0) or None,
+            estimated_output_tokens=int(observability_metadata.get("estimated_output_tokens") or 0) or None,
+            actual_output_tokens=int(observability_metadata.get("actual_output_tokens") or 0) or None,
             prompt_tokens=usage.get("prompt_tokens"),
             completion_tokens=usage.get("completion_tokens"),
             reasoning_tokens=usage.get("reasoning_tokens"),
+            prompt_size_bytes=int(observability_metadata.get("prompt_size_bytes") or 0) or None,
+            completion_truncated=bool(observability_metadata.get("completion_truncated"))
+            if observability_metadata.get("completion_truncated") is not None
+            else None,
             latency_ms=result.latency_ms,
-            finish_reason=None,
+            finish_reason=usage.get("finish_reason") or observability_metadata.get("finish_reason"),
             execution_status="completed",
             failure_reason=None,
         )

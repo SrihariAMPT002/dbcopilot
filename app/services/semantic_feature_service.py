@@ -94,12 +94,14 @@ class SemanticFeatureService:
         relationships: list[DatabaseRelationship],
         statistics: dict[str, Any] | None = None,
     ) -> SemanticFeatureBundle:
+        schema_count = len(getattr(database, "schemas", []) or [])
+        table_count_total = sum(len(getattr(schema, "tables", []) or []) for schema in (getattr(database, "schemas", []) or []))
         table_count = int(governance_package.get("table_count", 0) or 0)
         pii_count = sum(len(pkg.get("pii_columns", [])) for pkg in governance_package.get("packages", []))
         domain_hint = self._derive_domain_hint(governance_package, relationships)
         relationship_context = [
             {
-                "source_table": rel.table.name if rel.table else None,
+                "source_table": rel.referenced_table_name if rel.referenced_table_name else None,
                 "target_table": rel.referenced_table_name,
                 "source_column": rel.column_name,
                 "target_column": rel.referenced_column_name,
@@ -109,14 +111,14 @@ class SemanticFeatureService:
         evidence = [
             {"source": "governance", "table_count": table_count, "pii_count": pii_count},
             {"source": "relationships", "relationship_count": len(relationship_context)},
-            {"source": "metadata", "schema_count": len(database.schemas or []), "table_count": sum(len(s.tables or []) for s in (database.schemas or []))},
+            {"source": "metadata", "schema_count": schema_count, "table_count": table_count_total},
         ]
         if statistics:
             evidence.append({"source": "statistics", **statistics})
         domain_scores = {
             "governance": min(1.0, pii_count / max(1, table_count * 3)),
             "relationships": min(1.0, len(relationship_context) / max(1, table_count)),
-            "metadata": min(1.0, sum(len(schema.tables or []) for schema in (database.schemas or [])) / max(1, table_count)),
+            "metadata": min(1.0, table_count_total / max(1, table_count)),
         }
         return SemanticFeatureBundle(
             table_id=0,
@@ -143,4 +145,3 @@ class SemanticFeatureService:
         if relationships:
             return "Operational Analytics"
         return "General Business"
-

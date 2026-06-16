@@ -202,7 +202,7 @@ class SchemaEnricher:
 
         # ── Columns ───────────────────────────────────────────────────────
         doc_lines.append("\nColumns:")
-        for col in sorted(table.columns, key=lambda c: c.ordinal_position or 0):
+        for col in sorted(table.columns or [], key=lambda c: c.ordinal_position or 0):
             col_info = f"  - {col.name} ({col.data_type})"
             if col.is_primary_key:
                 col_info += " [PRIMARY KEY]"
@@ -273,14 +273,14 @@ class SchemaEnricher:
                         "type": column.data_type,
                         "description": column.description or "",
                     }
-                    for column in table.columns
+                for column in table.columns or []
                 ],
                 "relationships": [
                     {
                         "column": rel.column_name,
                         "references": f"{rel.referenced_table_name}.{rel.referenced_column_name}",
                     }
-                    for rel in table.relationships_from
+                    for rel in table.relationships_from or []
                 ],
                 "context_doc": context_doc,
             }

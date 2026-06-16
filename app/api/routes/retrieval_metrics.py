@@ -18,7 +18,7 @@ router = APIRouter(prefix="/retrieval", tags=["Retrieval Metrics"])
 @router.get("/metrics/{db_id}")
 async def retrieval_metrics(db_id: int, db: AsyncSession = Depends(get_db)) -> dict:
     docs = await db.execute(select(func.count(EmbeddingDocument.id)).where(EmbeddingDocument.database_id == db_id))
-    logs = await db.execute(select(func.count(RetrievalLog.id)))
+    logs = await db.execute(select(func.count(RetrievalLog.id)).where(RetrievalLog.database_id == db_id))
     evaluations = await db.execute(select(func.count(RetrievalEvaluation.id)).where(RetrievalEvaluation.database_id == db_id))
     collections = await db.execute(select(VectorCollection))
     collection_rows = collections.scalars().all()

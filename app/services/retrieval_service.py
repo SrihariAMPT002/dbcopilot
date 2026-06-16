@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.metadata import ConnectedDatabase
+from app.services.database_guard import ensure_connected
 from app.models.embedding_document import EmbeddingDocument
 from app.models.vector_collection import VectorCollection
 from app.schema_engine.embeddings import EmbeddingEngine, get_qdrant_client, qmodels
@@ -55,10 +56,7 @@ class RetrievalService:
         }
 
     async def _ensure_database(self, database_id: int) -> ConnectedDatabase:
-        database = await self.db.get(ConnectedDatabase, database_id)
-        if not database:
-            raise ValueError(f"Database {database_id} not found")
-        return database
+        return await ensure_connected(self.db, database_id)
 
     @staticmethod
     def _tokenize(text: str) -> set[str]:

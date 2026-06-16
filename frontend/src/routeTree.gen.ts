@@ -24,6 +24,7 @@ import { Route as ExplorerRouteImport } from './routes/explorer'
 import { Route as EmbeddingsRouteImport } from './routes/embeddings'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as ConnectRouteImport } from './routes/connect'
+import { Route as ObservabilityRouteImport } from './routes/observability'
 import { Route as IndexRouteImport } from './routes/index'
 
 const SourcesRoute = SourcesRouteImport.update({
@@ -101,6 +102,11 @@ const ConnectRoute = ConnectRouteImport.update({
   path: '/connect',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ObservabilityRoute = ObservabilityRouteImport.update({
+  id: '/observability',
+  path: '/observability',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -118,6 +124,7 @@ export interface FileRoutesByFullPath {
   '/kpi': typeof KpiRoute
   '/prompt-studio': typeof PromptStudioRoute
   '/prompt-budgets': typeof PromptBudgetsRoute
+  '/observability': typeof ObservabilityRoute
   '/readiness': typeof ReadinessRoute
   '/readiness-history': typeof ReadinessHistoryRoute
   '/relationships': typeof RelationshipsRoute
@@ -136,6 +143,7 @@ export interface FileRoutesByTo {
   '/kpi': typeof KpiRoute
   '/prompt-studio': typeof PromptStudioRoute
   '/prompt-budgets': typeof PromptBudgetsRoute
+  '/observability': typeof ObservabilityRoute
   '/readiness': typeof ReadinessRoute
   '/readiness-history': typeof ReadinessHistoryRoute
   '/relationships': typeof RelationshipsRoute
@@ -155,6 +163,7 @@ export interface FileRoutesById {
   '/kpi': typeof KpiRoute
   '/prompt-studio': typeof PromptStudioRoute
   '/prompt-budgets': typeof PromptBudgetsRoute
+  '/observability': typeof ObservabilityRoute
   '/readiness': typeof ReadinessRoute
   '/readiness-history': typeof ReadinessHistoryRoute
   '/relationships': typeof RelationshipsRoute
@@ -175,6 +184,7 @@ export interface FileRouteTypes {
     | '/kpi'
     | '/prompt-studio'
     | '/prompt-budgets'
+    | '/observability'
     | '/readiness'
     | '/readiness-history'
     | '/relationships'
@@ -193,6 +203,7 @@ export interface FileRouteTypes {
     | '/kpi'
     | '/prompt-studio'
     | '/prompt-budgets'
+    | '/observability'
     | '/readiness'
     | '/readiness-history'
     | '/relationships'
@@ -228,6 +239,7 @@ export interface RootRouteChildren {
   KpiRoute: typeof KpiRoute
   PromptStudioRoute: typeof PromptStudioRoute
   PromptBudgetsRoute: typeof PromptBudgetsRoute
+  ObservabilityRoute: typeof ObservabilityRoute
   ReadinessRoute: typeof ReadinessRoute
   ReadinessHistoryRoute: typeof ReadinessHistoryRoute
   RelationshipsRoute: typeof RelationshipsRoute
@@ -292,6 +304,13 @@ declare module '@tanstack/react-router' {
       path: '/prompt-budgets'
       fullPath: '/prompt-budgets'
       preLoaderRoute: typeof PromptBudgetsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/observability': {
+      id: '/observability'
+      path: '/observability'
+      fullPath: '/observability'
+      preLoaderRoute: typeof ObservabilityRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/kpi': {
@@ -363,6 +382,7 @@ const rootRouteChildren: RootRouteChildren = {
   KpiRoute: KpiRoute,
   PromptStudioRoute: PromptStudioRoute,
   PromptBudgetsRoute: PromptBudgetsRoute,
+  ObservabilityRoute: ObservabilityRoute,
   ReadinessRoute: ReadinessRoute,
   RelationshipsRoute: RelationshipsRoute,
   SemanticsRoute: SemanticsRoute,

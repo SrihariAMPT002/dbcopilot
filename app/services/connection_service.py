@@ -92,7 +92,7 @@ class ConnectionService:
             encrypted_password=encrypted_pw,
             ssl_enabled=req.ssl_enabled,
             status=ConnectionStatus.inactive,
-            lifecycle_status=DatabaseLifecycleStatus.active,
+            lifecycle_status=DatabaseLifecycleStatus.active.value,
         )
         self.db.add(db_conn)
         await safe_flush(self.db)
@@ -111,7 +111,7 @@ class ConnectionService:
             selectinload(ConnectedDatabase.schemas).selectinload(DatabaseSchema.tables)
         )
         if not include_archived:
-            stmt = stmt.where(ConnectedDatabase.lifecycle_status != DatabaseLifecycleStatus.archived)
+            stmt = stmt.where(ConnectedDatabase.lifecycle_status != DatabaseLifecycleStatus.archived.value)
         result = await self.db.execute(stmt.order_by(ConnectedDatabase.created_at.desc()))
         connections = result.scalars().unique().all()
         
@@ -235,7 +235,7 @@ class ConnectionService:
             raise ValueError(f"Connection id={db_id} not found")
         if (confirmation_text or "").strip() != conn.name:
             raise ValueError(f"Confirmation text must exactly match connection name '{conn.name}'")
-        conn.lifecycle_status = DatabaseLifecycleStatus.disconnected
+        conn.lifecycle_status = DatabaseLifecycleStatus.disconnected.value
         conn.status = ConnectionStatus.inactive
         conn.disconnected_at = datetime.now(timezone.utc)
         conn.disconnected_by = actor
@@ -270,7 +270,7 @@ class ConnectionService:
         conn = await self._get_connection_or_none(db_id)
         if not conn:
             raise ValueError(f"Connection id={db_id} not found")
-        conn.lifecycle_status = DatabaseLifecycleStatus.active
+        conn.lifecycle_status = DatabaseLifecycleStatus.active.value
         conn.status = ConnectionStatus.active
         conn.disconnected_at = None
         conn.disconnected_by = None
@@ -309,7 +309,7 @@ class ConnectionService:
             raise ValueError(f"Connection id={db_id} not found")
         if (confirmation_text or "").strip() != conn.name:
             raise ValueError(f"Confirmation text must exactly match connection name '{conn.name}'")
-        conn.lifecycle_status = DatabaseLifecycleStatus.archived
+        conn.lifecycle_status = DatabaseLifecycleStatus.archived.value
         conn.status = ConnectionStatus.inactive
         conn.archived_at = datetime.now(timezone.utc)
         conn.last_error = reason
@@ -344,7 +344,7 @@ class ConnectionService:
             raise ValueError(f"Connection id={db_id} not found")
         if (confirmation_text or "").strip() != conn.name:
             raise ValueError(f"Confirmation text must exactly match connection name '{conn.name}'")
-        conn.lifecycle_status = DatabaseLifecycleStatus.active
+        conn.lifecycle_status = DatabaseLifecycleStatus.active.value
         conn.status = ConnectionStatus.active
         conn.archived_at = None
         conn.last_error = None
@@ -391,7 +391,7 @@ class ConnectionService:
             "delete_embeddings": delete_embeddings,
             "delete_observability": delete_observability,
         }
-        conn.lifecycle_status = DatabaseLifecycleStatus.deleted
+        conn.lifecycle_status = DatabaseLifecycleStatus.deleted.value
         conn.status = ConnectionStatus.inactive
         conn.deleted_at = datetime.now(timezone.utc)
         conn.deletion_summary = json.dumps(deletion_summary)

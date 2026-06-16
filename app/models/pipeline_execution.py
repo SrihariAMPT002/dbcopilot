@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.metadata import Base
@@ -28,6 +28,12 @@ class PipelineExecution(Base):
     trace_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     token_usage_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    estimated_input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    actual_input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    estimated_output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    actual_output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    prompt_size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    completion_truncated: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     triggered_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -60,6 +66,12 @@ class StageExecution(Base):
     trace_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     token_usage_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    estimated_input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    actual_input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    estimated_output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    actual_output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    prompt_size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    completion_truncated: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     execution_order: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -7,30 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CoverageBar } from "@/components/coverage-bar";
 import { TraceLink } from "@/components/common/TraceLink";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { useDatabaseContext } from "@/context/database-context";
 import { useGovernance, useGovernanceEvidence, useGovernanceSummary } from "@/hooks/useGovernance";
-
-type Row = {
-  tableId: number;
-  table: string;
-  col: string;
-  classification: string;
-  risk: "high" | "medium" | "low";
-  confidence: number;
-  purpose: string;
-  aiReasoning: string;
-  rowEvidence: Array<Record<string, unknown>>;
-  ruleMatches: Array<Record<string, unknown>>;
-  samplePatterns: Array<Record<string, unknown> | string>;
-  promptTokens?: number | null;
-  completionTokens?: number | null;
-  reasoningTokens?: number | null;
-  finishReason?: string | null;
-  latencyMs?: number | null;
-};
+import { mapGovernanceDetail, mapGovernancePackages, type GovernanceFindingViewModel } from "@/mappers/governanceMapper";
 
 export function GovernancePage() {
   const { selectedDatabaseId } = useDatabaseContext();
@@ -51,30 +32,8 @@ export function GovernancePage() {
     }
   }, [packages, selectedTableId]);
 
-  const rows: Row[] = useMemo(
-    () =>
-      packages.flatMap((pkg) =>
-        pkg.pii_columns.map((c) => ({
-          tableId: pkg.table_id,
-          table: `${pkg.schema_name}.${pkg.table_name}`,
-          col: c.column_name,
-          classification: c.pii_type ?? (c.is_pii ? "PII" : "non_pii"),
-          risk: (c.risk_level as "high" | "medium" | "low") ?? "low",
-          confidence: c.confidence_score ?? 0,
-          purpose: c.business_meaning ?? pkg.business_purpose ?? "",
-          aiReasoning: c.governance_reasoning ?? "",
-          rowEvidence: pkg.evidence ?? [],
-          ruleMatches: pkg.rule_matches ?? [],
-          samplePatterns: pkg.sample_patterns ?? [],
-          promptTokens: pkg.prompt_tokens,
-          completionTokens: pkg.completion_tokens,
-          reasoningTokens: pkg.reasoning_tokens,
-          finishReason: pkg.finish_reason,
-          latencyMs: pkg.latency_ms,
-        })),
-      ),
-    [packages],
-  );
+  const rows: GovernanceFindingViewModel[] = useMemo(() => mapGovernancePackages(packages), [packages]);
+  const selectedDetail = useMemo(() => mapGovernanceDetail(selectedPackage, evidence), [selectedPackage, evidence]);
 
   const tableSummary = packages.map((pkg) => ({
     id: pkg.table_id,
@@ -83,9 +42,13 @@ export function GovernancePage() {
     highRisk: pkg.risk_columns.length,
     coverage: pkg.confidence_score ? Math.round(pkg.confidence_score * 100) : 0,
   }));
+
   const avgConfidence = packages.length
     ? (packages.reduce((a, p) => a + (p.confidence_score ?? 0), 0) / packages.length).toFixed(2)
     : "0.00";
+
+  const riskRate = summary?.table_count ? Math.round((summary.risk_columns / Math.max(1, summary.table_count)) * 100) : 0;
+  const piiRate = summary?.table_count ? Math.round((summary.pii_columns / Math.max(1, summary.table_count)) * 100) : 0;
 
   const exportPackage = () => {
     const blob = new Blob([JSON.stringify({ summary, packages, evidence: evidence ?? null }, null, 2)], { type: "application/json;charset=utf-8" });
@@ -102,15 +65,15 @@ export function GovernancePage() {
       <PageHeader
         eyebrow="Intelligence"
         title="Governance"
-        description="Live PII classifications, rule matches, evidence, and governance package telemetry."
+        description="Live PII classifications, evidence, risk levels, and package telemetry."
         actions={
           <>
             <Badge variant="outline" className="text-[11px]">
               db {dbId}
             </Badge>
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => document.querySelector('table')?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => document.getElementById("governance-packages")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
               <Filter className="h-3.5 w-3.5" />
-              Filter
+              Focus findings
             </Button>
             <Button variant="outline" size="sm" className="gap-1.5" onClick={exportPackage}>
               <Download className="h-3.5 w-3.5" />
@@ -121,322 +84,176 @@ export function GovernancePage() {
       />
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCard
-          label="Governance coverage"
-          value={String(summary?.table_count ?? packages.length)}
-          hint="tables with persisted packages"
-          icon={ShieldCheck}
-          progress={Math.min(100, summary?.governance_packages ? (summary.table_count / Math.max(1, summary.governance_packages)) * 100 : 0)}
-          tone="success"
-        />
-        <MetricCard
-          label="PII columns"
-          value={String(summary?.pii_columns ?? 0)}
-          hint="from live packages"
-          icon={EyeOff}
-          tone="warning"
-        />
-        <MetricCard
-          label="High-risk columns"
-          value={String(summary?.risk_columns ?? 0)}
-          hint="recommend access policy"
-          icon={ShieldAlert}
-          tone="danger"
-        />
-        <MetricCard
-          label="Avg confidence"
-          value={avgConfidence}
-          hint="persisted package confidence"
-          icon={Activity}
-          tone="info"
-        />
+        <MetricCard label="Governance coverage" value={String(summary?.table_count ?? packages.length)} hint="tables with persisted packages" icon={ShieldCheck} progress={Math.min(100, summary?.governance_packages ? (summary.table_count / Math.max(1, summary.governance_packages)) * 100 : 0)} tone="success" />
+        <MetricCard label="PII columns" value={String(summary?.pii_columns ?? 0)} hint="from live packages" icon={EyeOff} tone="warning" />
+        <MetricCard label="High-risk columns" value={String(summary?.risk_columns ?? 0)} hint="recommend access policy" icon={ShieldAlert} tone="danger" />
+        <MetricCard label="Avg confidence" value={avgConfidence} hint="persisted package confidence" icon={Activity} tone="info" />
       </section>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <Card className="xl:col-span-2">
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-6">
+        <KpiTile label="Total tables" value={String(summary?.table_count ?? packages.length)} onClick={() => document.getElementById("governance-packages")?.scrollIntoView({ behavior: "smooth", block: "start" })} />
+        <KpiTile label="Sensitive tables" value={String(summary?.sensitive_columns ?? 0)} tone="danger" />
+        <KpiTile label="PII rate" value={`${piiRate}%`} tone="warning" />
+        <KpiTile label="Risk rate" value={`${riskRate}%`} tone="danger" />
+        <KpiTile label="Coverage" value={`${Math.min(100, Math.round((summary?.governance_packages ?? 0) ? ((summary?.table_count ?? 0) / Math.max(1, summary!.governance_packages)) * 100 : 0))}%`} tone="success" />
+        <KpiTile label="Risk findings" value={String(summary?.risk_columns ?? 0)} tone="warning" />
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <Card id="governance-packages">
           <CardHeader>
-            <CardTitle className="text-base">Governance package</CardTitle>
-            <CardDescription>Column-level classifications generated for the active source.</CardDescription>
+            <CardTitle className="text-base">Governance packages</CardTitle>
+            <CardDescription>All persisted governance findings grouped by table and column.</CardDescription>
           </CardHeader>
-          <CardContent>
-            <Tabs defaultValue="columns">
-              <TabsList>
-                <TabsTrigger value="columns">Columns</TabsTrigger>
-                <TabsTrigger value="tables">Tables</TabsTrigger>
-              </TabsList>
-              <TabsContent value="columns" className="pt-4">
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-muted/40 hover:bg-muted/40">
-                        <TableHead>Column</TableHead>
-                        <TableHead>Classification</TableHead>
-                        <TableHead>Risk</TableHead>
-                        <TableHead className="text-right">Confidence</TableHead>
-                        <TableHead>Business purpose</TableHead>
+          <CardContent className="space-y-4">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/40 hover:bg-muted/40">
+                    <TableHead>Table</TableHead>
+                    <TableHead>Column</TableHead>
+                    <TableHead>PII</TableHead>
+                    <TableHead>Risk</TableHead>
+                    <TableHead className="text-right">Confidence</TableHead>
+                    <TableHead>Business purpose</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.length ? (
+                    rows.map((row) => (
+                      <TableRow key={row.id} className={cn("cursor-pointer", selectedTableId === row.tableId && "bg-muted/30")} onClick={() => setSelectedTableId(row.tableId)}>
+                        <TableCell>
+                          <div className="text-sm text-muted-foreground">{row.schemaName}.{row.tableName}</div>
+                        </TableCell>
+                        <TableCell className="font-medium text-foreground">{row.columnName}</TableCell>
+                        <TableCell>
+                          <Badge variant={row.piiDetected ? "destructive" : "secondary"} className="text-[10px] uppercase">
+                            {row.piiDetected ? "Detected" : "Not detected"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <RiskBadge risk={row.riskLevel} />
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm">{row.confidence.toFixed(2)}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{row.businessMeaning || "No business purpose captured."}</TableCell>
                       </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {rows.length ? (
-                        rows.map((r) => (
-                          <TableRow
-                            key={`${r.table}.${r.col}`}
-                            className={cn(
-                              "cursor-pointer",
-                              selectedTableId === r.tableId && "bg-muted/30",
-                            )}
-                            onClick={() => setSelectedTableId(r.tableId)}
-                          >
-                            <TableCell>
-                              <div className="text-sm">
-                                <span className="text-muted-foreground">{r.table}.</span>
-                                <span className="font-medium text-foreground">{r.col}</span>
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-sm">{r.classification}</TableCell>
-                            <TableCell>
-                              <RiskBadge risk={r.risk} />
-                            </TableCell>
-                            <TableCell className="text-right tabular-nums text-sm">{r.confidence.toFixed(2)}</TableCell>
-                            <TableCell className="text-xs text-muted-foreground">{r.purpose}</TableCell>
-                          </TableRow>
-                        ))
-                      ) : (
-                        <TableRow>
-                          <TableCell colSpan={5} className="text-sm text-muted-foreground">
-                            No governance packages found for this database.
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </TabsContent>
-              <TabsContent value="tables" className="pt-4">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/40 hover:bg-muted/40">
-                      <TableHead>Table</TableHead>
-                      <TableHead className="text-right">PII cols</TableHead>
-                      <TableHead className="text-right">High risk</TableHead>
-                      <TableHead className="min-w-[180px]">Coverage</TableHead>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-sm text-muted-foreground">
+                        No governance packages found for this database.
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {tableSummary.length ? (
-                      tableSummary.map((t) => (
-                        <TableRow key={t.id} className="cursor-pointer" onClick={() => setSelectedTableId(t.id)}>
-                          <TableCell className="font-mono text-sm">{t.name}</TableCell>
-                          <TableCell className="text-right tabular-nums">{t.piiCols}</TableCell>
-                          <TableCell className="text-right tabular-nums">{t.highRisk}</TableCell>
-                          <TableCell>
-                            <CoverageBar value={t.coverage} />
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    ) : (
-                      <TableRow>
-                        <TableCell colSpan={4} className="text-sm text-muted-foreground">
-                          No table summaries available.
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/40 hover:bg-muted/40">
+                    <TableHead>Table</TableHead>
+                    <TableHead className="text-right">PII cols</TableHead>
+                    <TableHead className="text-right">High risk</TableHead>
+                    <TableHead className="min-w-[180px]">Coverage</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {tableSummary.length ? (
+                    tableSummary.map((table) => (
+                      <TableRow key={table.id} className="cursor-pointer" onClick={() => setSelectedTableId(table.id)}>
+                        <TableCell className="font-mono text-sm">{table.name}</TableCell>
+                        <TableCell className="text-right tabular-nums">{table.piiCols}</TableCell>
+                        <TableCell className="text-right tabular-nums">{table.highRisk}</TableCell>
+                        <TableCell>
+                          <CoverageBar value={table.coverage} />
                         </TableCell>
                       </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </TabsContent>
-            </Tabs>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-sm text-muted-foreground">
+                        No table summaries available.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="xl:sticky xl:top-4 xl:self-start">
           <CardHeader>
-            <CardTitle className="text-base">Governance evidence</CardTitle>
-            <CardDescription>
-              {selectedPackage ? `${selectedPackage.schema_name}.${selectedPackage.table_name}` : "Select a table"}
-            </CardDescription>
+            <CardTitle className="text-base">Governance detail</CardTitle>
+            <CardDescription>{selectedPackage ? `${selectedPackage.schema_name}.${selectedPackage.table_name}` : "Select a table"}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
-            <div className="rounded-md border border-border bg-muted/20 p-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs uppercase tracking-wider text-muted-foreground">Telemetry</span>
-                <Badge variant="outline">{evidence?.finish_reason ?? selectedPackage?.finish_reason ?? "unknown"}</Badge>
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
-                <div>
-                  <div className="text-muted-foreground">Prompt tokens</div>
-                  <div className="font-medium tabular-nums">{evidence?.prompt_tokens ?? selectedPackage?.prompt_tokens ?? 0}</div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">Completion tokens</div>
-                  <div className="font-medium tabular-nums">{evidence?.completion_tokens ?? selectedPackage?.completion_tokens ?? 0}</div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">Reasoning tokens</div>
-                  <div className="font-medium tabular-nums">{evidence?.reasoning_tokens ?? selectedPackage?.reasoning_tokens ?? 0}</div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">Latency</div>
-                  <div className="font-medium tabular-nums">{Math.round(evidence?.latency_ms ?? selectedPackage?.latency_ms ?? 0)} ms</div>
-                </div>
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <TraceLink traceId={selectedPackage?.trace_id} label="Open trace" />
-              </div>
+            <div className="grid grid-cols-2 gap-3">
+              <DetailStat label="Prompt tokens" value={String(evidence?.prompt_tokens ?? selectedPackage?.prompt_tokens ?? 0)} />
+              <DetailStat label="Completion tokens" value={String(evidence?.completion_tokens ?? selectedPackage?.completion_tokens ?? 0)} />
+              <DetailStat label="Reasoning tokens" value={String(evidence?.reasoning_tokens ?? selectedPackage?.reasoning_tokens ?? 0)} />
+              <DetailStat label="Latency" value={`${Math.round(evidence?.latency_ms ?? selectedPackage?.latency_ms ?? 0)} ms`} />
+              <DetailStat label="Finish reason" value={evidence?.finish_reason ?? selectedPackage?.finish_reason ?? "unknown"} />
+              <DetailStat label="Model" value={selectedPackage?.model_name ?? selectedDetail?.modelName ?? "gpt-5-nano"} />
+              <DetailStat label="Confidence" value={`${Math.round((selectedPackage?.confidence_score ?? 0) * 100)}%`} />
             </div>
 
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <TraceLink traceId={selectedPackage?.trace_id} label="Open trace" />
+              <Badge variant="outline">{selectedDetail?.promptVersion ?? selectedPackage?.prompt_version ?? "v1"}</Badge>
+            </div>
+
+            <SectionChips title="Detection evidence" chips={selectedDetail?.evidenceChips ?? []} emptyLabel="No persisted evidence yet." />
             <div>
-              <div className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">Evidence</div>
-              <div className="space-y-2">
-                {(evidence?.evidence ?? []).length ? (
-                  evidence!.evidence.map((item) => (
-                    <div key={item.id} className="rounded-md border border-border bg-background p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="font-medium">{item.evidence_type}</div>
-                        <Badge variant="outline" className="text-[10px] uppercase">
-                          {item.evidence_source}
-                        </Badge>
-                      </div>
-                      <pre className="mt-2 overflow-auto rounded bg-muted/30 p-2 text-[11px] leading-5 text-muted-foreground">
-                        {JSON.stringify(item.evidence_json, null, 2)}
-                      </pre>
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">
-                    No persisted evidence yet.
-                  </div>
-                )}
+              <div className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">Business meaning</div>
+              <div className="rounded-md border border-border bg-background p-3 text-sm text-muted-foreground">
+                {selectedDetail?.businessMeaning || "No business meaning captured."}
               </div>
             </div>
-
-            <div>
-              <div className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">Rule matches</div>
-              <pre className="max-h-56 overflow-auto rounded-md border border-border bg-muted/20 p-3 text-[11px] leading-5 text-muted-foreground">
-                {JSON.stringify(selectedPackage?.rule_matches ?? [], null, 2)}
-              </pre>
-            </div>
-
-            <div>
-              <div className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">Sample patterns</div>
-              <pre className="max-h-44 overflow-auto rounded-md border border-border bg-muted/20 p-3 text-[11px] leading-5 text-muted-foreground">
-                {JSON.stringify(selectedPackage?.sample_patterns ?? [], null, 2)}
-              </pre>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <section className="grid gap-4 xl:grid-cols-3">
-        <Card className="xl:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-base">Column reasoning</CardTitle>
-            <CardDescription>Structured AI reasoning and evidence for the selected governance package.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {selectedPackage ? (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/40 hover:bg-muted/40">
-                      <TableHead>Column</TableHead>
-                      <TableHead>Classification</TableHead>
-                      <TableHead>Risk</TableHead>
-                      <TableHead>Reasoning</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rows.filter((row) => row.tableId === selectedPackage.table_id).length ? (
-                      rows
-                        .filter((row) => row.tableId === selectedPackage.table_id)
-                        .map((row) => (
-                          <TableRow key={`${row.table}.${row.col}`}>
-                            <TableCell>
-                              <span className="text-muted-foreground">{row.table}.</span>
-                              <span className="font-medium text-foreground">{row.col}</span>
-                            </TableCell>
-                            <TableCell>{row.classification}</TableCell>
-                            <TableCell>
-                              <RiskBadge risk={row.risk} />
-                            </TableCell>
-                            <TableCell className="max-w-[700px] text-sm text-muted-foreground">
-                              <div className="space-y-2">
-                                <div>{row.aiReasoning || "No AI reasoning captured."}</div>
-                                <div className="flex flex-wrap gap-2">
-                                  {(row.rowEvidence ?? []).slice(0, 3).map((item, index) => (
-                                    <Badge key={`${row.table}-${row.col}-${index}`} variant="outline" className="text-[10px]">
-                                      {String(item.evidence_type ?? item.type ?? item.reason ?? "evidence")}
-                                    </Badge>
-                                  ))}
-                                </div>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                    ) : (
-                      <TableRow>
-                        <TableCell colSpan={4} className="text-sm text-muted-foreground">
-                          No AI reasoning available for the selected package.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            ) : (
-              <div className="text-sm text-muted-foreground">No governance package selected.</div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Evidence summary</CardTitle>
-            <CardDescription>Telemetry and raw evidence distilled into compact cards.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {selectedPackage ? (
-              <>
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-1">
-                  <MetricCard label="Prompt tokens" value={String(selectedPackage.prompt_tokens ?? 0)} icon={Activity} tone="info" />
-                  <MetricCard label="Completion tokens" value={String(selectedPackage.completion_tokens ?? 0)} icon={Activity} tone="default" />
-                  <MetricCard label="Reasoning tokens" value={String(selectedPackage.reasoning_tokens ?? 0)} icon={Activity} tone="warning" />
-                  <MetricCard label="Latency" value={`${Math.round(selectedPackage.latency_ms ?? 0)} ms`} icon={Activity} tone="success" />
-                </div>
-                <div className="space-y-2">
-                  <div className="text-xs uppercase tracking-wider text-muted-foreground">Rule matches</div>
-                  <div className="flex flex-wrap gap-2">
-                    {(selectedPackage.rule_matches ?? []).length ? (
-                      selectedPackage.rule_matches.slice(0, 12).map((item, index) => (
-                        <Badge key={`rule-${index}`} variant="outline" className="text-[10px]">
-                          {String((item as Record<string, unknown>).rule_name ?? (item as Record<string, unknown>).pattern ?? (item as Record<string, unknown>).name ?? "rule")}
-                        </Badge>
-                      ))
-                    ) : (
-                      <div className="text-sm text-muted-foreground">No rule matches persisted.</div>
-                    )}
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <div className="text-xs uppercase tracking-wider text-muted-foreground">Sample patterns</div>
-                  <div className="space-y-2">
-                    {(selectedPackage.sample_patterns ?? []).length ? (
-                      selectedPackage.sample_patterns.slice(0, 6).map((item, index) => (
-                        <div key={`sample-${index}`} className="rounded-md border border-border bg-card p-3 text-xs text-muted-foreground">
-                          {typeof item === "string" ? item : JSON.stringify(item, null, 2)}
-                        </div>
-                      ))
-                    ) : (
-                      <div className="text-sm text-muted-foreground">No sample patterns persisted.</div>
-                    )}
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="text-sm text-muted-foreground">No governance package selected.</div>
-            )}
+            <SectionChips title="Rule matches" chips={selectedDetail?.ruleMatchChips ?? []} emptyLabel="No rule matches persisted." secondary />
+            <SectionChips title="Sample patterns" chips={selectedDetail?.samplePatternChips ?? []} emptyLabel="No sample patterns persisted." />
           </CardContent>
         </Card>
       </section>
+    </div>
+  );
+}
+
+function KpiTile({ label, value, tone = "default", onClick }: { label: string; value: string; tone?: "default" | "danger" | "warning" | "success"; onClick?: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="rounded-xl border border-border bg-card p-4 text-left shadow-sm transition hover:border-primary/40">
+      <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={cn("mt-1 text-2xl font-semibold", tone === "danger" && "text-destructive", tone === "warning" && "text-[var(--warning)]", tone === "success" && "text-[var(--success)]")}>{value}</div>
+    </button>
+  );
+}
+
+function DetailStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-border bg-muted/20 p-3">
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="mt-1 font-medium text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function SectionChips({ title, chips, emptyLabel, secondary = false }: { title: string; chips: string[]; emptyLabel: string; secondary?: boolean }) {
+  return (
+    <div>
+      <div className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">{title}</div>
+      <div className="flex flex-wrap gap-2">
+        {chips.length ? (
+          chips.map((chip) => (
+            <Badge key={chip} variant={secondary ? "secondary" : "outline"} className="text-[10px] uppercase">
+              {chip}
+            </Badge>
+          ))
+        ) : (
+          <div className="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">{emptyLabel}</div>
+        )}
+      </div>
     </div>
   );
 }

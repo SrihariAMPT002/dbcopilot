@@ -838,12 +838,13 @@ class RelationshipGraphEngine:
 
     def _build_cluster_summary(self, prompt_payload: dict[str, Any], cluster_table_ids: list[int]) -> dict[str, Any]:
         summary = prompt_payload.get("cluster_summary") or prompt_payload.get("business_relationship_summary") or ""
-        confidence = prompt_payload.get("cluster_confidence")
+        confidence = prompt_payload.get("confidence_score", prompt_payload.get("cluster_confidence"))
         if confidence is None:
             confidence = prompt_payload.get("confidence_score", 0.0)
         return {
             "cluster_id": self._cluster_key(cluster_table_ids),
             "cluster_summary": summary,
+            "confidence_score": float(confidence or 0.0),
             "cluster_confidence": float(confidence or 0.0),
         }
 
@@ -1044,7 +1045,8 @@ class RelationshipGraphEngine:
             payload = self._parse_json_object(result.content or "")
             payload = self._validate_relationship_payload(payload)
             payload["cluster_summary"] = payload.get("cluster_summary") or ""
-            payload["cluster_confidence"] = float(payload.get("cluster_confidence", 0.0) or 0.0)
+            payload["confidence_score"] = float(payload.get("confidence_score", payload.get("cluster_confidence", 0.0)) or 0.0)
+            payload["cluster_confidence"] = payload["confidence_score"]
             payload["prompt_name"] = discovery_prompt.metadata.id
             payload["prompt_version"] = str(discovery_prompt.metadata.version)
             payload["model_name"] = result.model_name
@@ -1069,7 +1071,7 @@ class RelationshipGraphEngine:
             payload["graph_metrics"] = batch_prompt_context.get("graph_features", {}).get("graph_metrics", {})
             payload["confidence_details"] = {
                 "cluster_scores": batch_prompt_context.get("cluster_scores", {}),
-                "ai_confidence": payload["cluster_confidence"],
+                "ai_confidence": payload["confidence_score"],
             }
             payload["cluster_size"] = telemetry["cluster_size"]
             payload["estimated_tokens"] = telemetry["estimated_tokens"]
@@ -1135,7 +1137,8 @@ class RelationshipGraphEngine:
                     "cluster_table_ids": payload.get("cluster_table_ids", []),
                     "cluster_size": len(payload.get("cluster_table_ids", [])),
                     "cluster_summary": payload.get("cluster_summary", ""),
-                    "cluster_confidence": payload.get("cluster_confidence", 0.0),
+                    "confidence_score": payload.get("confidence_score", payload.get("cluster_confidence", 0.0)),
+                    "cluster_confidence": payload.get("confidence_score", payload.get("cluster_confidence", 0.0)),
                     "estimated_tokens": payload.get("estimated_tokens"),
                     "actual_input_tokens": payload.get("actual_input_tokens"),
                     "actual_output_tokens": payload.get("actual_output_tokens"),
@@ -1166,6 +1169,7 @@ class RelationshipGraphEngine:
             "cluster_label": "batched-cluster",
             "cluster_table_ids": cluster_table_ids,
             "cluster_summary": "Batched relationship intelligence merged from smaller AI requests.",
+            "confidence_score": 0.0,
             "cluster_confidence": 0.0,
             "prompt_name": "relationship_discovery",
             "prompt_version": "2.0",
@@ -1216,7 +1220,8 @@ class RelationshipGraphEngine:
                     "cluster_table_ids": payload.get("cluster_table_ids", []),
                     "cluster_size": len(payload.get("cluster_table_ids", [])),
                     "cluster_summary": payload.get("cluster_summary", ""),
-                    "cluster_confidence": payload.get("cluster_confidence", 0.0),
+                    "confidence_score": payload.get("confidence_score", payload.get("cluster_confidence", 0.0)),
+                    "cluster_confidence": payload.get("confidence_score", payload.get("cluster_confidence", 0.0)),
                     "estimated_tokens": payload.get("estimated_tokens"),
                     "actual_input_tokens": payload.get("actual_input_tokens"),
                     "actual_output_tokens": payload.get("actual_output_tokens"),
@@ -1272,7 +1277,7 @@ class RelationshipGraphEngine:
         row.upstream_dependencies = list(relationship_payload.get("upstream_dependencies") or [])
         row.downstream_dependencies = list(relationship_payload.get("downstream_dependencies") or [])
         row.lifecycle_flows = list(relationship_payload.get("lifecycle_flows") or [])
-        row.confidence_score = float(relationship_payload.get("cluster_confidence", 0.0) or 0.0)
+        row.confidence_score = float(relationship_payload.get("confidence_score", relationship_payload.get("cluster_confidence", 0.0)) or 0.0)
         row.evidence = list(relationship_payload.get("evidence") or [])
         row.graph_metrics = dict(relationship_payload.get("graph_metrics") or {})
         row.confidence_details = dict(relationship_payload.get("confidence_details") or {})
@@ -1352,6 +1357,7 @@ class RelationshipGraphEngine:
                                 "cluster_table_ids": reduced_cluster,
                                 "cluster_size": len(reduced_cluster),
                                 "cluster_summary": "",
+                                "confidence_score": 0.0,
                                 "cluster_confidence": 0.0,
                                 "estimated_tokens": 0,
                                 "actual_input_tokens": 0,
@@ -1509,7 +1515,7 @@ class RelationshipGraphEngine:
                 if edge.source_table_id in cluster_tables or edge.target_table_id in cluster_tables:
                     cluster_id = str(cluster.get("cluster_id"))
                     cluster_summary = cluster.get("cluster_summary")
-                    cluster_confidence = float(cluster.get("cluster_confidence", 0.0) or 0.0)
+                    cluster_confidence = float(cluster.get("confidence_score", cluster.get("cluster_confidence", 0.0)) or 0.0)
                     parent_cluster_id = cluster.get("parent_cluster_id")
                     domain_name = cluster.get("domain_name")
                     analysis_status = cluster.get("analysis_status")
@@ -1552,7 +1558,7 @@ class RelationshipGraphEngine:
                     actual_input_tokens=int(cluster.get("actual_input_tokens", 0) or 0) if cluster_id else None,
                     actual_output_tokens=int(cluster.get("actual_output_tokens", 0) or 0) if cluster_id else None,
                     cluster_summary=cluster_summary,
-                    cluster_confidence=cluster_confidence,
+                    confidence_score=cluster_confidence,
                     prompt_truncated=bool(cluster.get("prompt_truncated", False)) if cluster_id else None,
                     analysis_status=analysis_status,
                     execution_status=intelligence.get("execution_status"),

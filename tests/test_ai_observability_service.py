@@ -74,6 +74,14 @@ def test_extract_azure_content_raises_for_empty_response():
         extract_azure_content(response)
 
 
+def test_resolve_completion_budget_scales_with_prompt_size():
+    estimated_tokens, completion_budget = AIObservabilityService._resolve_completion_budget(10_000, 0)
+
+    assert estimated_tokens == 12_000
+    assert 2_000 <= completion_budget <= 12_000
+    assert completion_budget >= 3_600
+
+
 def test_generate_chat_retries_once_on_length(monkeypatch):
     service = AIObservabilityService()
     service._langsmith_enabled = False

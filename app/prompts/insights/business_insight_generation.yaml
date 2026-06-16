@@ -49,4 +49,4 @@ user_prompt: |
   }
 constraints:
   output_format: json
-  max_completion_tokens: 1200
+  max_completion_tokens: 16000

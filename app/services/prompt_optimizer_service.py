@@ -59,7 +59,7 @@ class PromptOptimizerService:
                     ),
                 },
             ],
-            request_kwargs={"max_completion_tokens": 6000},
+            request_kwargs={},
             extra_metadata={"feature": "prompt_optimization", "prompt_package_id": package_id},
         )
         optimized = (result.content or "").strip() or package.generated_prompt
