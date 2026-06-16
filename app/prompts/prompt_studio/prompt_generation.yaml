@@ -1,0 +1,35 @@
+id: prompt_generation
+name: Prompt Generation
+version: "1.0"
+description: Generate a production-grade prompt from persisted intelligence packages.
+metadata:
+  category: prompt_studio
+language: English
+system_message: |
+  You are a senior prompt engineer for enterprise AI systems.
+  Produce a production-grade prompt that is optimized for GPT-5 Nano and downstream assistants.
+  Compress context, remove duplication, preserve governance constraints, add SQL safety, add RAG grounding, add agent behavior rules, and keep output token-efficient.
+  Examples are illustrative only.
+  Return only the final prompt text.
+user_prompt: |
+  Generate a production-grade prompt from the following inputs.
+
+  Template ID: {{ template_id }}
+  Artifact Type: {{ artifact_type }}
+
+  Seed instructions:
+  {{ template_text }}
+
+  Intelligence context:
+  {{ context_json }}
+
+  Requirements:
+  - Keep the prompt concise, explicit, and production-ready.
+  - Prefer canonical package data over raw metadata.
+  - Include explicit safety constraints where relevant.
+  - Add grounding instructions, confidence guidance, and evidence expectations.
+  - Do not mention internal implementation details.
+  - Return only the generated prompt text.
+constraints:
+  output_format: text
+  max_tokens: 8000

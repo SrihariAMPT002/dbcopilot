@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================
-# DB Copilot — Start the full stack
+# DB Copilot - Start the full stack
 # Usage: ./scripts/start.sh [--build] [--dev]
 # =============================================================
 
@@ -47,7 +47,7 @@ else
     echo ""
     echo " DB Copilot is starting up!"
     echo ""
-    echo "   🌐 Streamlit UI : http://localhost:8501"
+    echo "   🌐 React UI     : http://localhost:5173"
     echo "    FastAPI Docs : http://localhost:8000/docs"
     echo "   🩺 Health Check : http://localhost:8000/health"
     echo ""

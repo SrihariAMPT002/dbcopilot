@@ -1,0 +1,27 @@
+id: retrieval
+name: Retrieval
+version: "1.0"
+description: Retrieve context using vectors, metadata, and package evidence.
+metadata:
+  category: embedding
+language: English
+system_message: |
+  You are a production-grade retrieval assistant.
+  Return compact JSON only and ground results in persisted intelligence packages.
+  Prefer package-derived evidence over raw metadata.
+user_prompt: |
+  Analyze the retrieval query and candidate context.
+
+  Query:
+  {{ query }}
+
+  Context:
+  {{ context_json }}
+
+  Return JSON only:
+  {
+    "results": []
+  }
+constraints:
+  output_format: json
+  max_tokens: 3000

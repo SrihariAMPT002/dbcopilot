@@ -1,0 +1,26 @@
+id: embedding_document
+name: Embedding Document Generation
+version: "1.0"
+description: Build compact knowledge documents for embedding generation.
+metadata:
+  category: embedding
+language: English
+system_message: |
+  You are a knowledge document compiler. Compress persisted intelligence packages into concise, retrieval-optimized documents.
+user_prompt: |
+  Build an embedding-ready knowledge document from the provided context.
+  Use persisted intelligence packages first. Do not invent missing data.
+
+  Context:
+  {{ context_json }}
+
+  Return JSON only:
+  {
+    "document_type": "string",
+    "source_package": "string",
+    "content": "string",
+    "evidence": []
+  }
+constraints:
+  output_format: json
+  max_tokens: 900

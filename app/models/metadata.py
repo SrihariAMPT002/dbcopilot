@@ -560,6 +560,28 @@ class SchemaRelationshipGraph(Base):
     used_fallback: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     trace_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    @property
+    def entity_graph(self) -> list[dict]:
+        try:
+            return json.loads(self.business_entity_graph) if self.business_entity_graph else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @entity_graph.setter
+    def entity_graph(self, value: list[dict]) -> None:
+        self.business_entity_graph = json.dumps(value or [])
+
+    @property
+    def lifecycle_flows(self) -> list[dict]:
+        try:
+            return json.loads(self.entity_lifecycle_descriptions) if self.entity_lifecycle_descriptions else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @lifecycle_flows.setter
+    def lifecycle_flows(self, value: list[dict]) -> None:
+        self.entity_lifecycle_descriptions = json.dumps(value or [])
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -611,6 +633,14 @@ class GovernancePackage(Base):
     _sensitive_columns: Mapped[str] = mapped_column("sensitive_columns", Text, nullable=False, default="[]")
     overall_risk: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     confidence_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    evidence: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    rule_matches: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    sample_patterns: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    prompt_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    reasoning_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    finish_reason: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    latency_ms: Mapped[Optional[float]] = mapped_column(nullable=True)
     prompt_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     prompt_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -658,6 +688,58 @@ class GovernancePackage(Base):
     @sensitive_columns.setter
     def sensitive_columns(self, value: list[dict]) -> None:
         self._sensitive_columns = json.dumps(value or [])
+
+
+class GovernanceEvidence(Base):
+    __tablename__ = "governance_evidence"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    governance_package_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("governance_packages.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    column_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("database_columns.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    evidence_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_source: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ColumnStatistics(Base):
+    __tablename__ = "column_statistics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    database_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("connected_databases.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    table_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("database_tables.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    column_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("database_columns.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
+    )
+    column_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    data_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    stats_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class PIIPattern(Base):
+    __tablename__ = "pii_patterns"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    pattern_key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    label: Mapped[str] = mapped_column(String(128), nullable=False)
+    pattern_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    pattern_value: Mapped[str] = mapped_column(Text, nullable=False)
+    risk_level: Mapped[str] = mapped_column(String(32), nullable=False, default="medium")
+    confidence_weight: Mapped[float] = mapped_column(nullable=False, default=0.5)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class DatabaseSemantic(Base):
@@ -817,6 +899,8 @@ class SemanticPackage(Base):
     _business_capabilities: Mapped[str] = mapped_column("business_capabilities", Text, nullable=False, default="[]")
     _business_glossary: Mapped[str] = mapped_column("business_glossary", Text, nullable=False, default="[]")
     confidence_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    _domain_scores: Mapped[str] = mapped_column("domain_scores", Text, nullable=False, default="{}")
+    _evidence: Mapped[str] = mapped_column("evidence", Text, nullable=False, default="[]")
     prompt_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     prompt_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -870,6 +954,28 @@ class SemanticPackage(Base):
     def business_glossary(self, value: list[dict]) -> None:
         self._business_glossary = json.dumps(value or [])
 
+    @property
+    def domain_scores(self) -> dict:
+        try:
+            return json.loads(self._domain_scores) if self._domain_scores else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    @domain_scores.setter
+    def domain_scores(self, value: dict) -> None:
+        self._domain_scores = json.dumps(value or {})
+
+    @property
+    def evidence(self) -> list[dict]:
+        try:
+            return json.loads(self._evidence) if self._evidence else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @evidence.setter
+    def evidence(self, value: list[dict]) -> None:
+        self._evidence = json.dumps(value or [])
+
 
 class TableSemanticPackage(Base):
     """Persisted canonical semantic package for a table."""
@@ -884,6 +990,7 @@ class TableSemanticPackage(Base):
     business_capability: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     business_process: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     _business_keywords: Mapped[str] = mapped_column("business_keywords", Text, nullable=False, default="[]")
+    _evidence: Mapped[str] = mapped_column("evidence", Text, nullable=False, default="[]")
     semantic_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     confidence_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
     prompt_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -904,6 +1011,45 @@ class TableSemanticPackage(Base):
     def business_keywords(self, value: list[str]) -> None:
         self._business_keywords = json.dumps(value or [])
 
+    @property
+    def evidence(self) -> list[dict]:
+        try:
+            return json.loads(self._evidence) if self._evidence else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @evidence.setter
+    def evidence(self, value: list[dict]) -> None:
+        self._evidence = json.dumps(value or [])
+
+
+class SemanticEvidence(Base):
+    __tablename__ = "semantic_evidence"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    semantic_package_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("semantic_packages.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    table_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("database_tables.id", ondelete="CASCADE"), nullable=True, index=True)
+    evidence_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_source: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class BusinessGlossary(Base):
+    __tablename__ = "business_glossary"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    semantic_package_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("semantic_packages.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    term: Mapped[str] = mapped_column(String(255), nullable=False)
+    definition: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(64), nullable=False, default="ai")
+    confidence_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
 
 class RelationshipPackage(Base):
     """Persisted canonical relationship intelligence package."""
@@ -921,6 +1067,9 @@ class RelationshipPackage(Base):
     _upstream_dependencies: Mapped[str] = mapped_column("upstream_dependencies", Text, nullable=False, default="[]")
     _downstream_dependencies: Mapped[str] = mapped_column("downstream_dependencies", Text, nullable=False, default="[]")
     _lifecycle_flows: Mapped[str] = mapped_column("lifecycle_flows", Text, nullable=False, default="[]")
+    _evidence: Mapped[str] = mapped_column("evidence", Text, nullable=False, default="[]")
+    _graph_metrics: Mapped[str] = mapped_column("graph_metrics", Text, nullable=False, default="{}")
+    _confidence_details: Mapped[str] = mapped_column("confidence_details", Text, nullable=False, default="{}")
     confidence_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
     prompt_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     prompt_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
@@ -995,6 +1144,39 @@ class RelationshipPackage(Base):
     def lifecycle_flows(self, value: list[dict]) -> None:
         self._lifecycle_flows = json.dumps(value or [])
 
+    @property
+    def evidence(self) -> list[dict]:
+        try:
+            return json.loads(self._evidence) if self._evidence else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @evidence.setter
+    def evidence(self, value: list[dict]) -> None:
+        self._evidence = json.dumps(value or [])
+
+    @property
+    def graph_metrics(self) -> dict:
+        try:
+            return json.loads(self._graph_metrics) if self._graph_metrics else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    @graph_metrics.setter
+    def graph_metrics(self, value: dict) -> None:
+        self._graph_metrics = json.dumps(value or {})
+
+    @property
+    def confidence_details(self) -> dict:
+        try:
+            return json.loads(self._confidence_details) if self._confidence_details else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    @confidence_details.setter
+    def confidence_details(self, value: dict) -> None:
+        self._confidence_details = json.dumps(value or {})
+
 
 class RelationshipClusterTelemetry(Base):
     """Telemetry for cluster analysis and prompt stability."""
@@ -1018,6 +1200,36 @@ class RelationshipClusterTelemetry(Base):
     prompt_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class RelationshipEvidence(Base):
+    __tablename__ = "relationship_evidence"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    relationship_package_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("relationship_packages.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    cluster_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    evidence_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_source: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ClusterScore(Base):
+    __tablename__ = "cluster_scores"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    relationship_package_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("relationship_packages.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    cluster_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    centrality_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    hub_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    community_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    confidence_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    metrics_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

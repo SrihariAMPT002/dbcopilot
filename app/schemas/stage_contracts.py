@@ -207,6 +207,33 @@ class StageGraphResponse(BaseModel):
     message: str = "Stage graph loaded."
 
 
+class StageProgressItem(BaseModel):
+    stage: str
+    job_id: Optional[int] = None
+    status: str = "pending"
+    progress_percentage: int = 0
+    retries: int = 0
+    failure_reason: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    depends_on: list[str] = Field(default_factory=list)
+
+
+class StageProgressResponse(BaseModel):
+    database_id: int
+    parent_job_id: Optional[int] = None
+    overall_status: str = "pending"
+    overall_progress_percentage: int = 0
+    current_stage: Optional[str] = None
+    completed_stages: int = 0
+    running_stages: int = 0
+    failed_stages: int = 0
+    pending_stages: int = 0
+    stages: list[StageProgressItem] = Field(default_factory=list)
+    graph: list[StageDependency] = Field(default_factory=list)
+    message: str = "Stage progress loaded."
+
+
 STAGE_CONTRACTS: dict[str, StageContract] = {
     "metadata": StageContract(
         stage_name="metadata",

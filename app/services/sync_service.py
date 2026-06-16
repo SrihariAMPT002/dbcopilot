@@ -32,6 +32,7 @@ from app.models.metadata import (
     SyncStatus,
     TableType,
 )
+from app.models.pipeline_execution import PipelineExecution, StageExecution
 from app.schemas.api_schemas import SyncResponse, SyncLogResponse
 from app.utils import normalize_column_max_length, safe_flush
 
@@ -46,6 +47,77 @@ def _log_stage_duration(stage: str, start: float, **fields) -> None:
 class SyncService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+
+    async def _run_tracked_stage(
+        self,
+        pipeline_execution: PipelineExecution,
+        *,
+        stage_name: str,
+        execution_order: int,
+        db_id: int,
+        stage_label: str,
+        runner,
+    ) -> bool:
+        stage_execution = StageExecution(
+            pipeline_execution_id=pipeline_execution.id,
+            database_id=db_id,
+            stage_name=stage_name,
+            status="running",
+            start_time=datetime.now(timezone.utc),
+            execution_order=execution_order,
+        )
+        self.db.add(stage_execution)
+        await safe_flush(self.db)
+        success = True
+        stage_start = time.monotonic()
+        try:
+            await runner(db_id)
+            stage_execution.status = "completed"
+            stage_execution.end_time = datetime.now(timezone.utc)
+            stage_execution.duration_seconds = time.monotonic() - stage_start
+            _log_stage_duration(stage_label, stage_start, db_id=db_id)
+        except Exception as exc:
+            success = False
+            stage_execution.status = "failed"
+            stage_execution.end_time = datetime.now(timezone.utc)
+            stage_execution.duration_seconds = time.monotonic() - stage_start
+            stage_execution.error_message = str(exc)
+            logger.exception("Tracked stage failed | db_id=%s stage=%s", db_id, stage_name)
+        await safe_flush(self.db)
+        return success
+
+    async def _run_governance_stage(self, db_id: int) -> None:
+        from app.services.column_semantic_service import ColumnSemanticService
+
+        await ColumnSemanticService(self.db).generate_for_database(db_id, force=False)
+
+    async def _run_semantics_stage(self, db_id: int) -> None:
+        from app.services.database_semantic_service import DatabaseSemanticService
+
+        await DatabaseSemanticService(self.db).generate_and_store_semantics(db_id)
+
+    async def _run_relationships_stage(self, db_id: int) -> None:
+        from app.schema_engine.relationship_graph import RelationshipGraphEngine
+
+        await RelationshipGraphEngine(self.db).build_relationship_graph(db_id, persist=True)
+
+    async def _run_kpi_stage(self, db_id: int) -> None:
+        await KPIIntelligenceService(self.db).generate_for_database(db_id)
+
+    async def _run_prompt_stage(self, db_id: int) -> None:
+        from app.services.prompt_studio_service import PromptStudioService
+
+        await PromptStudioService(self.db).generate_artifacts(db_id)
+
+    async def _run_embeddings_stage(self, db_id: int) -> None:
+        from app.schema_engine.embeddings import EmbeddingEngine
+
+        await EmbeddingEngine(self.db).generate_database_embeddings(db_id)
+
+    async def _run_readiness_stage(self, db_id: int) -> None:
+        from app.services.readiness_service import ReadinessService
+
+        await ReadinessService(self.db).recompute(db_id)
 
     # ── Public entrypoint ─────────────────────────────────────────────────
 
@@ -74,8 +146,28 @@ class SyncService:
         conn.status = ConnectionStatus.active
         await safe_flush(self.db)
 
+        pipeline_execution = PipelineExecution(
+            database_id=db_id,
+            status="running",
+            triggered_by="sync_service",
+        )
+        self.db.add(pipeline_execution)
+        await safe_flush(self.db)
+        await self.db.refresh(pipeline_execution)
+
         start = time.monotonic()
         try:
+            metadata_stage = StageExecution(
+                pipeline_execution_id=pipeline_execution.id,
+                database_id=db_id,
+                stage_name="metadata",
+                status="running",
+                start_time=datetime.now(timezone.utc),
+                execution_order=0,
+            )
+            self.db.add(metadata_stage)
+            await safe_flush(self.db)
+
             stage_start = time.monotonic()
             schemas = await self._run_introspection(conn)
             _log_stage_duration("schema sync / introspection", stage_start, db_id=db_id, schemas=len(schemas))
@@ -91,48 +183,117 @@ class SyncService:
                 relationships=counts["relationships"],
             )
             await self.db.commit()
+            metadata_stage.status = "completed"
+            metadata_stage.end_time = datetime.now(timezone.utc)
+            metadata_stage.duration_seconds = time.monotonic() - start
+            await safe_flush(self.db)
 
-            try:
-                from app.services.database_semantic_service import DatabaseSemanticService
+            stage_statuses: list[bool] = []
 
-                semantic_start = time.monotonic()
-                await DatabaseSemanticService(self.db).generate_and_store_semantics(db_id)
-                _log_stage_duration("database semantic generation", semantic_start, db_id=db_id)
-                await self.db.commit()
-            except Exception as semantic_exc:
-                logger.exception(
-                    "Database semantic generation failed for db_id=%s: %s",
-                    db_id,
-                    semantic_exc,
+            stage_statuses.append(
+                await self._run_tracked_stage(
+                    pipeline_execution,
+                    stage_name="governance",
+                    execution_order=1,
+                    db_id=db_id,
+                    stage_label="pii classification",
+                    runner=self._run_governance_stage,
                 )
+            )
+            await self.db.commit()
 
-            try:
-                from app.services.column_semantic_service import ColumnSemanticService
-
-                governance_start = time.monotonic()
-                await ColumnSemanticService(self.db).generate_for_database(db_id, force=False)
-                _log_stage_duration("pii classification", governance_start, db_id=db_id)
-                await self.db.commit()
-            except Exception as pii_exc:
-                logger.exception(
-                    "Incremental PII rescan after metadata sync failed for db_id=%s: %s",
-                    db_id,
-                    pii_exc,
+            stage_statuses.append(
+                await self._run_tracked_stage(
+                    pipeline_execution,
+                    stage_name="semantics",
+                    execution_order=2,
+                    db_id=db_id,
+                    stage_label="database semantic generation",
+                    runner=self._run_semantics_stage,
                 )
+            )
+            await self.db.commit()
+
+            stage_statuses.append(
+                await self._run_tracked_stage(
+                    pipeline_execution,
+                    stage_name="relationships",
+                    execution_order=3,
+                    db_id=db_id,
+                    stage_label="relationship graph build",
+                    runner=self._run_relationships_stage,
+                )
+            )
+            await self.db.commit()
+
+            stage_statuses.append(
+                await self._run_tracked_stage(
+                    pipeline_execution,
+                    stage_name="kpi",
+                    execution_order=4,
+                    db_id=db_id,
+                    stage_label="kpi intelligence generation",
+                    runner=self._run_kpi_stage,
+                )
+            )
+            await self.db.commit()
+
+            stage_statuses.append(
+                await self._run_tracked_stage(
+                    pipeline_execution,
+                    stage_name="prompt",
+                    execution_order=5,
+                    db_id=db_id,
+                    stage_label="prompt studio artifact generation",
+                    runner=self._run_prompt_stage,
+                )
+            )
+            await self.db.commit()
+
+            stage_statuses.append(
+                await self._run_tracked_stage(
+                    pipeline_execution,
+                    stage_name="embeddings",
+                    execution_order=6,
+                    db_id=db_id,
+                    stage_label="embedding generation",
+                    runner=self._run_embeddings_stage,
+                )
+            )
+            await self.db.commit()
+
+            stage_statuses.append(
+                await self._run_tracked_stage(
+                    pipeline_execution,
+                    stage_name="readiness",
+                    execution_order=7,
+                    db_id=db_id,
+                    stage_label="readiness recompute",
+                    runner=self._run_readiness_stage,
+                )
+            )
+            await self.db.commit()
 
             try:
-                from app.schema_engine.relationship_graph import RelationshipGraphEngine
+                from app.services.opportunity_service import OpportunityService
+                from app.services.data_product_service import DataProductService
+                from app.services.warehouse_design_service import WarehouseDesignService
+                from app.services.recommendation_service import RecommendationService
+                from app.services.predictive_readiness_service import PredictiveReadinessService
 
-                graph_engine = RelationshipGraphEngine(self.db)
-                graph_start = time.monotonic()
-                await graph_engine.build_relationship_graph(db_id, persist=True)
-                _log_stage_duration("relationship graph build", graph_start, db_id=db_id)
+                intelligence_start = time.monotonic()
+                await OpportunityService(self.db).generate_for_database(db_id)
+                await DataProductService(self.db).generate_for_database(db_id)
+                await WarehouseDesignService(self.db).generate_for_database(db_id)
+                await RecommendationService(self.db).generate_for_database(db_id)
+                await PredictiveReadinessService(self.db).generate_for_database(db_id)
+                _log_stage_duration("business intelligence generation", intelligence_start, db_id=db_id)
                 await self.db.commit()
-            except Exception as graph_exc:
+            except Exception as intelligence_exc:
                 logger.exception(
-                    "Relationship graph build failed for db_id=%s: %s",
+                    "Business intelligence generation failed for db_id=%s: %s",
                     db_id,
-                    graph_exc,
+                    intelligence_exc,
                 )
 
             if conn_db_type == "mongodb":
@@ -159,6 +320,12 @@ class SyncService:
             sync_log.tables_synced = counts["tables"]
             sync_log.columns_synced = counts["columns"]
             sync_log.relationships_synced = counts["relationships"]
+            pipeline_execution.status = "completed" if all(stage_statuses) else "failed"
+            pipeline_execution.end_time = datetime.now(timezone.utc)
+            pipeline_execution.duration_seconds = elapsed
+            pipeline_execution.model_name = None
+            pipeline_execution.token_usage_json = None
+            pipeline_execution.error_message = None if all(stage_statuses) else "One or more stages failed"
 
             conn.status = ConnectionStatus.active
             conn.last_sync_at = datetime.now(timezone.utc)

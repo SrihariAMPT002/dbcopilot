@@ -36,12 +36,18 @@ from app.models.metadata import (
     DatabaseTable,
     SemanticPackage,
     TableSemanticPackage,
+    SemanticEvidence,
+    BusinessGlossary,
     SemanticGenerationStatus,
 )
 from app.schema_engine.embeddings import _traceable
 from app.models.metadata import SchemaSemantic
 from app.services.ai_observability_service import AIObservabilityService, AIObservationResult
 from app.services.column_semantic_service import ColumnSemanticService
+from app.services.semantic_feature_service import SemanticFeatureService
+from app.services.domain_inference_service import DomainInferenceService
+from app.services.semantic_validator_service import SemanticValidatorService
+from app.services.business_glossary_service import BusinessGlossaryService
 from app.utils import safe_flush
 
 logger = logging.getLogger(__name__)
@@ -69,6 +75,8 @@ class DatabaseSemanticEnrichment:
         confidence_score: float,
         business_processes: list[str] | None = None,
         table_semantics: list[dict[str, Any]] | None = None,
+        domain_scores: dict[str, float] | None = None,
+        evidence: list[dict[str, Any]] | None = None,
         analysis_notes: Optional[str] = None,
         raw_response: Optional[str] = None,
         prompt_id: Optional[str] = None,
@@ -85,6 +93,8 @@ class DatabaseSemanticEnrichment:
         self.suggested_use_cases = suggested_use_cases
         self.business_processes = business_processes or []
         self.table_semantics = table_semantics or []
+        self.domain_scores = domain_scores or {}
+        self.evidence = evidence or []
         self.confidence_score = confidence_score
         self.raw_response = raw_response
         self.prompt_id = prompt_id
@@ -108,6 +118,10 @@ class DatabaseSemanticService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+        self.feature_service = SemanticFeatureService(db)
+        self.domain_inference = DomainInferenceService()
+        self.semantic_validator = SemanticValidatorService()
+        self.glossary_service = BusinessGlossaryService()
 
     @staticmethod
     def _trace_id_as_string(trace_id: Any) -> str | None:
@@ -349,6 +363,8 @@ class DatabaseSemanticService:
 
             semantic_row = await self.save_enrichment(enrichment, SemanticGenerationStatus.completed)
             await self._upsert_semantic_package(enrichment)
+            await self._persist_semantic_evidence(enrichment)
+            await self._persist_business_glossary(enrichment)
             return semantic_row, (time.time() - start_time) * 1000
 
         except ValueError as exc:
@@ -395,6 +411,18 @@ class DatabaseSemanticService:
         """Build compact metadata + governance package input for business intelligence generation."""
         governance_package = await ColumnSemanticService(self.db).build_governance_package(database.id)
         pii_map = await ColumnSemanticService(self.db).get_pii_map(database.id)
+        relationships_result = await self.db.execute(
+            select(DatabaseRelationship).join(DatabaseTable, DatabaseRelationship.table_id == DatabaseTable.id)
+        )
+        relationships = relationships_result.scalars().all()
+        domain_scores = self.domain_inference.infer(
+            governance_package=governance_package,
+            relationship_context=[
+                {"source_table": rel.table.name if rel.table else None, "target_table": rel.referenced_table_name}
+                for rel in relationships
+            ],
+            statistics={"schema_count": len(database.schemas or [])},
+        )
 
         tables: list[dict[str, Any]] = []
         total_columns = 0
@@ -443,6 +471,16 @@ class DatabaseSemanticService:
         return {
             "metadata": metadata,
             "governance_package": governance_package,
+            "relationships": [
+                {
+                    "table_id": rel.table_id,
+                    "referenced_table_name": rel.referenced_table_name,
+                    "column_name": rel.column_name,
+                    "referenced_column_name": rel.referenced_column_name,
+                }
+                for rel in relationships
+            ],
+            "domain_scores": domain_scores,
         }
 
     @staticmethod
@@ -529,6 +567,8 @@ class DatabaseSemanticService:
         return {
             "metadata": semantic_input.get("metadata") or {},
             "governance_package": semantic_input.get("governance_package") or {},
+            "relationships": semantic_input.get("relationships") or [],
+            "domain_scores": semantic_input.get("domain_scores") or {},
             "database_name": database.display_name or database.name,
         }
 
@@ -553,6 +593,7 @@ class DatabaseSemanticService:
                 "pii_coverage": float(governance.get("pii_identified_coverage", 0.0) or 0.0),
             },
             "relationship_intelligence": relationship_intelligence,
+            "domain_scores": semantic_input.get("domain_scores") or {},
         }
 
     @_traceable("database_semantic_openai_call", run_type="llm")
@@ -663,14 +704,18 @@ class DatabaseSemanticService:
         business_entities = response_data.get("business_entities") or response_data.get("key_entities") or []
         business_capabilities = response_data.get("business_capabilities") or response_data.get("suggested_use_cases") or []
         business_processes = response_data.get("business_processes") or []
-        required = ["business_domain", "semantic_summary", "business_entities", "business_capabilities", "business_processes"]
-        missing = [field for field in required if field not in response_data and field.replace("semantic_summary", "business_summary") not in response_data]
-        if missing and not semantic_summary and not business_entities:
-            raise ValueError(f"missing_required_fields:{','.join(missing)}")
+        payload = self.semantic_validator.parse_and_validate(json.dumps({
+            "business_domain": response_data.get("business_domain", "Unknown"),
+            "semantic_summary": semantic_summary,
+            "business_entities": business_entities,
+            "business_capabilities": business_capabilities,
+            "business_processes": business_processes,
+            "table_semantics": response_data.get("table_semantics") or [],
+        }))
 
         return DatabaseSemanticEnrichment(
             source_id=source_id,
-            business_domain=response_data.get("business_domain", "Unknown"),
+            business_domain=payload.get("business_domain", "Unknown"),
             business_summary=semantic_summary,
             key_entities=list(business_entities),
             business_glossary=response_data.get("business_glossary", []),
@@ -678,6 +723,8 @@ class DatabaseSemanticService:
             business_processes=list(business_processes),
             table_semantics=list(response_data.get("table_semantics") or []),
             confidence_score=1.0,
+            domain_scores=response_data.get("domain_scores") or {},
+            evidence=response_data.get("evidence") or [],
             analysis_notes=self._normalize_description(response_data.get("analysis_notes")),
             raw_response=response_text,
             trace_id=None,
@@ -744,6 +791,8 @@ class DatabaseSemanticService:
         row.business_capabilities = enrichment.suggested_use_cases
         row.business_glossary = enrichment.business_glossary
         row.confidence_score = enrichment.confidence_score
+        row.domain_scores = enrichment.domain_scores
+        row.evidence = enrichment.evidence
         row.prompt_id = getattr(enrichment, "prompt_id", None)
         row.prompt_version = getattr(enrichment, "prompt_version", None)
         row.model_name = getattr(enrichment, "model_name", None)
@@ -751,6 +800,82 @@ class DatabaseSemanticService:
         row.updated_at = datetime.now(timezone.utc)
         await safe_flush(self.db)
         return row
+
+    async def _update_semantic_package(self, enrichment: DatabaseSemanticEnrichment) -> SemanticPackage:
+        return await self._upsert_semantic_package(enrichment)
+
+    async def _persist_semantic_evidence(self, enrichment: DatabaseSemanticEnrichment) -> None:
+        result = await self.db.execute(select(SemanticPackage).where(SemanticPackage.database_id == enrichment.source_id))
+        package = result.scalar_one_or_none()
+        if package is None:
+            return
+        rows: list[SemanticEvidence] = []
+        for item in enrichment.evidence or []:
+            if not isinstance(item, dict):
+                continue
+            rows.append(
+                SemanticEvidence(
+                    semantic_package_id=package.id,
+                    evidence_type=str(item.get("source") or "semantic"),
+                    evidence_source="azure_openai",
+                    evidence_json=json.dumps(item, default=str),
+                )
+            )
+        if rows:
+            self.db.add_all(rows)
+            await safe_flush(self.db)
+
+    async def _persist_business_glossary(self, enrichment: DatabaseSemanticEnrichment) -> None:
+        result = await self.db.execute(select(SemanticPackage).where(SemanticPackage.database_id == enrichment.source_id))
+        package = result.scalar_one_or_none()
+        if package is None:
+            return
+        rows: list[BusinessGlossary] = []
+        for term in self.glossary_service.build_glossary(
+            business_entities=enrichment.key_entities,
+            business_processes=enrichment.business_processes,
+            business_capabilities=enrichment.suggested_use_cases,
+        ):
+            rows.append(
+                BusinessGlossary(
+                    semantic_package_id=package.id,
+                    term=str(term.get("term") or ""),
+                    definition=str(term.get("definition") or ""),
+                    source=str(term.get("source") or "ai"),
+                    confidence_score=float(enrichment.confidence_score or 0.0),
+                )
+            )
+        if rows:
+            self.db.add_all(rows)
+            await safe_flush(self.db)
+
+    async def get_semantic_evidence(self, source_id: int) -> dict[str, Any]:
+        package = await self.get_semantic_package(source_id)
+        result = await self.db.execute(
+            select(SemanticEvidence)
+            .join(SemanticPackage, SemanticEvidence.semantic_package_id == SemanticPackage.id)
+            .where(SemanticPackage.database_id == source_id)
+            .order_by(SemanticEvidence.created_at)
+        )
+        rows = result.scalars().all()
+        return {
+            "database_id": source_id,
+            "business_domain": package.get("business_domain"),
+            "confidence_score": package.get("confidence_score", 0.0),
+            "domain_scores": package.get("domain_scores", {}),
+            "evidence": [
+                {
+                    "id": row.id,
+                    "semantic_package_id": row.semantic_package_id,
+                    "table_id": row.table_id,
+                    "evidence_type": row.evidence_type,
+                    "evidence_source": row.evidence_source,
+                    "evidence_json": json.loads(row.evidence_json or "{}"),
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+                for row in rows
+            ],
+        }
 
     async def _upsert_table_semantic_package(
         self,
@@ -911,6 +1036,13 @@ class DatabaseSemanticService:
             "business_processes": db_semantic.business_processes,
             "semantic_summary": db_semantic.business_summary,
             "analysis_notes": db_semantic.analysis_notes,
+            "confidence_score": float(db_semantic.confidence_score or 0.0),
+            "domain_scores": db_semantic.domain_scores if hasattr(db_semantic, "domain_scores") else {},
+            "evidence": db_semantic.evidence if hasattr(db_semantic, "evidence") else [],
+            "prompt_id": db_semantic.prompt_id if hasattr(db_semantic, "prompt_id") else None,
+            "prompt_version": db_semantic.prompt_version if hasattr(db_semantic, "prompt_version") else None,
+            "model_name": db_semantic.model_name if hasattr(db_semantic, "model_name") else None,
+            "trace_id": db_semantic.trace_id if hasattr(db_semantic, "trace_id") else None,
             "table_semantics": await self._load_table_semantics(source_id),
         }
 

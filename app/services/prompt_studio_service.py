@@ -63,6 +63,20 @@ class ContextPackageResult:
     manifest: Optional[dict[str, Any]] = None
 
 
+@dataclass
+class GeneratedPromptResult:
+    artifact_type: ArtifactType
+    prompt_id: str
+    prompt_version: str
+    model_name: str
+    content: str
+    filename: str
+    generated_at: datetime
+    trace_id: str | None
+    confidence_score: float
+    manifest: Optional[dict[str, Any]] = None
+
+
 class PromptStudioService:
     """Generate versioned Prompt Studio artifacts from shared metadata."""
 
@@ -177,6 +191,25 @@ class PromptStudioService:
             "relationships": (context.get("relationship_graph") or {}).edges if getattr(context.get("relationship_graph"), "edges", None) else [],
         }
         return self._prompt_context_for_artifact(artifact_type.value, payload)
+
+    def _assemble_generation_context(self, context: dict[str, Any], template_id: str) -> dict[str, Any]:
+        payload = self._assemble_context_payload(ArtifactType.system_prompt, context)
+        payload.update(
+            {
+                "template_id": template_id,
+                "governance_packages": context.get("governance_packages", []),
+                "semantic_package": context.get("semantic", {}).get("semantic_package", {}),
+                "relationship_packages": context.get("relationship_packages", []),
+                "kpi": context.get("kpi", {}),
+                "readiness": context.get("readiness", {}),
+                "instruction": (
+                    "Generate a production-grade prompt optimized for LLM use. "
+                    "Remove duplicate facts, compress metadata, preserve business meaning, "
+                    "include PII guidance and SQL/RAG/agent safety constraints, and return only the final prompt text."
+                ),
+            }
+        )
+        return payload
 
     @staticmethod
     def _evaluation_metrics(context: dict[str, Any], artifact_content: str) -> dict[str, float]:
@@ -306,6 +339,101 @@ class PromptStudioService:
             )
 
         return generated
+
+    async def generate_prompt(
+        self,
+        database_id: int,
+        artifact_type: str,
+        template_id: str = "default",
+    ) -> GeneratedPromptResult:
+        if not package_is_enabled("agent"):
+            raise ValueError("Prompt Studio package is disabled by registry")
+
+        context = await self._build_context(database_id)
+        artifact = self._artifact_enum(artifact_type)
+        prompt_id = template_id if template_id and template_id != "default" else self._template_id_for(artifact_type)
+        generation_context = self._assemble_generation_context(context, prompt_id)
+
+        rendered = self.registry.render_prompt(prompt_id, generation_context, category="system")
+        observability = AIObservabilityService()
+        result = await observability.generate(
+            operation="chat",
+            module="prompt_studio",
+            artifact_type=artifact.value,
+            prompt_id=prompt_id,
+            prompt_version="1.0",
+            database_id=database_id,
+            database_name=context["database_name"],
+            model_name=settings.azure_openai_deployment or "azure_openai",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an enterprise prompt engineer. Produce optimized prompts for downstream AI systems. "
+                        "Use the supplied template and intelligence context. Return only the final prompt text."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": "\n\n".join(
+                        [
+                            f"Template ID: {prompt_id}",
+                            f"Artifact Type: {artifact.value}",
+                            f"Template:\n{rendered.system_message}\n{rendered.user_prompt}",
+                            f"Context:\n{self._safe_json(generation_context)}",
+                        ]
+                    ),
+                },
+            ],
+            request_kwargs={"max_completion_tokens": 2400},
+            completeness_score=max(0.25, self._compute_quality(generation_context)["context_quality_score"]),
+            coverage_score=self._compute_quality(generation_context)["governance_coverage"],
+            confidence_score=self._compute_quality(generation_context)["pii_coverage"],
+            extra_metadata={
+                "feature": "prompt_studio_generate",
+                "prompt_name": prompt_id,
+                "artifact_type": artifact.value,
+                "database_id": database_id,
+            },
+        )
+
+        content = (result.content or "").strip()
+        if not content:
+            raise ValueError(f"Azure OpenAI returned empty content for {artifact.value}")
+
+        mime = self._mime_for(artifact)
+        filename = self._filename_for(artifact)
+        saved = await self.artifact_service.record_artifact(
+            database_id,
+            artifact,
+            content,
+            mime=mime,
+            extension=self._extension_for(artifact),
+            schema_hash_payload={
+                "artifact_type": artifact.value,
+                "content": content,
+                "database_id": database_id,
+                "prompt_id": prompt_id,
+                "prompt_version": "1.0",
+                "model_name": result.model_name,
+            },
+            prompt_id=prompt_id,
+            prompt_version="1.0",
+            model_name=result.model_name,
+        )
+
+        return GeneratedPromptResult(
+            artifact_type=artifact,
+            prompt_id=prompt_id,
+            prompt_version="1.0",
+            model_name=result.model_name,
+            content=content,
+            filename=filename,
+            generated_at=result.generated_at,
+            trace_id=result.trace_id,
+            confidence_score=self._compute_quality(generation_context)["confidence_score"],
+            manifest=saved,
+        )
 
     async def download_artifact(self, database_id: int, artifact_type: str) -> PromptStudioArtifact:
         if not package_is_enabled("agent"):

@@ -1,0 +1,49 @@
+id: kpi_candidate_discovery
+name: KPI Candidate Discovery
+version: "1.0"
+description: Infer KPI candidates from metadata, governance, semantics, relationships, and business processes.
+metadata:
+  category: kpi
+language: English
+system_message: |
+  You are a production-grade KPI candidate inference engine.
+  Infer candidate metrics from metadata, governance packages, semantic packages, relationship intelligence, graph features, and business process evidence.
+  Do not hardcode domain-specific KPI names or business assumptions.
+  Score each candidate with confidence and evidence.
+  Examples are illustrative only.
+  Return compact JSON only.
+user_prompt: |
+  Infer KPI candidates from the supplied intelligence packages.
+
+  Database context:
+  {{ database_context | tojson }}
+
+  Governance package:
+  {{ governance_package | default([]) | tojson }}
+
+  Semantic package:
+  {{ semantic_package | default({}) | tojson }}
+
+  Relationship package:
+  {{ relationship_package | default({}) | tojson }}
+
+  Graph features:
+  {{ graph_features | default({}) | tojson }}
+
+  KPI candidates:
+  {{ candidates | default([]) | tojson }}
+
+  Return JSON only:
+  {
+    "kpi_candidates": [
+      {
+        "metric": "string",
+        "candidate_type": "string",
+        "confidence": 0.0,
+        "evidence": []
+      }
+    ]
+  }
+constraints:
+  output_format: json
+  max_completion_tokens: 5000

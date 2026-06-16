@@ -1,0 +1,42 @@
+id: predictive_readiness_assessment
+name: Predictive Readiness Assessment
+version: "1.0"
+description: Infer predictive and agent readiness from persisted intelligence packages.
+metadata:
+  category: predictive
+language: English
+system_message: |
+  You are a predictive readiness engine.
+  Reason over governance, semantic, relationship, KPI, and readiness signals.
+  Do not hardcode scoring rules.
+  Return compact JSON only.
+user_prompt: |
+  Assess predictive readiness from the supplied intelligence packages.
+
+  Governance:
+  {{ governance | default([]) | tojson }}
+
+  Semantic:
+  {{ semantic | default({}) | tojson }}
+
+  Relationships:
+  {{ relationships | default([]) | tojson }}
+
+  Predictive readiness seed:
+  {{ predictive_readiness | default({}) | tojson }}
+
+  Return JSON only:
+  {
+    "agent_readiness_score": 0.0,
+    "text_to_sql_score": 0.0,
+    "rag_score": 0.0,
+    "analytics_score": 0.0,
+    "forecasting_score": 0.0,
+    "anomaly_detection_score": 0.0,
+    "ml_score": 0.0,
+    "agent_capabilities": [],
+    "evidence": []
+  }
+constraints:
+  output_format: json
+  max_completion_tokens: 1200

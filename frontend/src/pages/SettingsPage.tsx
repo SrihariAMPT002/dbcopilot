@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { ServerCog, Cpu, Boxes, KeyRound, Globe, CheckCircle2 } from "lucide-react";
+import { ServerCog, Cpu, Boxes, KeyRound, Globe, CheckCircle2, ArrowRight } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -35,9 +36,10 @@ export function SettingsPage() {
               <TabsList className="bg-transparent">
                 <TabsTrigger value="runtime">Runtime</TabsTrigger>
                 <TabsTrigger value="ai">AI configuration</TabsTrigger>
-                <TabsTrigger value="platform">Platform context</TabsTrigger>
-                <TabsTrigger value="tokens">API tokens</TabsTrigger>
-              </TabsList>
+              <TabsTrigger value="platform">Platform context</TabsTrigger>
+              <TabsTrigger value="tokens">API tokens</TabsTrigger>
+              <TabsTrigger value="prompts">Prompts</TabsTrigger>
+            </TabsList>
             </div>
             <TabsContent value="runtime" className="p-6 pt-6">
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -102,6 +104,19 @@ export function SettingsPage() {
                 </div>
                 <Button size="sm" className="shrink-0">
                   Generate token
+                </Button>
+              </div>
+            </TabsContent>
+            <TabsContent value="prompts" className="p-6 pt-6">
+              <div className="flex items-start justify-between gap-3 rounded-md border border-border bg-card p-4">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium text-foreground">Prompt budget audit</div>
+                  <p className="mt-1 text-xs text-muted-foreground">Inspect completion budgets, truncation risk, and prompt quality scores for GPT-5 Nano workloads.</p>
+                </div>
+                <Button asChild size="sm" className="shrink-0">
+                  <Link to="/prompt-budgets">
+                    Open audit <ArrowRight className="ml-1 h-3.5 w-3.5" />
+                  </Link>
                 </Button>
               </div>
             </TabsContent>

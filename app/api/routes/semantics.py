@@ -27,6 +27,7 @@ from app.schemas.api_schemas import (
     DatabaseSemanticExportResponse,
     DatabaseSemanticGenerateResponse,
     DatabaseSemanticResponse,
+    SemanticEvidenceResponse,
     JobQueueResponse,
 )
 from app.services.column_semantic_service import ColumnSemanticService
@@ -197,6 +198,21 @@ async def get_semantic_package(
 
     service = DatabaseSemanticService(db)
     return await service.build_semantic_package(source_id)
+
+
+@router.get(
+    "/evidence/{source_id}",
+    response_model=SemanticEvidenceResponse,
+    summary="Get semantic evidence for a database",
+)
+async def get_semantic_evidence(source_id: int, db: AsyncSession = Depends(get_db)) -> SemanticEvidenceResponse:
+    result = await db.execute(select(ConnectedDatabase).where(ConnectedDatabase.id == source_id))
+    database = result.scalars().first()
+    if not database:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Database {source_id} not found")
+    service = DatabaseSemanticService(db)
+    evidence = await service.get_semantic_evidence(source_id)
+    return SemanticEvidenceResponse.model_validate(evidence)
 
 
 @router.delete(

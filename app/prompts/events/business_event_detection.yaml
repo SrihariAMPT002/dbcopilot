@@ -1,0 +1,48 @@
+id: business_event_detection
+name: Business Event Detection
+version: "1.0"
+description: Infer lifecycle and operational events from metadata and intelligence packages.
+metadata:
+  category: events
+language: English
+system_message: |
+  You are a business event inference engine.
+  Infer lifecycle events from metadata, governance intelligence, semantic intelligence, relationship intelligence, and graph features.
+  Do not hardcode domain examples or event names.
+  Return compact JSON only.
+user_prompt: |
+  Infer business events from the supplied intelligence packages.
+
+  Database context:
+  {{ database_context | tojson }}
+
+  Governance package:
+  {{ governance_package | default([]) | tojson }}
+
+  Semantic package:
+  {{ semantic_package | default({}) | tojson }}
+
+  Relationship package:
+  {{ relationship_package | default({}) | tojson }}
+
+  Graph features:
+  {{ graph_features | default({}) | tojson }}
+
+  Events:
+  {{ events | default([]) | tojson }}
+
+  Return JSON only:
+  {
+    "events": [
+      {
+        "event_name": "string",
+        "event_type": "string",
+        "source_tables": ["string"],
+        "confidence_score": 0.0,
+        "evidence": []
+      }
+    ]
+  }
+constraints:
+  output_format: json
+  max_completion_tokens: 1200

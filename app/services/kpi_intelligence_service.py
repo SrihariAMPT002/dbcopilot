@@ -32,7 +32,9 @@ from app.models.metadata import (
     SchemaSemantic,
     SemanticPackage,
 )
+from app.models.kpi_package import KPIPackage
 from app.services.ai_observability_service import AIObservabilityService
+from app.services.kpi_candidate_service import KPICandidateService
 from app.schema_engine.relationship_graph import RelationshipGraphEngine
 
 logger = logging.getLogger(__name__)
@@ -69,6 +71,53 @@ class KPIIntelligenceService:
         relationship_packages = await self._fetch_relationship_packages(database_id)
         semantics = await self._fetch_semantics(database_id)
         column_semantics = await self._fetch_column_semantics(database_id)
+        db_semantic = semantics[0]
+        schema_semantics = [
+            {
+                "schema": table.schema.name,
+                "table": table.name,
+                "semantic_summary": semantic.semantic_summary,
+            }
+            for semantic, table in semantics[1]
+        ]
+        deterministic_candidates = KPICandidateService().generate(
+            database_semantics={
+                "business_domain": db_semantic.business_domain if db_semantic else None,
+                "business_summary": db_semantic.business_summary if db_semantic else None,
+            },
+            schema_semantics=schema_semantics,
+            relationship_intelligence=[
+                {
+                    "source_table": rel.source_table_name,
+                    "target_table": rel.target_table_name,
+                }
+                for rel in relationship_packages
+            ],
+            governance_intelligence=[
+                {
+                    "column": sem.column_name,
+                    "is_pii": sem.is_pii,
+                    "risk_level": sem.risk_level,
+                }
+                for sem in column_semantics
+            ],
+        )
+        candidates = await KPICandidateService().generate_with_ai(
+            database_context={
+                "database_id": database.id,
+                "database_name": database.display_name or database.name,
+                "schema_count": len({table.schema_id for _, table in semantics[1]}),
+                "table_count": len(semantics[1]),
+            },
+            governance_package=[self._governance_package_to_dict(pkg) for pkg in governance_packages],
+            semantic_package=self._semantic_package_to_dict(semantic_package) if semantic_package else {},
+            relationship_package={"clusters": [self._relationship_package_to_dict(pkg) for pkg in relationship_packages]},
+            graph_features={
+                "cluster_count": len(relationship_packages),
+                "relationship_count": sum(len(pkg.entity_graph or []) for pkg in relationship_packages),
+            },
+            candidates=deterministic_candidates,
+        )
         clusters = self._relationship_clusters_from_packages(relationship_packages)
         if not clusters:
             graph = await RelationshipGraphEngine(self.db).build_relationship_graph(database_id, persist=False)
@@ -86,6 +135,7 @@ class KPIIntelligenceService:
                     relationship_packages=relationship_packages,
                     column_semantics=column_semantics,
                     job_id=job_id,
+                    candidates=candidates,
                 )
             except Exception as exc:
                 logger.exception("KPI cluster failed | database_id=%s cluster_id=%s", database_id, cluster_id)
@@ -117,8 +167,10 @@ class KPIIntelligenceService:
         definitions = self._aggregate_definitions([item["definitions"] for item in successful_clusters])
         lineage = self._aggregate_lineage([item["lineage"] for item in successful_clusters])
         context_md = self._build_context_markdown(database, catalog, definitions, lineage)
+        confidence_scores = [item.get("confidence", 0.0) for item in catalog if isinstance(item, dict)]
 
         await self._persist_kpis(database_id, catalog)
+        await self._persist_kpi_package(database_id, catalog, context_md, confidence_scores)
 
         bundles = [
             (ArtifactType.kpi_catalog, json.dumps(catalog, indent=2, default=str), "application/json"),
@@ -130,8 +182,6 @@ class KPIIntelligenceService:
         artifacts = []
         for artifact_type, content, mime in bundles:
             artifacts.append(await self._store_artifact(database_id, artifact_type, content, mime=mime))
-
-        confidence_scores = [item.get("confidence", 0.0) for item in catalog if isinstance(item, dict)]
 
         return {
             "database_id": database_id,
@@ -183,6 +233,15 @@ class KPIIntelligenceService:
         )
         return [self._kpi_row(row) for row in result.scalars().all()]
 
+    async def get_package(self, database_id: int) -> dict[str, Any]:
+        result = await self.db.execute(
+            select(KPIPackage).where(KPIPackage.database_id == database_id).order_by(KPIPackage.created_at.desc())
+        )
+        package = result.scalars().first()
+        if not package:
+            raise ValueError(f"KPI package not found for database {database_id}")
+        return self._kpi_package_row(package)
+
     def _build_prompt_context(
         self,
         database: ConnectedDatabase,
@@ -193,6 +252,7 @@ class KPIIntelligenceService:
         governance_packages: list[GovernancePackage] | None = None,
         semantic_package: SemanticPackage | None = None,
         relationship_packages: list[RelationshipPackage] | None = None,
+        candidates: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         db_semantic, table_semantics = semantics
         governance_packages = governance_packages or []
@@ -242,6 +302,7 @@ class KPIIntelligenceService:
                 }
                 for sem in column_semantics
             ],
+            "kpi_candidates": candidates or [],
             "database_context": {
                 "table_count": len(table_semantics),
                 "relationship_count": len(relationships),
@@ -442,6 +503,7 @@ class KPIIntelligenceService:
             governance_packages=governance_packages,
             semantic_package=semantic_package,
             relationship_packages=relationship_packages,
+            candidates=candidates,
         )
         prompt_context, telemetry = self._apply_cluster_budget(prompt_context, cluster_relationships)
         rendered = self.registry.render_prompt("kpi_discovery", prompt_context, category="kpi")
@@ -759,6 +821,32 @@ class KPIIntelligenceService:
             )
         await self.db.flush()
 
+    async def _persist_kpi_package(self, database_id: int, catalog: list[dict[str, Any]], context_md: str, confidence_scores: list[float]) -> None:
+        await self.db.execute(delete(KPIPackage).where(KPIPackage.database_id == database_id))
+        best = catalog[0] if catalog else {}
+        evidence = [
+            {
+                "name": item.get("name"),
+                "confidence": item.get("confidence", 0.0),
+                "discovery_source": item.get("discovery_source"),
+                "lineage_summary": item.get("lineage_summary"),
+            }
+            for item in catalog[:25]
+        ]
+        self.db.add(
+            KPIPackage(
+                database_id=database_id,
+                kpi_name=best.get("name"),
+                description=best.get("description"),
+                formula=best.get("formula"),
+                category=best.get("discovery_source") or "discovered",
+                confidence_score=round(sum(confidence_scores) / max(1, len(confidence_scores)), 3) if confidence_scores else 0.0,
+                evidence=json.dumps(evidence, default=str),
+                trace_id=best.get("trace_id"),
+            )
+        )
+        await self.db.flush()
+
     async def _fetch_database(self, database_id: int) -> ConnectedDatabase:
         result = await self.db.execute(select(ConnectedDatabase).where(ConnectedDatabase.id == database_id))
         database = result.scalars().first()
@@ -877,6 +965,21 @@ class KPIIntelligenceService:
             "confidence_score": row.confidence_score,
             "metadata_fingerprint": row.metadata_fingerprint,
             "status": row.status,
+        }
+
+    @staticmethod
+    def _kpi_package_row(row: KPIPackage) -> dict[str, Any]:
+        return {
+            "id": row.id,
+            "database_id": row.database_id,
+            "kpi_name": row.kpi_name,
+            "description": row.description,
+            "formula": row.formula,
+            "category": row.category,
+            "confidence_score": row.confidence_score,
+            "evidence": json.loads(row.evidence or "[]"),
+            "trace_id": row.trace_id,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
         }
 
     @staticmethod

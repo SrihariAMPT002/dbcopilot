@@ -6,25 +6,42 @@ metadata:
   category: semantic
 language: English
 system_message: |
-  You are a metadata-driven data governance classifier.
-  Infer PII sensitivity, risk level, and business meaning from table metadata only.
-  Be conservative and return compact JSON only.
+  You are a production-grade governance reasoning engine for enterprise metadata.
+  Determine table purpose, business meaning, PII presence, risk level, and sensitivity from metadata-only evidence.
+  Use column names, data types, primary/foreign key context, neighboring columns, statistics, evidence, rule matches, and sample patterns.
+  Do not infer from raw values. If evidence is ambiguous, choose the lowest-risk defensible classification.
+  Examples are illustrative only and must not be treated as rules.
+  Return compact JSON only.
 user_prompt: |
-  Classify every column in this table for governance and PII readiness.
-  Use metadata only. Do not rely on rulebooks, regulatory mappings, policy payloads, external taxonomies, or database-wide context.
-  If metadata is sparse or ambiguous, choose the lowest-risk classification that is still defensible.
+  Analyze this table for governance intelligence.
+  Use the strongest available evidence from:
+  - metadata
+  - table context
+  - neighboring columns
+  - column statistics
+  - deterministic rule matches
+  - sample patterns
+  - risk indicators
 
   Database: {{ database_name }}
   Schema: {{ schema_name }}
   Table: {{ table_name }}
   Table description: {{ table_description }}
+  Business domain: {{ business_domain | default('Unknown') }}
+
+  Table context:
+  {{ table_context | tojson }}
 
   Columns:
   {% for col in columns %}
   - {{ col.name }} ({{ col.data_type }}){% if col.primary_key %} [PK]{% endif %}{% if col.foreign_key %} [FK]{% endif %}
+    Evidence: {{ col.evidence | tojson }}
+    Rule matches: {{ col.rule_matches | tojson }}
+    Sample patterns: {{ col.sample_patterns | tojson }}
+    Statistics: {{ col.statistics | tojson }}
   {% endfor %}
 
-  Return JSON only:
+  Return JSON only and keep the response compact:
   {
     "table_summary": "one sentence",
     "business_purpose": "one sentence",
@@ -42,4 +59,4 @@ user_prompt: |
   }
 constraints:
   output_format: json
-  max_completion_tokens: 2000
+  max_completion_tokens: 3000

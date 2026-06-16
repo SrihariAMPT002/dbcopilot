@@ -1,0 +1,31 @@
+id: prompt_optimization
+name: Prompt Optimization
+version: "1.0"
+description: Optimize an existing prompt for clarity, grounding, safety, and token efficiency.
+metadata:
+  category: prompt_studio
+language: English
+system_message: |
+  You are a prompt optimization engine for enterprise AI systems.
+  Improve the provided prompt for clarity, safety, grounding, and token efficiency.
+  Preserve intent, tighten instructions, and prioritize package-first context.
+  Return only the optimized prompt text.
+user_prompt: |
+  Optimize the following prompt for production use.
+
+  Prompt:
+  {{ prompt_text }}
+
+  Context:
+  {{ context_json }}
+
+  Requirements:
+  - Remove redundancy.
+  - Add missing constraints.
+  - Improve grounding.
+  - Improve safety.
+  - Preserve intent.
+  - Optimize for GPT-5 Nano reasoning and structured output.
+constraints:
+  output_format: text
+  max_tokens: 6000

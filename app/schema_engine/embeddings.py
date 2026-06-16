@@ -37,7 +37,9 @@ from app.models.metadata import (
     SemanticPackage,
     RelationshipPackage,
 )
+from app.models.embedding_document import EmbeddingDocument
 from app.services.ai_observability_service import AIObservabilityService
+from app.services.embedding_document_service import EmbeddingDocumentService
 from app.utils import safe_flush, truncate
 from app.config.package_registry import package_is_enabled
 
@@ -56,6 +58,13 @@ EMBEDDING_COLLECTIONS = (
     COLLECTION_SCHEMA_TABLES,
     COLLECTION_SCHEMA_RELATIONSHIPS,
     COLLECTION_SCHEMA_PROMPTS,
+    "metadata_vectors",
+    "governance_vectors",
+    "semantic_vectors",
+    "relationship_vectors",
+    "kpi_vectors",
+    "prompt_vectors",
+    "memory_vectors",
 )
 
 _qdrant_client = None
@@ -660,6 +669,10 @@ class EmbeddingEngine:
         relationship_packages = await self._fetch_relationship_packages(database_id)
         package_governance = governance_packages.get(table.id)
 
+        document_service = EmbeddingDocumentService(self.db)
+        knowledge_documents = await document_service.build_documents_for_table(database_id, table_id)
+        knowledge_text = "\n\n".join(doc.content for doc in knowledge_documents if doc.content)
+
         table_text = self._build_table_text(table, semantic, pii_map)
         relationship_text = self._build_relationship_text(table, pii_map)
         prompt_text = self._build_prompt_text(table, semantic)
@@ -672,6 +685,10 @@ class EmbeddingEngine:
             prompt_text = "\n\n".join([prompt_text, semantic_text])
         if relationship_package_text:
             relationship_text = "\n\n".join([relationship_text, relationship_package_text])
+        if knowledge_text:
+            table_text = "\n\n".join([table_text, knowledge_text])
+            prompt_text = "\n\n".join([prompt_text, knowledge_text])
+            relationship_text = "\n\n".join([relationship_text, knowledge_text])
 
         texts = [table_text, relationship_text, prompt_text]
         vectors, usage = await self._embed_texts(

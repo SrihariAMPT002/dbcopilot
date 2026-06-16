@@ -1,0 +1,34 @@
+import { useQueries } from "@tanstack/react-query";
+import { BusinessIntelligenceService } from "@/services/businessIntelligenceService";
+
+export function useBusinessIntelligence(databaseId?: number | null) {
+  return useQueries({
+    queries: [
+      {
+        queryKey: ["business-intelligence", "opportunities", databaseId ?? "default"],
+        queryFn: () => BusinessIntelligenceService.opportunities(databaseId ?? 0),
+        enabled: typeof databaseId === "number" && databaseId > 0,
+      },
+      {
+        queryKey: ["business-intelligence", "data-products", databaseId ?? "default"],
+        queryFn: () => BusinessIntelligenceService.dataProducts(databaseId ?? 0),
+        enabled: typeof databaseId === "number" && databaseId > 0,
+      },
+      {
+        queryKey: ["business-intelligence", "warehouse-designs", databaseId ?? "default"],
+        queryFn: () => BusinessIntelligenceService.warehouseDesigns(databaseId ?? 0),
+        enabled: typeof databaseId === "number" && databaseId > 0,
+      },
+      {
+        queryKey: ["business-intelligence", "recommendations", databaseId ?? "default"],
+        queryFn: () => BusinessIntelligenceService.recommendations(databaseId ?? 0),
+        enabled: typeof databaseId === "number" && databaseId > 0,
+      },
+      {
+        queryKey: ["business-intelligence", "predictive-readiness", databaseId ?? "default"],
+        queryFn: () => BusinessIntelligenceService.predictiveReadiness(databaseId ?? 0),
+        enabled: typeof databaseId === "number" && databaseId > 0,
+      },
+    ],
+  });
+}

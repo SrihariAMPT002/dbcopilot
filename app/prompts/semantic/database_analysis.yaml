@@ -6,10 +6,12 @@ metadata:
   category: semantic
 language: English
 system_message: |
-  You are an enterprise data intelligence analyst.
-  Use metadata and governance intelligence to infer business meaning.
-  PII columns in the governance package are visible context — describe business role without exposing raw values.
-  Return compact JSON only. Do not request or assume full schema dumps.
+  You are an enterprise semantic intelligence analyst.
+  Infer business domain, entities, processes, capabilities, and glossary from package-first evidence.
+  Use governance intelligence, relationships, domain evidence, and compact metadata only.
+  PII columns are visible as governed context, but do not expose raw values or sensitive details.
+  Examples are illustrative only.
+  Return compact JSON only.
 user_prompt: |
   Generate business intelligence for this database.
 
@@ -18,6 +20,12 @@ user_prompt: |
 
   Governance package:
   {{ governance_package | tojson }}
+
+  Relationships:
+  {{ relationships | tojson }}
+
+  Domain scores:
+  {{ domain_scores | tojson }}
 
   Return JSON only:
   {
@@ -39,5 +47,5 @@ user_prompt: |
     ]
   }
 constraints:
-  max_completion_tokens: 2000
+  max_completion_tokens: 4000
   output_format: json

@@ -191,6 +191,9 @@ class GovernancePackageColumnResponse(BaseModel):
     confidence_score: float = 0.0
     business_meaning: Optional[str] = None
     governance_reasoning: Optional[str] = None
+    evidence: List[Dict[str, Any]] = Field(default_factory=list)
+    rule_matches: List[Dict[str, Any]] = Field(default_factory=list)
+    sample_patterns: List[str] = Field(default_factory=list)
 
 
 class GovernancePackageResponse(BaseModel):
@@ -206,6 +209,14 @@ class GovernancePackageResponse(BaseModel):
     sensitive_columns: List[GovernancePackageColumnResponse] = Field(default_factory=list)
     overall_risk: Optional[str] = None
     confidence_score: float = 0.0
+    evidence: List[Dict[str, Any]] = Field(default_factory=list)
+    rule_matches: List[Dict[str, Any]] = Field(default_factory=list)
+    sample_patterns: List[Dict[str, Any]] = Field(default_factory=list)
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    reasoning_tokens: Optional[int] = None
+    finish_reason: Optional[str] = None
+    latency_ms: Optional[float] = None
     prompt_id: Optional[str] = None
     prompt_version: Optional[str] = None
     model_name: Optional[str] = None
@@ -222,6 +233,30 @@ class GovernancePiiSummaryResponse(BaseModel):
     risk_columns: int = 0
     sensitive_columns: int = 0
     governance_packages: int = 0
+
+
+class GovernanceEvidenceItemResponse(BaseModel):
+    id: int
+    governance_package_id: int
+    column_id: Optional[int] = None
+    evidence_type: str
+    evidence_source: str
+    evidence_json: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[datetime] = None
+
+
+class GovernanceEvidenceResponse(BaseModel):
+    database_id: int
+    table_id: int
+    table_name: Optional[str] = None
+    schema_name: Optional[str] = None
+    confidence_score: float = 0.0
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    reasoning_tokens: Optional[int] = None
+    finish_reason: Optional[str] = None
+    latency_ms: Optional[float] = None
+    evidence: List[GovernanceEvidenceItemResponse] = Field(default_factory=list)
 
 
 class RelationshipResponse(BaseModel):
@@ -498,6 +533,9 @@ class RelationshipPackageClusterResponse(BaseModel):
     upstream_dependencies: List[Dict[str, Any]] = Field(default_factory=list)
     downstream_dependencies: List[Dict[str, Any]] = Field(default_factory=list)
     lifecycle_flows: List[Dict[str, Any]] = Field(default_factory=list)
+    evidence: List[Dict[str, Any]] = Field(default_factory=list)
+    graph_metrics: Dict[str, Any] = Field(default_factory=dict)
+    confidence_details: Dict[str, Any] = Field(default_factory=dict)
     estimated_tokens: Optional[int] = None
     actual_input_tokens: Optional[int] = None
     actual_output_tokens: Optional[int] = None
@@ -636,6 +674,43 @@ class DatabaseSemanticResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SemanticEvidenceItemResponse(BaseModel):
+    id: int
+    semantic_package_id: int
+    table_id: Optional[int] = None
+    evidence_type: str
+    evidence_source: str
+    evidence_json: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[datetime] = None
+
+
+class SemanticPackageResponse(BaseModel):
+    database_id: int
+    business_domain: Optional[str] = None
+    semantic_summary: Optional[str] = None
+    business_entities: List[str] = Field(default_factory=list)
+    business_processes: List[str] = Field(default_factory=list)
+    business_capabilities: List[str] = Field(default_factory=list)
+    business_glossary: List[GlossaryTerm] = Field(default_factory=list)
+    confidence_score: float = 0.0
+    domain_scores: Dict[str, float] = Field(default_factory=dict)
+    evidence: List[Dict[str, Any]] = Field(default_factory=list)
+    prompt_id: Optional[str] = None
+    prompt_version: Optional[str] = None
+    model_name: Optional[str] = None
+    trace_id: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class SemanticEvidenceResponse(BaseModel):
+    database_id: int
+    business_domain: Optional[str] = None
+    confidence_score: float = 0.0
+    domain_scores: Dict[str, float] = Field(default_factory=dict)
+    evidence: List[SemanticEvidenceItemResponse] = Field(default_factory=list)
+
+
 class DatabaseSemanticGenerateResponse(BaseModel):
     """Response for semantic generation request."""
     source_id: int
@@ -720,6 +795,20 @@ class PromptStudioTemplateListResponse(BaseModel):
     templates: List[PromptStudioTemplateItem] = Field(default_factory=list)
 
 
+class PromptGenerationRequest(BaseModel):
+    database_id: int
+    artifact_type: str
+    template_id: str = "default"
+
+
+class PromptOptimizationRequest(BaseModel):
+    prompt_package_id: int
+
+
+class PromptEvaluationRequest(BaseModel):
+    prompt_package_id: int
+
+
 class PromptInventoryItemResponse(BaseModel):
     prompt: str
     category: str
@@ -754,6 +843,92 @@ class PromptStudioArtifactResponse(BaseModel):
     content: str
     manifest: Optional[PromptStudioArtifactItem] = None
     generated_at: datetime
+
+
+class PromptGenerationResponse(BaseModel):
+    generated_prompt: str
+    model: str
+    trace_id: Optional[str] = None
+    artifact_id: Optional[int] = None
+    prompt_id: Optional[str] = None
+    prompt_version: Optional[str] = None
+    generated_at: Optional[datetime] = None
+
+
+class PromptPackageResponse(BaseModel):
+    id: int
+    database_id: int
+    artifact_type: str
+    template_id: Optional[str] = None
+    generated_prompt: str
+    model_name: Optional[str] = None
+    trace_id: Optional[str] = None
+    prompt_version: Optional[str] = None
+    confidence_score: float = 0.0
+    generation_metadata: Optional[str] = None
+    execution_status: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class PromptVersionResponse(BaseModel):
+    id: int
+    prompt_package_id: int
+    version: int
+    generated_prompt: str
+    model_name: Optional[str] = None
+    template_id: Optional[str] = None
+    trace_id: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+class PromptObservabilityLogResponse(BaseModel):
+    id: int
+    prompt_package_id: int
+    trace_id: Optional[str] = None
+    model_name: Optional[str] = None
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    reasoning_tokens: Optional[int] = None
+    latency_ms: Optional[float] = None
+    finish_reason: Optional[str] = None
+    execution_status: Optional[str] = None
+    failure_reason: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+class PromptEvaluationResponse(BaseModel):
+    id: int
+    prompt_package_id: int
+    completeness_score: float
+    safety_score: float
+    grounding_score: float
+    hallucination_risk: float
+    sql_safety_score: float
+    rag_quality_score: float
+    agent_quality_score: float
+    prompt_quality_score: float
+    reasoning_summary: Optional[str] = None
+    packages_used: str
+    evidence: str
+    trace_id: Optional[str] = None
+    model_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+class PromptPackageListResponse(BaseModel):
+    database_id: int
+    prompt_packages: List[PromptPackageResponse] = Field(default_factory=list)
+
+
+class PromptVersionListResponse(BaseModel):
+    prompt_package_id: int
+    versions: List[PromptVersionResponse] = Field(default_factory=list)
+
+
+class PromptObservabilityListResponse(BaseModel):
+    prompt_package_id: int
+    observability_logs: List[PromptObservabilityLogResponse] = Field(default_factory=list)
 
 
 class PromptStudioBundleResponse(BaseModel):

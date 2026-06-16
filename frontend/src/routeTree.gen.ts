@@ -14,12 +14,15 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SemanticsRouteImport } from './routes/semantics'
 import { Route as RelationshipsRouteImport } from './routes/relationships'
 import { Route as ReadinessRouteImport } from './routes/readiness'
+import { Route as ReadinessHistoryRouteImport } from './routes/readiness-history'
 import { Route as PromptStudioRouteImport } from './routes/prompt-studio'
+import { Route as PromptBudgetsRouteImport } from './routes/prompt-budgets'
 import { Route as KpiRouteImport } from './routes/kpi'
 import { Route as JobsRouteImport } from './routes/jobs'
 import { Route as GovernanceRouteImport } from './routes/governance'
 import { Route as ExplorerRouteImport } from './routes/explorer'
 import { Route as EmbeddingsRouteImport } from './routes/embeddings'
+import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as IndexRouteImport } from './routes/index'
 
@@ -48,9 +51,19 @@ const ReadinessRoute = ReadinessRouteImport.update({
   path: '/readiness',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ReadinessHistoryRoute = ReadinessHistoryRouteImport.update({
+  id: '/readiness-history',
+  path: '/readiness-history',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PromptStudioRoute = PromptStudioRouteImport.update({
   id: '/prompt-studio',
   path: '/prompt-studio',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PromptBudgetsRoute = PromptBudgetsRouteImport.update({
+  id: '/prompt-budgets',
+  path: '/prompt-budgets',
   getParentRoute: () => rootRouteImport,
 } as any)
 const KpiRoute = KpiRouteImport.update({
@@ -78,6 +91,11 @@ const EmbeddingsRoute = EmbeddingsRouteImport.update({
   path: '/embeddings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AgentsRoute = AgentsRouteImport.update({
+  id: '/agents',
+  path: '/agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ConnectRoute = ConnectRouteImport.update({
   id: '/connect',
   path: '/connect',
@@ -93,12 +111,15 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/connect': typeof ConnectRoute
   '/embeddings': typeof EmbeddingsRoute
+  '/agents': typeof AgentsRoute
   '/explorer': typeof ExplorerRoute
   '/governance': typeof GovernanceRoute
   '/jobs': typeof JobsRoute
   '/kpi': typeof KpiRoute
   '/prompt-studio': typeof PromptStudioRoute
+  '/prompt-budgets': typeof PromptBudgetsRoute
   '/readiness': typeof ReadinessRoute
+  '/readiness-history': typeof ReadinessHistoryRoute
   '/relationships': typeof RelationshipsRoute
   '/semantics': typeof SemanticsRoute
   '/settings': typeof SettingsRoute
@@ -108,12 +129,15 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/connect': typeof ConnectRoute
   '/embeddings': typeof EmbeddingsRoute
+  '/agents': typeof AgentsRoute
   '/explorer': typeof ExplorerRoute
   '/governance': typeof GovernanceRoute
   '/jobs': typeof JobsRoute
   '/kpi': typeof KpiRoute
   '/prompt-studio': typeof PromptStudioRoute
+  '/prompt-budgets': typeof PromptBudgetsRoute
   '/readiness': typeof ReadinessRoute
+  '/readiness-history': typeof ReadinessHistoryRoute
   '/relationships': typeof RelationshipsRoute
   '/semantics': typeof SemanticsRoute
   '/settings': typeof SettingsRoute
@@ -124,12 +148,15 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/connect': typeof ConnectRoute
   '/embeddings': typeof EmbeddingsRoute
+  '/agents': typeof AgentsRoute
   '/explorer': typeof ExplorerRoute
   '/governance': typeof GovernanceRoute
   '/jobs': typeof JobsRoute
   '/kpi': typeof KpiRoute
   '/prompt-studio': typeof PromptStudioRoute
+  '/prompt-budgets': typeof PromptBudgetsRoute
   '/readiness': typeof ReadinessRoute
+  '/readiness-history': typeof ReadinessHistoryRoute
   '/relationships': typeof RelationshipsRoute
   '/semantics': typeof SemanticsRoute
   '/settings': typeof SettingsRoute
@@ -141,12 +168,15 @@ export interface FileRouteTypes {
     | '/'
     | '/connect'
     | '/embeddings'
+    | '/agents'
     | '/explorer'
     | '/governance'
     | '/jobs'
     | '/kpi'
     | '/prompt-studio'
+    | '/prompt-budgets'
     | '/readiness'
+    | '/readiness-history'
     | '/relationships'
     | '/semantics'
     | '/settings'
@@ -156,12 +186,15 @@ export interface FileRouteTypes {
     | '/'
     | '/connect'
     | '/embeddings'
+    | '/agents'
     | '/explorer'
     | '/governance'
     | '/jobs'
     | '/kpi'
     | '/prompt-studio'
+    | '/prompt-budgets'
     | '/readiness'
+    | '/readiness-history'
     | '/relationships'
     | '/semantics'
     | '/settings'
@@ -171,6 +204,7 @@ export interface FileRouteTypes {
     | '/'
     | '/connect'
     | '/embeddings'
+    | '/agents'
     | '/explorer'
     | '/governance'
     | '/jobs'
@@ -187,12 +221,15 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ConnectRoute: typeof ConnectRoute
   EmbeddingsRoute: typeof EmbeddingsRoute
+  AgentsRoute: typeof AgentsRoute
   ExplorerRoute: typeof ExplorerRoute
   GovernanceRoute: typeof GovernanceRoute
   JobsRoute: typeof JobsRoute
   KpiRoute: typeof KpiRoute
   PromptStudioRoute: typeof PromptStudioRoute
+  PromptBudgetsRoute: typeof PromptBudgetsRoute
   ReadinessRoute: typeof ReadinessRoute
+  ReadinessHistoryRoute: typeof ReadinessHistoryRoute
   RelationshipsRoute: typeof RelationshipsRoute
   SemanticsRoute: typeof SemanticsRoute
   SettingsRoute: typeof SettingsRoute
@@ -236,11 +273,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReadinessRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/readiness-history': {
+      id: '/readiness-history'
+      path: '/readiness-history'
+      fullPath: '/readiness-history'
+      preLoaderRoute: typeof ReadinessHistoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/prompt-studio': {
       id: '/prompt-studio'
       path: '/prompt-studio'
       fullPath: '/prompt-studio'
       preLoaderRoute: typeof PromptStudioRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/prompt-budgets': {
+      id: '/prompt-budgets'
+      path: '/prompt-budgets'
+      fullPath: '/prompt-budgets'
+      preLoaderRoute: typeof PromptBudgetsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/kpi': {
@@ -278,6 +329,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EmbeddingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/agents': {
+      id: '/agents'
+      path: '/agents'
+      fullPath: '/agents'
+      preLoaderRoute: typeof AgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/connect': {
       id: '/connect'
       path: '/connect'
@@ -304,6 +362,7 @@ const rootRouteChildren: RootRouteChildren = {
   JobsRoute: JobsRoute,
   KpiRoute: KpiRoute,
   PromptStudioRoute: PromptStudioRoute,
+  PromptBudgetsRoute: PromptBudgetsRoute,
   ReadinessRoute: ReadinessRoute,
   RelationshipsRoute: RelationshipsRoute,
   SemanticsRoute: SemanticsRoute,

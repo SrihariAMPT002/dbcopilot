@@ -20,16 +20,20 @@ from app.config.manager import get_config_manager
 from app.models.column_semantic import ColumnSemantic
 from app.models.metadata import (
     ConnectedDatabase,
+    ColumnStatistics,
     DatabaseColumn,
     DatabaseSchema,
     DatabaseSemantic,
     DatabaseTable,
+    GovernanceEvidence,
     GovernancePackage,
     SemanticGenerationStatus,
 )
 from app.config.package_registry import package_is_enabled
 from app.services.ai_observability_service import AIObservabilityService
 from app.config.prompts import get_prompt_registry
+from app.services.governance_feature_service import GovernanceFeatureService
+from app.services.governance_validator_service import GovernanceValidatorService
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +80,8 @@ class ColumnSemanticService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.registry = get_prompt_registry()
+        self.feature_service = GovernanceFeatureService(db)
+        self.validator = GovernanceValidatorService()
 
     @staticmethod
     def _trace_id_as_string(trace_id: Any) -> str | None:
@@ -112,30 +118,138 @@ class ColumnSemanticService:
         digest = hashlib.sha256(json.dumps(parts, default=str, sort_keys=True).encode("utf-8")).hexdigest()
         return digest[:32]
 
+    def _rule_matches_for_column(
+        self,
+        *,
+        database: ConnectedDatabase,
+        table: DatabaseTable,
+        column: DatabaseColumn,
+        neighbors: list[DatabaseColumn] | None = None,
+    ) -> list[dict[str, Any]]:
+        neighbor_context = ", ".join(
+            neighbor.name for neighbor in (neighbors or []) if neighbor.id != column.id
+        )
+        return [
+            match.to_dict()
+            for match in self.feature_service.rule_service.match_column(
+                column_name=column.name,
+                data_type=column.data_type,
+                table_context=f"{database.display_name or database.name} {table.schema.name} {table.name}",
+                neighbor_context=neighbor_context,
+            )
+        ]
+
+    def _deterministic_column_payload(
+        self,
+        *,
+        database: ConnectedDatabase,
+        table: DatabaseTable,
+        column: DatabaseColumn,
+        neighbors: list[DatabaseColumn] | None = None,
+        statistics: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        matches = self._rule_matches_for_column(
+            database=database,
+            table=table,
+            column=column,
+            neighbors=neighbors,
+        )
+        is_pii = bool(matches)
+        top_match = matches[0] if matches else None
+        confidence = float(top_match.get("confidence", 0.55)) if top_match else 0.2
+        evidence = [
+            {
+                "source": "metadata",
+                "column_name": column.name,
+                "data_type": column.data_type,
+                "nullable": bool(column.is_nullable),
+                "primary_key": bool(column.is_primary_key),
+                "foreign_key": bool(column.is_foreign_key),
+            },
+        ]
+        if statistics:
+            evidence.append({"source": "statistics", **statistics})
+        evidence.append(
+            {
+                "source": "rule_matches",
+                "matches": matches,
+            }
+        )
+        return {
+            "column_name": column.name,
+            "is_pii": is_pii,
+            "pii_type": top_match.get("label") if top_match else None,
+            "risk_level": top_match.get("risk_level") if top_match else "low",
+            "confidence_score": max(0.0, min(1.0, confidence)),
+            "business_meaning": column.description or column.name.replace("_", " "),
+            "governance_reasoning": "Deterministic governance rule engine classified this column because the AI response was unavailable.",
+            "classification_source": "deterministic_rules",
+            "review_status": self._review_status_from_confidence(confidence),
+            "sample_patterns": [match.get("matched_value") for match in matches if match.get("matched_value")],
+            "rule_matches": matches,
+            "evidence": evidence,
+        }
+
     def _metadata_package(
         self,
         table: DatabaseTable,
         database: ConnectedDatabase,
         semantic: DatabaseSemantic | None,
         columns: list[DatabaseColumn] | None = None,
+        statistics: dict[int, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         selected_columns = columns if columns is not None else list(table.columns or [])
-        payload: dict[str, Any] = {
+        stats_map = statistics or {}
+        table_context = {
             "database_name": database.display_name or database.name,
             "schema_name": table.schema.name,
             "table_name": table.name,
             "table_description": table.description or "",
-            "columns": [
+            "column_count": len(selected_columns),
+            "neighboring_columns": [
                 {
                     "name": column.name,
                     "data_type": column.data_type,
                     "nullable": bool(column.is_nullable),
                     "primary_key": bool(column.is_primary_key),
                     "foreign_key": bool(column.is_foreign_key),
+                    "ordinal_position": column.ordinal_position,
                 }
                 for column in sorted(selected_columns, key=lambda item: item.ordinal_position or 0)
             ],
         }
+        payload: dict[str, Any] = {
+            "database_name": database.display_name or database.name,
+            "schema_name": table.schema.name,
+            "table_name": table.name,
+            "table_description": table.description or "",
+            "table_context": table_context,
+            "columns": [],
+        }
+        for column in sorted(selected_columns, key=lambda item: item.ordinal_position or 0):
+            feature = self.feature_service.build_feature(
+                database=database,
+                schema=table.schema,
+                table=table,
+                column=column,
+                statistics=stats_map.get(column.id, {}),
+                neighbors=selected_columns,
+            )
+            payload["columns"].append(
+                {
+                    "name": column.name,
+                    "data_type": column.data_type,
+                    "nullable": bool(column.is_nullable),
+                    "primary_key": bool(column.is_primary_key),
+                    "foreign_key": bool(column.is_foreign_key),
+                    "ordinal_position": column.ordinal_position,
+                    "statistics": feature.statistics,
+                    "neighbor_context": feature.neighbor_context,
+                    "rule_matches": feature.rule_matches,
+                    "sample_patterns": feature.sample_patterns,
+                    "evidence": feature.evidence,
+                }
+            )
         return payload
 
     @staticmethod
@@ -374,6 +488,7 @@ class ColumnSemanticService:
         columns = sorted(table.columns or [], key=lambda item: item.ordinal_position or 0)
         if not columns:
             return []
+        stats_map = await self.feature_service.fetch_column_statistics([column.id for column in columns])
 
         semantic = await self._fetch_database_semantic(database.id)
         existing_rows = {row.column_id: row for row in await self.get_by_database_id(database.id)}
@@ -389,7 +504,24 @@ class ColumnSemanticService:
         max_completion_tokens = int(get_config_manager().get_model_config("schema_enrichment").get("max_completion_tokens", 1000) or 1000)
         observability = AIObservabilityService()
         for batch_index, batch in enumerate(self._column_batches(columns, self.MAX_COLUMNS_PER_BATCH), start=1):
-            prompt_context = self._metadata_package(table, database, semantic, columns=batch)
+            prompt_context = self._metadata_package(table, database, semantic, columns=batch, statistics=stats_map)
+            error_message: str | None = None
+            for column in batch:
+                feature = self.feature_service.build_feature(
+                    database=database,
+                    schema=table.schema,
+                    table=table,
+                    column=column,
+                    statistics=stats_map.get(column.id, {}),
+                    neighbors=batch,
+                )
+                await self.feature_service.upsert_column_statistics(
+                    database=database,
+                    schema=table.schema,
+                    table=table,
+                    column=column,
+                    feature=feature,
+                )
             prompt_context_size = len(json.dumps(prompt_context, default=str))
             prompt = self.registry.render_prompt(self.PROMPT_ID, prompt_context, category="semantic")
             prompt_size = len(prompt.system_message or "") + len(prompt.user_prompt or "")
@@ -480,26 +612,21 @@ class ColumnSemanticService:
                     usage.get("completion_tokens"),
                     usage.get("reasoning_tokens"),
                 )
-                failures = await self._persist_table_failure(
-                    batch,
-                    database.id,
-                    table=table,
-                    prompt_id=prompt.metadata.id,
-                    prompt_version=str(prompt.metadata.version),
-                    model_name=model_name,
-                    error_message=error_message,
-                    ai_result=ai_result,
-                )
-                await self._persist_governance_package_failure(
-                    table,
-                    database,
-                    prompt_id=prompt.metadata.id,
-                    prompt_version=str(prompt.metadata.version),
-                    model_name=model_name,
-                    error_message=error_message,
-                    ai_result=ai_result,
-                )
-                return failures
+                payload = {
+                    "table_summary": f"Deterministic governance summary for {table.name}.",
+                    "business_purpose": table.description or f"{table.name} table",
+                    "resolved_columns": [
+                        self._deterministic_column_payload(
+                            database=database,
+                            table=table,
+                            column=column,
+                            neighbors=batch,
+                            statistics=stats_map.get(column.id, {}),
+                        )
+                        for column in batch
+                    ],
+                    "raw_failure_reason": error_message,
+                }
 
             table_purpose = payload.get("business_purpose") or payload.get("table_summary")
             resolved = payload.get("resolved_columns", [])
@@ -512,6 +639,27 @@ class ColumnSemanticService:
             for column in batch:
                 item = resolved_map.get(column.name)
                 fingerprint = self._column_metadata_fingerprint(column, table)
+                if not item:
+                    rule_floor = self.feature_service.build_feature(
+                        database=database,
+                        schema=table.schema,
+                        table=table,
+                        column=column,
+                        statistics=stats_map.get(column.id, {}),
+                        neighbors=batch,
+                    )
+                    if rule_floor.rule_matches:
+                        item = {
+                            "column_name": column.name,
+                            "is_pii": True,
+                            "pii_type": rule_floor.rule_matches[0]["label"],
+                            "risk_level": rule_floor.rule_matches[0]["risk_level"],
+                            "confidence_score": max(float(rule_floor.rule_matches[0]["confidence"]), 0.8),
+                            "business_meaning": column.description or column.name.replace("_", " "),
+                            "governance_reasoning": "Deterministic rule match used as governance floor because AI response omitted the column.",
+                        }
+                    else:
+                        item = None
                 if not item:
                     results.append(
                         await self._upsert_failed_semantic(
@@ -533,6 +681,7 @@ class ColumnSemanticService:
                     model_name=model_name,
                     metadata_fingerprint=fingerprint,
                     table_purpose=table_purpose,
+                    source=str(item.get("classification_source", "table_ai")),
                 )
                 results.append(await self._upsert_semantic(column, database.id, classification, ai_result))
             await self._upsert_governance_package(
@@ -543,7 +692,10 @@ class ColumnSemanticService:
                 model_name=model_name,
                 payload=payload,
                 ai_result=ai_result,
+                batch_columns=batch,
+                error_message=error_message,
             )
+            await self._persist_governance_evidence(table, database, payload, batch, ai_result)
         return results
 
     async def _upsert_governance_package(
@@ -556,6 +708,7 @@ class ColumnSemanticService:
         model_name: str,
         payload: dict[str, Any],
         ai_result: Any | None,
+        batch_columns: list[DatabaseColumn] | None = None,
         error_message: str | None = None,
     ) -> GovernancePackage:
         result = await self.db.execute(
@@ -581,6 +734,62 @@ class ColumnSemanticService:
             0.0,
             min(1.0, float(sum(float(item.get("confidence_score", 0.0) or 0.0) for item in resolved) / max(1, len(resolved)) if resolved else 0.0)),
         )
+        row.evidence = json.dumps(
+            [
+                {
+                    "column_name": item.get("column_name"),
+                    "business_meaning": item.get("business_meaning"),
+                    "governance_reasoning": item.get("governance_reasoning"),
+                    "risk_level": item.get("risk_level"),
+                    "is_pii": bool(item.get("is_pii")),
+                }
+                for item in resolved
+                if isinstance(item, dict)
+            ]
+        )
+        row.rule_matches = json.dumps(
+            [
+                {
+                    "column_name": column.name,
+                    "data_type": column.data_type,
+                    "rule_matches": self._rule_matches_for_column(
+                        database=database,
+                        table=table,
+                        column=column,
+                        neighbors=batch_columns or list(table.columns or []),
+                    ),
+                }
+                for column in (batch_columns or list(table.columns or []))
+            ]
+        )
+        row.sample_patterns = json.dumps(
+            [
+                {
+                    "column_name": column.name,
+                    "patterns": [
+                        match.get("matched_value")
+                        for match in self._rule_matches_for_column(
+                            database=database,
+                            table=table,
+                            column=column,
+                            neighbors=batch_columns or list(table.columns or []),
+                        )
+                        if match.get("matched_value")
+                    ],
+                }
+                for column in (batch_columns or list(table.columns or []))
+            ]
+        )
+        usage = getattr(ai_result, "token_usage", {}) or {}
+        row.prompt_tokens = int(usage.get("prompt_tokens", 0) or 0) if usage else None
+        row.completion_tokens = int(usage.get("completion_tokens", 0) or 0) if usage else None
+        row.reasoning_tokens = int(usage.get("reasoning_tokens", 0) or 0) if usage else None
+        raw_response = getattr(ai_result, "raw_response", None) if ai_result is not None else None
+        try:
+            row.finish_reason = str(getattr(raw_response.choices[0], "finish_reason", None)) if raw_response and getattr(raw_response, "choices", None) else None
+        except Exception:
+            row.finish_reason = None
+        row.latency_ms = float(getattr(ai_result, "latency_ms", 0.0) or 0.0) if ai_result is not None else None
         row.prompt_id = prompt_id
         row.prompt_version = prompt_version
         row.model_name = model_name
@@ -614,6 +823,61 @@ class ColumnSemanticService:
             error_message=error_message,
         )
 
+    async def _persist_governance_evidence(
+        self,
+        table: DatabaseTable,
+        database: ConnectedDatabase,
+        payload: dict[str, Any],
+        batch_columns: list[DatabaseColumn],
+        ai_result: Any | None,
+    ) -> None:
+        result = await self.db.execute(
+            select(GovernancePackage).where(GovernancePackage.table_id == table.id)
+        )
+        package = result.scalar_one_or_none()
+        if package is None:
+            return
+        rule_matches: list[dict[str, Any]] = []
+        resolved = list(payload.get("resolved_columns") or [])
+        for column in batch_columns:
+            rule_matches.append(
+                {
+                    "column_name": column.name,
+                    "matches": self._rule_matches_for_column(
+                        database=database,
+                        table=table,
+                        column=column,
+                        neighbors=batch_columns,
+                    ),
+                }
+            )
+        evidence_rows: list[GovernanceEvidence] = []
+        for item in resolved:
+            if not isinstance(item, dict):
+                continue
+            evidence_rows.append(
+                GovernanceEvidence(
+                    governance_package_id=package.id,
+                    evidence_type="ai_reasoning",
+                    evidence_source="azure_openai",
+                    evidence_json=json.dumps(
+                        {
+                            "column_name": item.get("column_name"),
+                            "business_meaning": item.get("business_meaning"),
+                            "governance_reasoning": item.get("governance_reasoning"),
+                            "confidence_score": item.get("confidence_score"),
+                            "risk_level": item.get("risk_level"),
+                            "rule_matches": rule_matches,
+                            "content": getattr(ai_result, "content", None),
+                        },
+                        default=str,
+                    ),
+                )
+            )
+        if evidence_rows:
+            self.db.add_all(evidence_rows)
+            await self.db.flush()
+
     @staticmethod
     def _governance_package_to_dict(row: GovernancePackage) -> dict[str, Any]:
         return {
@@ -629,6 +893,14 @@ class ColumnSemanticService:
             "sensitive_columns": row.sensitive_columns,
             "overall_risk": row.overall_risk,
             "confidence_score": float(row.confidence_score or 0.0),
+            "evidence": json.loads(row.evidence or "[]"),
+            "rule_matches": json.loads(row.rule_matches or "[]"),
+            "sample_patterns": json.loads(row.sample_patterns or "[]"),
+            "prompt_tokens": row.prompt_tokens,
+            "completion_tokens": row.completion_tokens,
+            "reasoning_tokens": row.reasoning_tokens,
+            "finish_reason": row.finish_reason,
+            "latency_ms": row.latency_ms,
             "prompt_id": row.prompt_id,
             "prompt_version": row.prompt_version,
             "model_name": row.model_name,
@@ -640,20 +912,7 @@ class ColumnSemanticService:
 
     @staticmethod
     def _parse_table_classification(response_text: str) -> dict[str, Any]:
-        cleaned = (response_text or "").strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        if not cleaned:
-            raise ValueError("empty_ai_response")
-        try:
-            payload = json.loads(cleaned)
-        except Exception as exc:
-            raise ValueError("invalid_json") from exc
-        if not isinstance(payload, dict):
-            raise ValueError("invalid_json")
-        if "resolved_columns" not in payload or not isinstance(payload.get("resolved_columns"), list):
-            raise ValueError("missing_required_sections:resolved_columns")
-        return payload
+        return GovernanceValidatorService().parse_and_validate(response_text)
 
     async def generate_for_database(self, database_id: int, force: bool = False) -> list[ColumnSemantic]:
         """Governance engine: one metadata-driven AI request per table."""
@@ -779,6 +1038,42 @@ class ColumnSemanticService:
             "risk_columns": sum(len(pkg.risk_columns) for pkg in packages),
             "sensitive_columns": sum(len(pkg.sensitive_columns) for pkg in packages),
             "governance_packages": len(packages),
+        }
+
+    async def get_governance_evidence(self, table_id: int) -> dict[str, Any] | None:
+        result = await self.db.execute(
+            select(GovernancePackage).where(GovernancePackage.table_id == table_id)
+        )
+        package = result.scalar_one_or_none()
+        if package is None:
+            return None
+        evidence_result = await self.db.execute(
+            select(GovernanceEvidence).where(GovernanceEvidence.governance_package_id == package.id)
+        )
+        evidence_rows = evidence_result.scalars().all()
+        return {
+            "database_id": package.database_id,
+            "table_id": package.table_id,
+            "table_name": package.table_name,
+            "schema_name": package.schema_name,
+            "confidence_score": float(package.confidence_score or 0.0),
+            "prompt_tokens": package.prompt_tokens,
+            "completion_tokens": package.completion_tokens,
+            "reasoning_tokens": package.reasoning_tokens,
+            "finish_reason": package.finish_reason,
+            "latency_ms": package.latency_ms,
+            "evidence": [
+                {
+                    "id": row.id,
+                    "governance_package_id": row.governance_package_id,
+                    "column_id": row.column_id,
+                    "evidence_type": row.evidence_type,
+                    "evidence_source": row.evidence_source,
+                    "evidence_json": json.loads(row.evidence_json or "{}"),
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+                for row in evidence_rows
+            ],
         }
 
     async def get_by_database_id(self, database_id: int) -> list[ColumnSemantic]:

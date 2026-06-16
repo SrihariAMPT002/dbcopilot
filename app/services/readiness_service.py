@@ -38,6 +38,14 @@ from app.schema_engine.embeddings import EmbeddingEngine
 from app.services.prompt_studio_service import PromptStudioService
 from app.models.metadata import KPIArtifact, KPIIntelligence
 from app.config.prompts import get_prompt_registry
+from app.models.remediation_action import RemediationAction
+from app.services.remediation_service import RemediationService
+from app.models.prompt_package import PromptPackage
+from app.models.embedding_document import EmbeddingDocument
+from app.models.retrieval_evaluation import RetrievalEvaluation
+from app.models.semantic_cache import SemanticCache
+from app.models.agent_memory import AgentMemory
+from app.models.prompt_evaluation import PromptEvaluation
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +244,11 @@ class ReadinessService:
             raise ValueError("Governance package is disabled by registry")
         snapshot = await self._latest_snapshot(database_id)
         database = await self._fetch_database(database_id)
+        latest_change = await self._latest_package_change_at(database_id)
         if snapshot is None:
+            return await self.recompute(database_id)
+
+        if latest_change and snapshot.generated_at < latest_change:
             return await self.recompute(database_id)
 
         if database.last_sync_at and snapshot.generated_at < database.last_sync_at:
@@ -260,6 +272,7 @@ class ReadinessService:
             logger.exception("AI readiness assessment generation failed; falling back to deterministic summary")
 
         snapshot = await self._upsert_snapshot(database.id, breakdown, ai_assessment)
+        await self._persist_remediation_actions(snapshot, database.id, breakdown, ai_assessment)
         breakdown.generated_at = snapshot.generated_at
         breakdown.ai_summary = snapshot.ai_summary
         breakdown.ai_recommendations = self._parse_snapshot_json(snapshot.ai_recommendations)
@@ -275,6 +288,82 @@ class ReadinessService:
         breakdown.failed_cluster_count = int(snapshot.failed_cluster_count)
         breakdown.coverage_percentage = float(snapshot.coverage_percentage)
         return breakdown
+
+    async def _persist_remediation_actions(
+        self,
+        snapshot: ReadinessSnapshot,
+        database_id: int,
+        breakdown: ReadinessBreakdown,
+        ai_assessment: dict[str, Any],
+    ) -> list[RemediationAction]:
+        recommendations: list[dict[str, Any]] = []
+        for hint in breakdown.remediation_hints[:10]:
+            recommendations.append(
+                {
+                    "issue": hint,
+                    "recommendation": hint,
+                    "expected_impact": "Improve AI readiness coverage",
+                    "priority": "medium",
+                    "confidence_score": float(ai_assessment.get("ai_confidence", 0.0) or 0.0),
+                    "evidence": [{"source": "readiness_snapshot", "snapshot_id": snapshot.id}],
+                    "trace_id": ai_assessment.get("trace_id"),
+                }
+            )
+        if not recommendations and ai_assessment.get("ai_recommendations"):
+            for item in ai_assessment.get("ai_recommendations", [])[:10]:
+                recommendations.append(
+                    {
+                        "issue": str(item),
+                        "recommendation": str(item),
+                        "expected_impact": "Improve AI readiness coverage",
+                        "priority": "medium",
+                        "confidence_score": float(ai_assessment.get("ai_confidence", 0.0) or 0.0),
+                        "evidence": [{"source": "ai_assessment", "snapshot_id": snapshot.id}],
+                        "trace_id": ai_assessment.get("trace_id"),
+                    }
+                )
+        if not recommendations:
+            return []
+        service = RemediationService(self.db)
+        return await service.persist(
+            readiness_snapshot_id=snapshot.id,
+            database_id=database_id,
+            recommendations=recommendations,
+            trace_id=ai_assessment.get("trace_id"),
+        )
+
+    async def _latest_package_change_at(self, database_id: int) -> datetime | None:
+        candidates: list[datetime | None] = []
+
+        async def _max_updated(model: Any, clause: Any = None) -> None:
+            stmt = select(func.max(model.updated_at)).where(model.database_id == database_id)
+            if clause is not None:
+                stmt = stmt.where(clause)
+            result = await self.db.execute(stmt)
+            candidates.append(result.scalar_one_or_none())
+
+        await _max_updated(GovernancePackage)
+        await _max_updated(SemanticPackage)
+        await _max_updated(RelationshipPackage)
+        await _max_updated(KPIIntelligence)
+        await _max_updated(KPIArtifact)
+        await _max_updated(ReadinessSnapshot)
+
+        extra_models = [
+            PromptPackage,
+            EmbeddingDocument,
+            RetrievalEvaluation,
+            SemanticCache,
+            AgentMemory,
+            PromptEvaluation,
+        ]
+        for model in extra_models:
+            stmt = select(func.max(model.updated_at)).where(model.database_id == database_id)
+            result = await self.db.execute(stmt)
+            candidates.append(result.scalar_one_or_none())
+
+        values = [value for value in candidates if value is not None]
+        return max(values) if values else None
 
     async def _upsert_snapshot(self, database_id: int, breakdown: ReadinessBreakdown, ai_assessment: dict[str, Any]) -> ReadinessSnapshot:
         snapshot = ReadinessSnapshot(

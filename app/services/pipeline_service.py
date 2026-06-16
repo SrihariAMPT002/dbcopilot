@@ -39,8 +39,11 @@ class PipelineService:
         for job_type in (
             JobType.sync,
             JobType.semantic,
-            JobType.embeddings,
             JobType.relationship_graph,
+            JobType.kpi,
+            JobType.prompt,
+            JobType.embeddings,
+            JobType.readiness,
             JobType.exports,
         ):
             job = await self.create_job(database_id, job_type, triggered_by=triggered_by)

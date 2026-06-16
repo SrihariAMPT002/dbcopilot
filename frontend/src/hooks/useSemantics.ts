@@ -7,3 +7,11 @@ export function useSemantics(databaseId: number) {
     queryFn: () => SemanticService.getPackage(databaseId),
   });
 }
+
+export function useSemanticEvidence(databaseId: number) {
+  return useQuery({
+    queryKey: ["semantic-evidence", databaseId],
+    queryFn: () => SemanticService.getEvidence(databaseId),
+    enabled: Boolean(databaseId),
+  });
+}

@@ -17,6 +17,7 @@ from app.schemas.api_schemas import (
     ReadinessResponse,
 )
 from app.services.readiness_service import ReadinessBreakdown, ReadinessService
+from app.services.remediation_service import RemediationService
 
 router = APIRouter(prefix="/readiness", tags=["AI Readiness"])
 logger = logging.getLogger(__name__)
@@ -139,3 +140,23 @@ async def recompute_readiness(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to recompute readiness",
         )
+
+
+@router.post(
+    "/recalculate/{db_id}",
+    response_model=ReadinessBreakdownResponse,
+    summary="Recalculate AI readiness snapshot for a database",
+)
+async def recalculate_readiness(
+    db_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> ReadinessBreakdownResponse:
+    service = ReadinessService(db)
+    try:
+        result = await service.recompute(db_id)
+        return _to_breakdown_response(result)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except Exception as exc:
+        logger.error("Readiness recalculation failed for db_id=%s: %s", db_id, exc, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to recalculate readiness")

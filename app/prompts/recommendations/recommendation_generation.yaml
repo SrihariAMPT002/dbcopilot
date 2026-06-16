@@ -1,0 +1,44 @@
+id: recommendation_generation
+name: Recommendation Generation
+version: "1.0"
+description: Generate recommendations from persisted intelligence packages.
+metadata:
+  category: recommendations
+language: English
+system_message: |
+  You are a recommendation engine.
+  Reason over governance, semantic, relationship, and readiness packages.
+  Return compact JSON only.
+user_prompt: |
+  Generate recommendations from the supplied intelligence packages.
+
+  Governance:
+  {{ governance | default([]) | tojson }}
+
+  Semantic:
+  {{ semantic | default({}) | tojson }}
+
+  Relationships:
+  {{ relationships | default([]) | tojson }}
+
+  Readiness:
+  {{ readiness | default({}) | tojson }}
+
+  Existing recommendations:
+  {{ recommendations | default([]) | tojson }}
+
+  Return JSON only:
+  {
+    "recommendations": [
+      {
+        "recommendation_text": "string",
+        "recommendation_type": "string",
+        "priority": "low|medium|high",
+        "confidence_score": 0.0,
+        "evidence": []
+      }
+    ]
+  }
+constraints:
+  output_format: json
+  max_completion_tokens: 1200

@@ -11,6 +11,7 @@ import {
   Sparkles,
   Gauge,
   Activity,
+  Bot,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -56,6 +57,7 @@ export const navGroups: NavGroup[] = [
     label: "Platform",
     items: [
       { title: "Jobs & Operations", to: "/jobs", icon: Activity },
+      { title: "Agents", to: "/agents", icon: Bot },
       { title: "Settings", to: "/settings", icon: Settings },
     ],
   },

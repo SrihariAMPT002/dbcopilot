@@ -38,7 +38,11 @@ from app.models.metadata import (
     DatabaseSemantic,
 )
 from app.services.ai_observability_service import AIObservabilityService
+from app.services.cluster_scoring_service import ClusterScoringService
+from app.services.graph_feature_service import GraphFeatureService
 from app.services.column_semantic_service import ColumnSemanticService
+from app.services.lineage_service import LineageService
+from app.services.relationship_validator_service import RelationshipValidatorService
 from app.utils import safe_flush
 from app.config.prompts import get_prompt_registry
 from app.config.package_registry import package_is_enabled
@@ -713,18 +717,7 @@ class RelationshipGraphEngine:
         }
 
     def _validate_relationship_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if not payload:
-            raise ValueError("empty_ai_response")
-        normalized = self._normalize_intelligence_output(payload)
-        required = ["cluster_summary", "cluster_confidence", "entity_graph", "lifecycle_flows"]
-        missing = [field for field in required if normalized.get(field) in (None, "", [], {})]
-        if missing:
-            raise ValueError(f"missing_required_fields:{','.join(missing)}")
-        normalized.setdefault("hidden_relationships", [])
-        normalized.setdefault("upstream_dependencies", [])
-        normalized.setdefault("downstream_dependencies", [])
-        normalized.setdefault("lifecycle_flows", [])
-        return normalized
+        return RelationshipValidatorService().parse_and_validate(json.dumps(payload or {}, default=str))
 
     def _build_cluster_package(
         self,
@@ -776,10 +769,46 @@ class RelationshipGraphEngine:
             cluster_metadata["domain_name"] = domain_name
         if parent_cluster_id:
             cluster_metadata["parent_cluster_id"] = parent_cluster_id
+        graph_bundle = GraphFeatureService().build(
+            tables=[
+                {
+                    "table_id": table.id,
+                    "table_name": table.name,
+                    "schema_name": table.schema.name,
+                }
+                for table in cluster_tables
+            ],
+            relationships=[
+                {
+                    "source_table_id": edge.source_table_id,
+                    "target_table_id": edge.target_table_id,
+                    "relationship_type": edge.relationship_type,
+                    "relationship_strength": edge.relationship_strength,
+                    "join_columns": [{"source_column": link.source_column, "target_column": link.target_column} for link in edge.join_columns],
+                }
+                for edge in cluster_edges
+            ],
+        )
+        cluster_scores = ClusterScoringService().score(
+            graph_metrics=graph_bundle.graph_metrics,
+            cluster_size=len(cluster_tables),
+            relationship_count=len(cluster_edges),
+            ai_confidence=0.0,
+        )
         return {
             "governance_package": self._json_compatible(self._filter_governance_package(governance_package, cluster_table_ids_set, tables)),
             "semantic_package": self._json_compatible(self._filter_semantic_package(semantic_package, cluster_table_ids_set, table_semantics)),
             "cluster_metadata": self._json_compatible(cluster_metadata),
+            "graph_features": self._json_compatible(
+                {
+                    "graph_metrics": graph_bundle.graph_metrics,
+                    "centrality": graph_bundle.centrality,
+                    "hub_analysis": graph_bundle.hub_analysis,
+                    "communities": graph_bundle.communities,
+                    "evidence": graph_bundle.evidence,
+                }
+            ),
+            "cluster_scores": self._json_compatible(cluster_scores),
         }
 
     @staticmethod
@@ -791,12 +820,14 @@ class RelationshipGraphEngine:
             "domain_name": row.domain_name,
             "cluster_summary": row.cluster_summary,
             "entity_graph": row.entity_graph,
-            "business_process_flows": row.business_process_flows,
             "hidden_relationships": row.hidden_relationships,
             "upstream_dependencies": row.upstream_dependencies,
             "downstream_dependencies": row.downstream_dependencies,
             "lifecycle_flows": row.lifecycle_flows,
             "confidence_score": float(row.confidence_score or 0.0),
+            "evidence": row.evidence,
+            "graph_metrics": row.graph_metrics,
+            "confidence_details": row.confidence_details,
             "prompt_id": row.prompt_id,
             "prompt_version": row.prompt_version,
             "model_name": row.model_name,
@@ -1034,6 +1065,12 @@ class RelationshipGraphEngine:
                 "downstream_dependencies": payload.get("downstream_dependencies", []),
                 "lifecycle_flows": payload.get("lifecycle_flows", []),
             }
+            payload["evidence"] = payload.get("evidence") or batch_prompt_context.get("graph_features", {}).get("evidence", [])
+            payload["graph_metrics"] = batch_prompt_context.get("graph_features", {}).get("graph_metrics", {})
+            payload["confidence_details"] = {
+                "cluster_scores": batch_prompt_context.get("cluster_scores", {}),
+                "ai_confidence": payload["cluster_confidence"],
+            }
             payload["cluster_size"] = telemetry["cluster_size"]
             payload["estimated_tokens"] = telemetry["estimated_tokens"]
             payload["actual_input_tokens"] = int(result.token_usage.get("prompt_tokens", 0) or 0)
@@ -1085,13 +1122,10 @@ class RelationshipGraphEngine:
             "database_type": database_type,
             "cluster_count": len(batch_outputs),
             "entity_graph": entity_graph,
-            "business_entity_graph": entity_graph,
             "hidden_relationships": hidden_relationships,
-            "business_process_flows": business_process_flows,
             "upstream_dependencies": upstream_dependencies,
             "downstream_dependencies": downstream_dependencies,
             "lifecycle_flows": lifecycle_flows,
-            "entity_lifecycle_descriptions": lifecycle_flows,
             "cluster_summaries": [
                 {
                     "cluster_id": payload.get("cluster_id"),
@@ -1110,10 +1144,12 @@ class RelationshipGraphEngine:
                     "relationship_intelligence": payload.get("relationship_intelligence", {}),
                     "entity_graph": payload.get("entity_graph", []),
                     "hidden_relationships": payload.get("hidden_relationships", []),
-                    "business_process_flows": payload.get("business_process_flows", []),
                     "upstream_dependencies": payload.get("upstream_dependencies", []),
                     "downstream_dependencies": payload.get("downstream_dependencies", []),
                     "lifecycle_flows": payload.get("lifecycle_flows", []),
+                    "evidence": payload.get("evidence", []),
+                    "graph_metrics": payload.get("graph_metrics", {}),
+                    "confidence_details": payload.get("confidence_details", {}),
                 }
                 for payload in batch_outputs
             ],
@@ -1153,7 +1189,11 @@ class RelationshipGraphEngine:
         upstream_dependencies: list[Any] = []
         downstream_dependencies: list[Any] = []
         lifecycle_flows: list[Any] = []
+        evidence: list[Any] = []
+        graph_metrics: list[dict[str, Any]] = []
+        confidence_details: list[dict[str, Any]] = []
         cluster_summaries: list[dict[str, Any]] = []
+        lineage = LineageService().build_lineage(relationship_packages=cluster_payloads)
 
         for payload in cluster_payloads:
             entity_graph.extend(payload.get("entity_graph") or [])
@@ -1162,6 +1202,11 @@ class RelationshipGraphEngine:
             upstream_dependencies.extend(payload.get("upstream_dependencies") or [])
             downstream_dependencies.extend(payload.get("downstream_dependencies") or [])
             lifecycle_flows.extend(payload.get("lifecycle_flows") or [])
+            evidence.extend(payload.get("evidence") or [])
+            if payload.get("graph_metrics"):
+                graph_metrics.append(payload.get("graph_metrics") or {})
+            if payload.get("confidence_details"):
+                confidence_details.append(payload.get("confidence_details") or {})
             cluster_summaries.append(
                 {
                     "cluster_id": payload.get("cluster_id"),
@@ -1190,10 +1235,10 @@ class RelationshipGraphEngine:
         relationship_intelligence = {
             "entity_graph": entity_graph,
             "hidden_relationships": hidden_relationships,
-            "business_process_flows": business_process_flows,
             "upstream_dependencies": upstream_dependencies,
             "downstream_dependencies": downstream_dependencies,
             "lifecycle_flows": lifecycle_flows,
+            "lineage": lineage,
         }
         return {
             "entity_graph": entity_graph,
@@ -1202,6 +1247,12 @@ class RelationshipGraphEngine:
             "upstream_dependencies": upstream_dependencies,
             "downstream_dependencies": downstream_dependencies,
             "lifecycle_flows": lifecycle_flows,
+            "evidence": evidence,
+            "graph_metrics": graph_metrics[-1] if graph_metrics else {},
+            "confidence_details": {
+                **(confidence_details[-1] if confidence_details else {}),
+                "lineage_count": len(lineage),
+            },
             "cluster_summaries": cluster_summaries,
             "relationship_intelligence": relationship_intelligence,
         }
@@ -1217,12 +1268,14 @@ class RelationshipGraphEngine:
         row.domain_name = relationship_payload.get("domain_name")
         row.cluster_summary = relationship_payload.get("cluster_summary") or "Database relationship intelligence."
         row.entity_graph = list(relationship_payload.get("entity_graph") or [])
-        row.business_process_flows = list(relationship_payload.get("business_process_flows") or [])
         row.hidden_relationships = list(relationship_payload.get("hidden_relationships") or [])
         row.upstream_dependencies = list(relationship_payload.get("upstream_dependencies") or [])
         row.downstream_dependencies = list(relationship_payload.get("downstream_dependencies") or [])
         row.lifecycle_flows = list(relationship_payload.get("lifecycle_flows") or [])
         row.confidence_score = float(relationship_payload.get("cluster_confidence", 0.0) or 0.0)
+        row.evidence = list(relationship_payload.get("evidence") or [])
+        row.graph_metrics = dict(relationship_payload.get("graph_metrics") or {})
+        row.confidence_details = dict(relationship_payload.get("confidence_details") or {})
         row.prompt_id = relationship_payload.get("prompt_name")
         row.prompt_version = relationship_payload.get("prompt_version")
         row.model_name = relationship_payload.get("model_name")
@@ -1478,17 +1531,14 @@ class RelationshipGraphEngine:
                     relationship_strength=edge.relationship_strength,
                     path_depth=edge.path_depth,
                     is_circular=edge.is_circular,
-                    business_entity_graph=self._json_safe(cluster_intel.get("entity_graph") or intelligence.get("entity_graph", [])),
-                    business_process_flows=self._json_safe(
-                        cluster_intel.get("business_process_flows") or intelligence.get("business_process_flows", [])
-                    ),
+                    entity_graph=self._json_safe(cluster_intel.get("entity_graph") or intelligence.get("entity_graph", [])),
                     upstream_dependencies=self._json_safe(
                         cluster_intel.get("upstream_dependencies") or intelligence.get("upstream_dependencies", [])
                     ),
                     downstream_dependencies=self._json_safe(
                         cluster_intel.get("downstream_dependencies") or intelligence.get("downstream_dependencies", [])
                     ),
-                    entity_lifecycle_descriptions=self._json_safe(cluster_intel.get("lifecycle_flows") or intelligence.get("lifecycle_flows", [])),
+                    lifecycle_flows=self._json_safe(cluster_intel.get("lifecycle_flows") or intelligence.get("lifecycle_flows", [])),
                     ai_summary=cluster_summary or intelligence.get("business_relationship_summary"),
                     ai_confidence=float(cluster_confidence if cluster_confidence is not None else intelligence.get("confidence_score", 0.0) or 0.0),
                     ai_model_name=intelligence.get("model_name"),

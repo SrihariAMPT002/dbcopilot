@@ -1,0 +1,47 @@
+id: opportunity_discovery
+name: Opportunity Discovery
+version: "1.0"
+description: Infer opportunities from persisted intelligence packages.
+metadata:
+  category: opportunity
+language: English
+system_message: |
+  You are an opportunity discovery engine.
+  Reason over governance, semantics, relationships, KPI, and readiness packages.
+  Do not hardcode domain-specific opportunities.
+  Return compact JSON only.
+user_prompt: |
+  Infer opportunity recommendations from the supplied intelligence packages.
+
+  Governance:
+  {{ governance | default([]) | tojson }}
+
+  Semantic:
+  {{ semantic | default({}) | tojson }}
+
+  Relationships:
+  {{ relationships | default([]) | tojson }}
+
+  KPI:
+  {{ kpis | default([]) | tojson }}
+
+  Readiness:
+  {{ readiness | default({}) | tojson }}
+
+  Existing opportunities:
+  {{ opportunities | default([]) | tojson }}
+
+  Return JSON only:
+  {
+    "opportunities": [
+      {
+        "recommendation_text": "string",
+        "recommendation_type": "string",
+        "confidence_score": 0.0,
+        "evidence": []
+      }
+    ]
+  }
+constraints:
+  output_format: json
+  max_completion_tokens: 1200

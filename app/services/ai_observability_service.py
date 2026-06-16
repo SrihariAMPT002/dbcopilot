@@ -309,6 +309,23 @@ class AIObservabilityService:
         return len(content or "")
 
     @staticmethod
+    def _request_budget_summary(request_payload: dict[str, Any], *, operation: OperationType) -> dict[str, Any]:
+        if operation == "embeddings":
+            texts = request_payload.get("input", []) or []
+            prompt_text = json.dumps(texts, default=str)
+            completion_budget = 0
+        else:
+            messages = request_payload.get("messages", []) or []
+            prompt_text = json.dumps(messages, default=str)
+            completion_budget = int(request_payload.get("max_completion_tokens") or request_payload.get("max_tokens") or 0)
+        return {
+            "prompt_chars": len(prompt_text),
+            "prompt_tokens_est": AIObservabilityService._estimate_text_tokens(prompt_text),
+            "completion_budget": completion_budget,
+            "request_chars": len(_serialize_for_log(request_payload)),
+        }
+
+    @staticmethod
     def _embeddings_from_response(response: Any) -> list[list[float]]:
         data = getattr(response, "data", []) or []
         return [list(item.embedding) for item in data if getattr(item, "embedding", None) is not None]
@@ -578,8 +595,27 @@ class AIObservabilityService:
 
         with observation as generation:
             try:
+                budget_summary = self._request_budget_summary(request_payload, operation="chat")
+                logger.info(
+                    "AI preflight | module=%s artifact_type=%s model=%s prompt_chars=%d prompt_tokens_est=%d completion_budget=%d request_chars=%d",
+                    module,
+                    artifact_type,
+                    model_name,
+                    budget_summary["prompt_chars"],
+                    budget_summary["prompt_tokens_est"],
+                    budget_summary["completion_budget"],
+                    budget_summary["request_chars"],
+                )
                 logger.error("AZURE REQUEST=%s", _serialize_for_log(request_payload))
-                logger.error("AZURE REQUEST SIZE chars=%d", len(_serialize_for_log(request_payload)))
+                logger.error(
+                    "AZURE REQUEST SIZE | module=%s artifact_type=%s prompt_chars=%d prompt_tokens_est=%d completion_budget=%d request_chars=%d",
+                    module,
+                    artifact_type,
+                    budget_summary["prompt_chars"],
+                    budget_summary["prompt_tokens_est"],
+                    budget_summary["completion_budget"],
+                    budget_summary["request_chars"],
+                )
                 response = await asyncio.to_thread(_invoke, request_payload)
                 raw_response_dump = _response_dump_json(response)
                 logger.error("AZURE RAW RESPONSE=%s", raw_response_dump)
@@ -726,6 +762,17 @@ class AIObservabilityService:
 
         with observation as embedding_obs:
             try:
+                budget_summary = self._request_budget_summary({"input": input_texts, **request_kwargs}, operation="embeddings")
+                logger.info(
+                    "AI preflight | module=%s artifact_type=%s model=%s prompt_chars=%d prompt_tokens_est=%d completion_budget=%d request_chars=%d",
+                    module,
+                    artifact_type,
+                    model_name,
+                    budget_summary["prompt_chars"],
+                    budget_summary["prompt_tokens_est"],
+                    budget_summary["completion_budget"],
+                    budget_summary["request_chars"],
+                )
                 response = await asyncio.to_thread(_invoke)
                 latency_ms = (time.perf_counter() - start) * 1000
                 vectors = self._embeddings_from_response(response)

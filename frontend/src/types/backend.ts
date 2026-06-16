@@ -15,6 +15,34 @@ export type Connection = {
   last_error?: string | null;
 };
 
+export type DashboardSummary = {
+  database_id?: number | null;
+  database_name?: string | null;
+  total_databases: number;
+  schemas: number;
+  tables: number;
+  columns: number;
+  relationships: number;
+  governance_coverage: number;
+  semantic_coverage: number;
+  relationship_coverage: number;
+  kpi_count: number;
+  embeddings_ready: number;
+  embeddings_total: number;
+  readiness_score: number;
+  active_jobs: number;
+  last_sync_at?: string | null;
+  failed_jobs: number;
+  completed_jobs_24h: number;
+  failed_jobs_24h: number;
+  prompt_packages?: number;
+  prompt_embeddings?: number;
+  latest_prompt_at?: string | null;
+  semantic_cache_entries?: number;
+  retrieval_evaluations?: number;
+  retrieval_logs?: number;
+};
+
 export type DatabaseSummary = {
   database_id: number;
   database_name: string;
@@ -153,6 +181,14 @@ export type GovernancePackage = {
   sensitive_columns: GovernanceColumn[];
   overall_risk?: string | null;
   confidence_score?: number;
+  evidence?: Array<Record<string, unknown>>;
+  rule_matches?: Array<Record<string, unknown>>;
+  sample_patterns?: Array<Record<string, unknown> | string>;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  reasoning_tokens?: number | null;
+  finish_reason?: string | null;
+  latency_ms?: number | null;
   prompt_id?: string | null;
   prompt_version?: string | null;
   model_name?: string | null;
@@ -171,6 +207,30 @@ export type GovernanceSummary = {
   governance_packages: number;
 };
 
+export type GovernanceEvidenceItem = {
+  id: number;
+  governance_package_id: number;
+  column_id?: number | null;
+  evidence_type: string;
+  evidence_source: string;
+  evidence_json: Record<string, unknown>;
+  created_at?: string | null;
+};
+
+export type GovernanceEvidence = {
+  database_id: number;
+  table_id: number;
+  table_name?: string | null;
+  schema_name?: string | null;
+  confidence_score?: number;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  reasoning_tokens?: number | null;
+  finish_reason?: string | null;
+  latency_ms?: number | null;
+  evidence: GovernanceEvidenceItem[];
+};
+
 export type SemanticGlossaryTerm = {
   term: string;
   definition: string;
@@ -186,10 +246,30 @@ export type SemanticPackage = {
   business_capabilities?: string[];
   business_glossary?: SemanticGlossaryTerm[];
   confidence_score?: number;
+  domain_scores?: Record<string, number>;
+  evidence?: Array<Record<string, unknown>>;
   prompt_id?: string | null;
   prompt_version?: string | null;
   model_name?: string | null;
   trace_id?: string | null;
+};
+
+export type SemanticEvidenceItem = {
+  id: number;
+  semantic_package_id: number;
+  table_id?: number | null;
+  evidence_type: string;
+  evidence_source: string;
+  evidence_json: Record<string, unknown>;
+  created_at?: string | null;
+};
+
+export type SemanticEvidence = {
+  database_id: number;
+  business_domain?: string | null;
+  confidence_score?: number;
+  domain_scores?: Record<string, number>;
+  evidence: SemanticEvidenceItem[];
 };
 
 export type RelationshipPackageCluster = {
@@ -205,6 +285,9 @@ export type RelationshipPackageCluster = {
   upstream_dependencies?: Array<Record<string, unknown>>;
   downstream_dependencies?: Array<Record<string, unknown>>;
   lifecycle_flows?: Array<Record<string, unknown>>;
+  evidence?: Array<Record<string, unknown>>;
+  graph_metrics?: Record<string, unknown>;
+  confidence_details?: Record<string, unknown>;
   estimated_tokens?: number | null;
   actual_input_tokens?: number | null;
   actual_output_tokens?: number | null;
@@ -218,12 +301,200 @@ export type RelationshipPackage = {
 };
 
 export type KpiPackage = {
-  latest: Record<string, unknown>;
-  history: Record<string, unknown[]>;
-  artifact_count: number;
+  id?: number;
+  database_id: number;
+  kpi_name?: string | null;
+  description?: string | null;
+  formula?: string | null;
+  category?: string | null;
+  confidence_score?: number;
+  evidence?: Array<Record<string, unknown>>;
+  trace_id?: string | null;
+  created_at?: string | null;
+};
+
+export type BusinessEvent = {
+  id?: number;
+  event_name: string;
+  event_type?: string | null;
+  source_tables: string[];
+  confidence_score: number;
+  trace_id?: string | null;
+  created_at?: string | null;
+};
+
+export type BusinessEventsResponse = {
+  database_id: number;
+  events: BusinessEvent[];
+};
+
+export type BusinessInsight = {
+  id?: number;
+  database_id?: number;
+  insight_text: string;
+  confidence_score: number;
+  impact_level?: string | null;
+  evidence?: Array<Record<string, unknown>>;
+  trace_id?: string | null;
+  created_at?: string | null;
+};
+
+export type BusinessInsightsResponse = {
+  database_id: number;
+  insights: BusinessInsight[];
+};
+
+export type OpportunityRecommendation = {
+  id?: number;
+  recommendation_text: string;
+  recommendation_type?: string | null;
+  confidence_score: number;
+  evidence?: Array<Record<string, unknown>>;
+  trace_id?: string | null;
+  created_at?: string | null;
+};
+
+export type OpportunityRecommendationsResponse = {
+  database_id: number;
+  opportunities: OpportunityRecommendation[];
+};
+
+export type DataProduct = {
+  id?: number;
+  product_name: string;
+  product_type?: string | null;
+  description?: string | null;
+  confidence_score: number;
+  evidence?: Array<Record<string, unknown>>;
+  trace_id?: string | null;
+  created_at?: string | null;
+};
+
+export type DataProductsResponse = {
+  database_id: number;
+  data_products: DataProduct[];
+};
+
+export type WarehouseDesign = {
+  id?: number;
+  design_name: string;
+  design_type?: string | null;
+  description?: string | null;
+  confidence_score: number;
+  evidence?: Array<Record<string, unknown>>;
+  trace_id?: string | null;
+  created_at?: string | null;
+};
+
+export type WarehouseDesignsResponse = {
+  database_id: number;
+  warehouse_designs: WarehouseDesign[];
+};
+
+export type Recommendation = {
+  id?: number;
+  recommendation_text: string;
+  recommendation_type?: string | null;
+  priority?: string | null;
+  confidence_score: number;
+  evidence?: Array<Record<string, unknown>>;
+  trace_id?: string | null;
+  created_at?: string | null;
+};
+
+export type RecommendationsResponse = {
+  database_id: number;
+  recommendations: Recommendation[];
+};
+
+export type AgentCapability = {
+  id?: number;
+  capability_name: string;
+  capability_type?: string | null;
+  score: number;
+  evidence?: Array<Record<string, unknown>>;
+  trace_id?: string | null;
+  created_at?: string | null;
+};
+
+export type AgentMemory = {
+  id: number;
+  database_id: number;
+  query_text: string;
+  response_text?: string | null;
+  context_json?: Record<string, unknown>;
+  memory_type: string;
+  tags?: string[];
+  embedding_model?: string | null;
+  vector_id?: string | null;
+  trace_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type AgentMemoryCreateRequest = {
+  database_id: number;
+  query_text: string;
+  response_text?: string | null;
+  context_json?: Record<string, unknown>;
+  memory_type?: string;
+  tags?: string[];
+  trace_id?: string | null;
+};
+
+export type AgentMemorySearchRequest = {
+  database_id: number;
+  query: string;
+  top_k?: number;
+};
+
+export type AgentMemoryHistoryResponse = {
+  database_id: number;
+  total: number;
+  results: AgentMemory[];
+};
+
+export type AgentMemorySearchHit = {
+  score: number;
+  id: number;
+  query_text: string;
+  response_text?: string | null;
+  memory_type: string;
+  tags?: string[];
+  trace_id?: string | null;
+  created_at?: string | null;
+};
+
+export type AgentMemorySearchResponse = {
+  database_id: number;
+  query: string;
+  total_hits: number;
+  results: AgentMemorySearchHit[];
+};
+
+export type PredictiveReadiness = {
+  id?: number;
+  database_id?: number;
+  agent_readiness_score: number;
+  text_to_sql_score: number;
+  rag_score: number;
+  analytics_score: number;
+  forecasting_score: number;
+  anomaly_detection_score: number;
+  ml_score: number;
+  agent_capabilities: AgentCapability[];
+  evidence?: Array<Record<string, unknown>>;
+  trace_id?: string | null;
+  created_at?: string | null;
+};
+
+export type PredictiveReadinessResponse = {
+  database_id: number;
+  predictive_readiness: PredictiveReadiness | null;
 };
 
 export type ReadinessSnapshot = {
+  id?: number;
   database_id: number;
   database_name: string;
   readiness_status: string;
@@ -249,6 +520,51 @@ export type ReadinessSnapshot = {
   };
   missing_stages: string[];
   remediation_hints: string[];
+  prompt_id?: string | null;
+  prompt_version?: string | null;
+  model_name?: string | null;
+  ai_summary?: string | null;
+  ai_recommendations?: string[];
+  ai_risks?: string[];
+  ai_roadmap?: string[];
+  ai_confidence?: number;
+};
+
+export type ReadinessHistoryItem = {
+  id: number;
+  database_id: number;
+  overall_score: number;
+  maturity_level: string;
+  summary?: string | null;
+  confidence_score: number;
+  trace_id?: string | null;
+  model_name?: string | null;
+  generated_at: string;
+};
+
+export type ReadinessHistoryResponse = {
+  database_id: number;
+  snapshots: ReadinessHistoryItem[];
+};
+
+export type RemediationAction = {
+  id: number;
+  readiness_snapshot_id: number;
+  database_id: number;
+  issue: string;
+  recommendation: string;
+  expected_impact?: string | null;
+  priority?: string | null;
+  confidence_score: number;
+  evidence: string;
+  trace_id?: string | null;
+  created_at: string;
+};
+
+export type ReadinessRemediationResponse = {
+  database_id: number;
+  latest_snapshot_id?: number | null;
+  remediations: RemediationAction[];
 };
 
 export type EmbeddingStatus = {
@@ -268,6 +584,136 @@ export type EmbeddingStatus = {
     last_indexed_at?: string | null;
   }>;
   message?: string;
+};
+
+export type SemanticCacheItem = {
+  id: number;
+  database_id: number;
+  query_hash: string;
+  query_text: string;
+  response: string;
+  ttl_seconds: number;
+  last_used?: string | null;
+  hit_count: number;
+  trace_id?: string | null;
+  model_name?: string | null;
+  created_at: string;
+};
+
+export type SemanticCacheListResponse = {
+  database_id: number;
+  caches: SemanticCacheItem[];
+};
+
+export type RetrievalEvaluationItem = {
+  id: number;
+  database_id: number;
+  query_text: string;
+  precision_score: number;
+  recall_score: number;
+  mrr_score: number;
+  ndcg_score: number;
+  coverage_score: number;
+  hallucination_risk: number;
+  evidence: string;
+  trace_id?: string | null;
+  model_name?: string | null;
+  created_at: string;
+};
+
+export type RetrievalEvaluationListResponse = {
+  database_id: number;
+  evaluations: RetrievalEvaluationItem[];
+};
+
+export type RetrievalMetricsResponse = {
+  database_id: number;
+  total_documents: number;
+  retrieval_logs: number;
+  retrieval_evaluations: number;
+  collections: Array<{
+    collection_name: string;
+    vector_count: number;
+    status: string;
+    embedding_model?: string | null;
+    last_synced?: string | null;
+  }>;
+};
+
+export type RetrievalHit = {
+  score: number;
+  collection: string;
+  database_id: number;
+  schema_name: string;
+  table_name: string;
+  document_type: string;
+  content: string;
+  metadata: Record<string, unknown>;
+  score_breakdown: Record<string, number>;
+};
+
+export type RetrievalResponse = {
+  query: string;
+  database_id?: number | null;
+  latency_ms: number;
+  total_hits: number;
+  results: RetrievalHit[];
+};
+
+export type RetrievalRerankedHit = {
+  original: RetrievalHit;
+  rerank_score: number;
+  final_score: number;
+  reasoning: string;
+};
+
+export type RetrievalRerankResponse = {
+  query: string;
+  database_id?: number | null;
+  latency_ms: number;
+  trace_id?: string | null;
+  model_name?: string | null;
+  results: RetrievalRerankedHit[];
+};
+
+export type GraphNode = {
+  table_id: number;
+  schema_id: number;
+  schema_name: string;
+  table_name: string;
+  table_type: string;
+  degree: number;
+  in_degree: number;
+  out_degree: number;
+  depth: number;
+  is_isolated: boolean;
+};
+
+export type GraphPathStep = {
+  source_table_id: number;
+  target_table_id: number;
+  source_table_name: string;
+  target_table_name: string;
+  relationship_type: string;
+  join_columns: Array<Record<string, unknown>>;
+  relationship_strength: number;
+};
+
+export type GraphPath = {
+  source_table_id: number;
+  target_table_id: number;
+  hops: number;
+  steps: GraphPathStep[];
+};
+
+export type GraphRetrievalResponse = {
+  database_id?: number | null;
+  query: string;
+  latency_ms: number;
+  neighbors: GraphNode[];
+  shortest_paths: GraphPath[];
+  contextual_retrieval: GraphNode[];
+  lineage: Array<Record<string, unknown>>;
 };
 
 export type PromptTemplate = {
@@ -302,6 +748,131 @@ export type PromptBundle = {
   }>;
 };
 
+export type PromptGenerationRequest = {
+  database_id: number;
+  artifact_type: string;
+  template_id?: string;
+};
+
+export type PromptOptimizationRequest = {
+  prompt_package_id: number;
+};
+
+export type PromptEvaluationRequest = {
+  prompt_package_id: number;
+};
+
+export type PromptGenerationResponse = {
+  generated_prompt: string;
+  model: string;
+  trace_id?: string | null;
+  artifact_id?: number | null;
+  prompt_id?: string | null;
+  prompt_version?: string | null;
+  generated_at?: string | null;
+};
+
+export type PromptPackage = {
+  id: number;
+  database_id: number;
+  artifact_type: string;
+  template_id?: string | null;
+  generated_prompt: string;
+  model_name?: string | null;
+  trace_id?: string | null;
+  prompt_version?: string | null;
+  confidence_score: number;
+  generation_metadata?: string | null;
+  execution_status?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type PromptEmbedding = {
+  id: number;
+  prompt_package_id: number;
+  embedding_model?: string | null;
+  vector: string;
+  created_at?: string | null;
+};
+
+export type PromptPackageListResponse = {
+  database_id: number;
+  prompt_packages: PromptPackage[];
+};
+
+export type PromptVersion = {
+  id: number;
+  prompt_package_id: number;
+  version: number;
+  generated_prompt: string;
+  model_name?: string | null;
+  template_id?: string | null;
+  trace_id?: string | null;
+  created_at?: string | null;
+};
+
+export type PromptVersionListResponse = {
+  prompt_package_id: number;
+  versions: PromptVersion[];
+};
+
+export type PromptObservabilityLog = {
+  id: number;
+  prompt_package_id: number;
+  trace_id?: string | null;
+  model_name?: string | null;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  reasoning_tokens?: number | null;
+  latency_ms?: number | null;
+  finish_reason?: string | null;
+  execution_status?: string | null;
+  failure_reason?: string | null;
+  created_at?: string | null;
+};
+
+export type PromptObservabilityListResponse = {
+  prompt_package_id: number;
+  observability_logs: PromptObservabilityLog[];
+};
+
+export type PromptEvaluation = {
+  id: number;
+  prompt_package_id: number;
+  completeness_score: number;
+  safety_score: number;
+  grounding_score: number;
+  hallucination_risk: number;
+  sql_safety_score: number;
+  rag_quality_score: number;
+  agent_quality_score: number;
+  prompt_quality_score: number;
+  reasoning_summary?: string | null;
+  packages_used: string;
+  evidence: string;
+  trace_id?: string | null;
+  model_name?: string | null;
+  created_at?: string | null;
+};
+
+export type PromptBudgetItem = {
+  prompt_path: string;
+  prompt_id: string;
+  category: string;
+  version: string;
+  current_token_limit: number;
+  recommended_token_limit: number;
+  truncation_risk: string;
+  prompt_quality_score: number;
+  description?: string;
+};
+
+export type PromptBudgetResponse = {
+  total: number;
+  prompts: PromptBudgetItem[];
+};
+
 export type PipelineJob = {
   id: number;
   job_type: string;
@@ -312,4 +883,76 @@ export type PipelineJob = {
   completed_at?: string | null;
   failure_reason?: string | null;
   triggered_by?: string | null;
+};
+
+export type PipelineExecution = {
+  id: number;
+  database_id: number;
+  status: string;
+  start_time: string;
+  end_time?: string | null;
+  duration_seconds?: number | null;
+  trace_id?: string | null;
+  model_name?: string | null;
+  token_usage_json?: string | null;
+  error_message?: string | null;
+  triggered_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type StageExecution = {
+  id: number;
+  pipeline_execution_id: number;
+  database_id: number;
+  stage_name: string;
+  status: string;
+  start_time?: string | null;
+  end_time?: string | null;
+  duration_seconds?: number | null;
+  trace_id?: string | null;
+  model_name?: string | null;
+  token_usage_json?: string | null;
+  error_message?: string | null;
+  execution_order?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type PipelineExecutionsResponse = {
+  database_id: number;
+  executions: PipelineExecution[];
+};
+
+export type StageExecutionsResponse = {
+  database_id: number;
+  pipeline_execution_id?: number | null;
+  stage_executions: StageExecution[];
+};
+
+export type StageProgressItem = {
+  stage: string;
+  job_id?: number | null;
+  status: string;
+  progress_percentage: number;
+  retries: number;
+  failure_reason?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  depends_on: string[];
+};
+
+export type StageProgressResponse = {
+  database_id: number;
+  parent_job_id?: number | null;
+  overall_status: string;
+  overall_progress_percentage: number;
+  current_stage?: string | null;
+  completed_stages: number;
+  running_stages: number;
+  failed_stages: number;
+  pending_stages: number;
+  stages: StageProgressItem[];
+  graph: Array<{ stage: string; depends_on: string[] }>;
+  message: string;
 };

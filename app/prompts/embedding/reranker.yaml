@@ -1,0 +1,26 @@
+id: reranker
+name: Retrieval Reranker
+version: "1.0"
+description: Rank retrieval candidates using business context.
+metadata:
+  category: embedding
+language: English
+system_message: |
+  You are a production-grade retrieval reranking engine.
+  Rank candidates using business relevance, package evidence, and query intent.
+  Return compact JSON only.
+user_prompt: |
+  Query:
+  {{ query }}
+
+  Candidates:
+  {{ candidates_json }}
+
+  Return JSON only:
+  {
+    "score": 0.0,
+    "reason": "short explanation"
+  }
+constraints:
+  output_format: json
+  max_tokens: 3000

@@ -26,6 +26,7 @@ from app.models.metadata import (
     EmbeddingStatus,
     SchemaEmbedding,
 )
+from app.models.embedding_document import EmbeddingDocument
 from app.models.pipeline_job import JobStatus, JobType
 from app.schema_engine.embeddings import (
     COLLECTION_SCHEMA_PROMPTS,
@@ -37,12 +38,14 @@ from app.schemas.embedding_schemas import (
     CollectionStatus,
     EmbeddingGenerateResponse,
     EmbeddingStatusResponse,
+    EmbeddingRefreshRequest,
     SemanticSearchHit,
     SemanticSearchRequest,
     SemanticSearchResponse,
 )
 from app.services.qdrant_service import get_qdrant_service
 from app.services.pipeline_service import PipelineService
+from app.schemas.embedding_document import EmbeddingDocumentItem, EmbeddingDocumentListResponse
 from app.utils import safe_flush
 
 router = APIRouter(tags=["Embeddings"])
@@ -54,6 +57,37 @@ _VALID_COLLECTIONS = {
     COLLECTION_SCHEMA_PROMPTS,
     "all",
 }
+
+
+@router.get(
+    "/documents/{db_id}",
+    response_model=EmbeddingDocumentListResponse,
+    summary="List embedding knowledge documents",
+)
+async def list_embedding_documents(db_id: int, db: AsyncSession = Depends(get_db)) -> EmbeddingDocumentListResponse:
+    result = await db.execute(
+        select(EmbeddingDocument).where(EmbeddingDocument.database_id == db_id).order_by(EmbeddingDocument.created_at.desc())
+    )
+    rows = result.scalars().all()
+    return EmbeddingDocumentListResponse(
+        database_id=db_id,
+        documents=[
+            EmbeddingDocumentItem(
+                id=row.id,
+                database_id=row.database_id,
+                document_type=row.document_type,
+                source_package=row.source_package,
+                content=row.content,
+                metadata_json=row.metadata_json,
+                embedding_model=row.embedding_model,
+                vector_id=row.vector_id,
+                trace_id=row.trace_id,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ],
+    )
 
 
 def _format_relationship(value: Any) -> str:
@@ -178,6 +212,59 @@ async def generate_table_embeddings(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Table embedding failed: {exc}",
         )
+
+
+@router.post(
+    "/embeddings/refresh/{db_id}",
+    response_model=EmbeddingGenerateResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Refresh embeddings for a database after package changes",
+)
+async def refresh_database_embeddings(
+    db_id: int,
+    request: EmbeddingRefreshRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+) -> EmbeddingGenerateResponse:
+    engine = EmbeddingEngine(db)
+    _guard_embedding_config(engine)
+    pipeline = PipelineService(db)
+    try:
+        job = await pipeline.create_job(db_id, JobType.embeddings, triggered_by="refresh", stage_name="embeddings_refresh")
+
+        async def _runner(job_id: int) -> None:
+            async with db_session() as session:
+                job_service = PipelineService(session)
+                engine_inner = EmbeddingEngine(session)
+                _guard_embedding_config(engine_inner)
+                try:
+                    if request.table_id:
+                        result = await engine_inner.generate_table_embeddings(db_id, request.table_id)
+                    else:
+                        result = await engine_inner.generate_database_embeddings(db_id)
+                    if result.success:
+                        await job_service.update_status(job_id, JobStatus.completed, progress_percentage=100)
+                    else:
+                        await job_service.update_status(job_id, JobStatus.failed, progress_percentage=0, failure_reason=result.message)
+                except Exception as exc:
+                    logger.exception("Embedding refresh job failed for db_id=%s job_id=%s", db_id, job_id)
+                    await job_service.update_status(job_id, JobStatus.failed, progress_percentage=0, failure_reason=str(exc))
+
+        background_tasks.add_task(_runner, job.id)
+        return EmbeddingGenerateResponse(
+            database_id=db_id,
+            database_name="queued",
+            embedding_model=settings.azure_openai_embedding_deployment,
+            tables_indexed=0,
+            vectors_indexed=0,
+            token_usage={},
+            latency_ms=0.0,
+            success=True,
+            message=f"Embedding refresh queued as job {job.id}.",
+        )
+    except Exception as exc:
+        logger.error("Embedding refresh failed for db_id=%s: %s", db_id, exc, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
 # ── Status ────────────────────────────────────────────────────────────────────

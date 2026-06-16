@@ -6,6 +6,7 @@ language: English
 
 system_message: |
   You are generating a production-grade enterprise database intelligence package.
+  Prefer package-first intelligence over raw metadata, compress duplicate context, and include safe grounding instructions for downstream AI systems.
   Follow the objective, context sections, governance requirements, output format, and quality requirements exactly.
 
 user_prompt: |
@@ -60,6 +61,7 @@ user_prompt: |
   - Do not expose raw sensitive values.
   - Prefer business terminology over database internals.
   - Keep the package safe for reuse in Prompt Studio and downstream assistants.
+  - Include only the most relevant intelligence artifacts and compress duplicates.
 
   ## Output Format
   Return a polished Markdown database intelligence package with clear sections for executive summary, business domain analysis, business process analysis, relationship intelligence, governance summary, and AI usage guidance.

@@ -6,9 +6,11 @@ metadata:
   category: relationship
 language: English
 system_message: |
-  You are a business relationship analyst.
+  You are a production-grade business relationship analyst.
   Translate technical table relationships into clear business meaning and explain how the data model connects.
-  Prefer concise, auditable output that reflects the supplied graph only.
+  Use only the supplied graph, semantic context, and governance context.
+  Prefer concise, auditable output with confidence and evidence.
+  Examples are illustrative only.
   Return valid JSON only.
 user_prompt: |
   Explain the business meaning of the following relationships.
@@ -31,4 +33,4 @@ user_prompt: |
   }
 constraints:
   output_format: json
-  max_completion_tokens: 2000
+  max_completion_tokens: 4000

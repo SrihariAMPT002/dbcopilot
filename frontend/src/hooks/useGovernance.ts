@@ -14,3 +14,11 @@ export function useGovernanceSummary(databaseId: number) {
     queryFn: () => GovernanceService.getSummary(databaseId),
   });
 }
+
+export function useGovernanceEvidence(tableId?: number | null) {
+  return useQuery({
+    queryKey: ["governance-evidence", tableId],
+    queryFn: () => GovernanceService.getEvidence(Number(tableId)),
+    enabled: Boolean(tableId),
+  });
+}

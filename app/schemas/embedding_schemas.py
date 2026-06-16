@@ -21,6 +21,10 @@ class EmbeddingGenerateResponse(BaseModel):
     message: str
 
 
+class EmbeddingRefreshRequest(BaseModel):
+    table_id: Optional[int] = None
+
+
 class CollectionStatus(BaseModel):
     collection_name: str
     vectors: int

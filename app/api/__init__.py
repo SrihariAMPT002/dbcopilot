@@ -11,14 +11,29 @@ from app.api.routes import (
     prompt_studio,
     kpi_intelligence,
     embeddings,
+    vector_collections,
+    retrieval,
+    retrieval_rerank,
+    retrieval_metrics,
+    graph_retrieval,
     relationship_graph,
+    semantic_cache,
+    retrieval_evaluation,
     exports,
     readiness,
+    readiness_history,
+    readiness_remediation,
+    prompt_budgets,
     pipeline,
     artifacts,
     mongodb,
     governance,
+    business_events,
+    business_insights,
+    business_intelligence,
+    agent_memory,
     databases,
+    dashboard,
 )
 
 api_router = APIRouter()
@@ -31,12 +46,28 @@ api_router.include_router(semantics.router)
 api_router.include_router(column_semantics.router)
 api_router.include_router(prompt_studio.router)
 api_router.include_router(kpi_intelligence.router)
+api_router.include_router(kpi_intelligence.kpi_router)
 api_router.include_router(embeddings.router)
+api_router.include_router(vector_collections.router)
+api_router.include_router(retrieval.router)
+api_router.include_router(retrieval_rerank.router)
+api_router.include_router(retrieval_metrics.router)
+api_router.include_router(graph_retrieval.router)
 api_router.include_router(relationship_graph.router)
 api_router.include_router(exports.router)
 api_router.include_router(readiness.router)
+api_router.include_router(readiness_history.router)
+api_router.include_router(readiness_remediation.router)
+api_router.include_router(prompt_budgets.router)
 api_router.include_router(pipeline.router)
 api_router.include_router(artifacts.router)
 api_router.include_router(mongodb.router)
 api_router.include_router(governance.router)
+api_router.include_router(business_events.router)
+api_router.include_router(business_insights.router)
+api_router.include_router(business_intelligence.router)
+api_router.include_router(agent_memory.router)
+api_router.include_router(semantic_cache.router)
+api_router.include_router(retrieval_evaluation.router)
 api_router.include_router(databases.router)
+api_router.include_router(dashboard.router)

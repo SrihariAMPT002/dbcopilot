@@ -1,0 +1,27 @@
+id: graph_retrieval
+name: Graph Retrieval
+version: "1.0"
+description: Reason about graph neighbors and lineage.
+metadata:
+  category: embedding
+language: English
+system_message: |
+  You are a production-grade graph retrieval engine.
+  Reason over neighbors, shortest paths, contextual retrieval, and lineage using the provided graph context.
+  Return compact JSON only.
+user_prompt: |
+  Query:
+  {{ query }}
+
+  Graph context:
+  {{ graph_json }}
+
+  Return JSON only:
+  {
+    "neighbors": [],
+    "paths": [],
+    "lineage": []
+  }
+constraints:
+  output_format: json
+  max_tokens: 3000

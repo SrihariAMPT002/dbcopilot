@@ -1,0 +1,30 @@
+id: retrieval_evaluation
+name: Retrieval Evaluation
+version: "1.0"
+description: Score retrieval quality and hallucination risk.
+metadata:
+  category: embedding
+language: English
+system_message: |
+  You are a production-grade retrieval evaluation engine.
+  Evaluate retrieval quality, grounding, and hallucination risk using evidence from the retrieval pipeline.
+  Return compact JSON only.
+user_prompt: |
+  Evaluate retrieval quality.
+
+  Context:
+  {{ context_json }}
+
+  Return JSON only:
+  {
+    "precision_score": 0.0,
+    "recall_score": 0.0,
+    "mrr_score": 0.0,
+    "ndcg_score": 0.0,
+    "coverage_score": 0.0,
+    "hallucination_risk": 0.0,
+    "evidence": []
+  }
+constraints:
+  output_format: json
+  max_tokens: 3000

@@ -25,6 +25,7 @@ from app.services.mongodb_service import MongoDBService
 from app.services.pipeline_service import PipelineService
 from app.services.readiness_service import ReadinessService
 from app.services.prompt_studio_service import PromptStudioService
+from app.schemas.stage_contracts import StageProgressItem, StageProgressResponse
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +47,13 @@ class StageGraphNode:
 
 STAGE_GRAPH: list[StageGraphNode] = [
     StageGraphNode("metadata", JobType.sync, [], "Metadata"),
-    StageGraphNode("semantics", JobType.semantic, ["metadata"], "Semantics"),
-    StageGraphNode("governance", JobType.semantic, ["semantics"], "Governance"),
-    StageGraphNode("relationships", JobType.relationship_graph, ["semantics"], "Relationships"),
-    StageGraphNode("kpi", JobType.kpi, ["relationships"], "KPI"),
+    StageGraphNode("governance", JobType.semantic, ["metadata"], "Governance"),
+    StageGraphNode("semantics", JobType.semantic, ["governance"], "Semantics"),
+    StageGraphNode("relationships", JobType.relationship_graph, ["governance", "semantics"], "Relationships"),
+    StageGraphNode("kpi", JobType.kpi, ["governance", "semantics", "relationships"], "KPI"),
     StageGraphNode("prompt", JobType.prompt, ["kpi"], "Prompt"),
-    StageGraphNode("readiness", JobType.readiness, ["prompt"], "Readiness"),
+    StageGraphNode("embeddings", JobType.embeddings, ["prompt"], "Embeddings"),
+    StageGraphNode("readiness", JobType.readiness, ["embeddings", "prompt"], "Readiness"),
 ]
 
 
@@ -102,7 +104,7 @@ class DatabasePipelineOrchestrator:
                 entity_table_id=table.id,
                 entity_name=f"{table.schema.name}.{table.name}",
                 stage_name="embeddings",
-                depends_on=["metadata"],
+                depends_on=["prompt"],
             )
 
         return OrchestratorRunResult(
@@ -183,6 +185,8 @@ class DatabasePipelineOrchestrator:
             return await KPIIntelligenceService(self.db).generate_for_database(database_id, job_id=job_id)
         if stage == "prompt":
             return await PromptStudioService(self.db).generate_artifacts(database_id)
+        if stage == "embeddings":
+            return await EmbeddingEngine(self.db).generate_database_embeddings(database_id)
         if stage == "readiness":
             return await ReadinessService(self.db).recompute(database_id)
         raise ValueError(f"Unknown stage {stage}")
@@ -281,3 +285,60 @@ class DatabasePipelineOrchestrator:
             "resumable": True,
             "message": "Stage graph loaded.",
         }
+
+    async def get_stage_progress(self, database_id: int, parent_job_id: Optional[int] = None) -> StageProgressResponse:
+        jobs = await self.db.execute(
+            select(PipelineJob).where(PipelineJob.database_id == database_id)
+        )
+        job_rows = list(jobs.scalars().all())
+        filtered = [
+            job for job in job_rows if parent_job_id is None or job.parent_job_id == parent_job_id or job.id == parent_job_id
+        ]
+        stage_items: list[StageProgressItem] = []
+        completed = running = failed = pending = 0
+        current_stage = None
+        for node in STAGE_GRAPH:
+            match = next((job for job in filtered if job.stage_name == node.stage), None)
+            status = (match.status.value if match else "PENDING").lower()
+            progress = int(getattr(match, "progress_percentage", 0) or 0)
+            stage_items.append(
+                StageProgressItem(
+                    stage=node.stage,
+                    job_id=match.id if match else None,
+                    status=status,
+                    progress_percentage=progress,
+                    retries=match.retry_count if match else 0,
+                    failure_reason=match.failure_reason if match else None,
+                    started_at=match.started_at if match else None,
+                    completed_at=match.completed_at if match else None,
+                    depends_on=node.depends_on,
+                )
+            )
+            if status == "completed":
+                completed += 1
+            elif status == "running":
+                running += 1
+                current_stage = current_stage or node.stage
+            elif status == "failed":
+                failed += 1
+                current_stage = current_stage or node.stage
+            else:
+                pending += 1
+
+        total = max(1, len(stage_items))
+        overall_progress = int(round((completed / total) * 100))
+        overall_status = "completed" if completed == total else "failed" if failed else "running" if running else "pending"
+        return StageProgressResponse(
+            database_id=database_id,
+            parent_job_id=parent_job_id,
+            overall_status=overall_status,
+            overall_progress_percentage=overall_progress,
+            current_stage=current_stage,
+            completed_stages=completed,
+            running_stages=running,
+            failed_stages=failed,
+            pending_stages=pending,
+            stages=stage_items,
+            graph=[{"stage": node.stage, "depends_on": node.depends_on} for node in STAGE_GRAPH],
+            message="Stage progress loaded.",
+        )

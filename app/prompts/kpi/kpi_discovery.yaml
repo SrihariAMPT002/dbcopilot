@@ -13,6 +13,9 @@ system_message: |
 user_prompt: |
   Analyze the following metadata and produce KPI intelligence in JSON.
 
+  KPI candidates:
+  {{ kpi_candidates | default([]) | tojson }}
+
   Database semantics:
   {{ database_semantics | default({}) | tojson }}
 

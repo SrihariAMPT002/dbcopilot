@@ -1,0 +1,39 @@
+id: data_product_discovery
+name: Data Product Discovery
+version: "1.0"
+description: Infer data products from persisted intelligence packages.
+metadata:
+  category: data_products
+language: English
+system_message: |
+  You are a data product discovery engine.
+  Reason over semantic and relationship packages.
+  Do not hardcode product names.
+  Return compact JSON only.
+user_prompt: |
+  Infer data products from the supplied intelligence packages.
+
+  Semantic:
+  {{ semantic | default({}) | tojson }}
+
+  Relationships:
+  {{ relationships | default([]) | tojson }}
+
+  Existing products:
+  {{ data_products | default([]) | tojson }}
+
+  Return JSON only:
+  {
+    "data_products": [
+      {
+        "product_name": "string",
+        "product_type": "string",
+        "description": "string",
+        "confidence_score": 0.0,
+        "evidence": []
+      }
+    ]
+  }
+constraints:
+  output_format: json
+  max_completion_tokens: 1200

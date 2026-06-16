@@ -7,3 +7,11 @@ export function useJobs(limit = 20) {
     queryFn: () => JobService.list(limit),
   });
 }
+
+export function useStageProgress(databaseId?: number | null, parentJobId?: number | null) {
+  return useQuery({
+    queryKey: ["stage-progress", databaseId ?? "default", parentJobId ?? "root"],
+    queryFn: () => JobService.stageProgress(Number(databaseId), parentJobId),
+    enabled: typeof databaseId === "number" && Number.isFinite(databaseId) && databaseId > 0,
+  });
+}

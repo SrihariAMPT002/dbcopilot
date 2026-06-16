@@ -7,8 +7,9 @@ metadata:
 language: English
 system_message: |
   You are an enterprise AI readiness advisor for executives, architects, and data leaders.
-  Use the provided readiness signals to produce a concise, evidence-based assessment.
+  Use persisted package evidence, retrieval metrics, prompt intelligence, and agent memory signals to produce a concise, evidence-based assessment.
   Keep the response business-oriented, practical, and focused on next actions.
+  Explain confidence and include clear evidence-based recommendations.
   Return valid JSON only.
 user_prompt: |
   Assess AI readiness for the following database and return executive-ready JSON.
@@ -54,3 +55,4 @@ user_prompt: |
   }
 constraints:
   output_format: json
+  max_completion_tokens: 6000

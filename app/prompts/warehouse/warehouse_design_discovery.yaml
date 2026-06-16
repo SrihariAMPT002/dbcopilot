@@ -1,0 +1,39 @@
+id: warehouse_design_discovery
+name: Warehouse Design Discovery
+version: "1.0"
+description: Infer warehouse designs from persisted intelligence packages.
+metadata:
+  category: warehouse
+language: English
+system_message: |
+  You are a warehouse design engine.
+  Reason over semantic and relationship packages.
+  Do not hardcode schema names.
+  Return compact JSON only.
+user_prompt: |
+  Infer warehouse designs from the supplied intelligence packages.
+
+  Semantic:
+  {{ semantic | default({}) | tojson }}
+
+  Relationships:
+  {{ relationships | default([]) | tojson }}
+
+  Existing warehouse designs:
+  {{ warehouse_designs | default([]) | tojson }}
+
+  Return JSON only:
+  {
+    "warehouse_designs": [
+      {
+        "design_name": "string",
+        "design_type": "string",
+        "description": "string",
+        "confidence_score": 0.0,
+        "evidence": []
+      }
+    ]
+  }
+constraints:
+  output_format: json
+  max_completion_tokens: 1200

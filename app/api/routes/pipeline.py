@@ -9,12 +9,14 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi import BackgroundTasks
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.models.pipeline_job import JobStatus, PipelineJob
+from app.models.pipeline_execution import PipelineExecution, StageExecution
 from app.schemas.api_schemas import PipelineJobResponse, PipelineRunResponse
-from app.schemas.stage_contracts import StageGraphResponse
+from app.schemas.stage_contracts import StageGraphResponse, StageProgressResponse
 from app.db.session import db_session
 from app.services.pipeline_service import PipelineService
 from app.services.database_pipeline_orchestrator import DatabasePipelineOrchestrator
@@ -209,3 +211,106 @@ async def stage_graph(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to load stage graph",
         )
+
+
+@router.get(
+    "/stage-progress/{db_id}",
+    response_model=StageProgressResponse,
+    summary="Get canonical per-stage progress for a database",
+)
+async def stage_progress(
+    db_id: int,
+    parent_job_id: Optional[int] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> StageProgressResponse:
+    orchestrator = DatabasePipelineOrchestrator(db)
+    try:
+        return await orchestrator.get_stage_progress(db_id, parent_job_id=parent_job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except Exception as exc:
+        logger.error("Stage progress lookup failed for db_id=%s: %s", db_id, exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to load stage progress",
+        )
+
+
+@router.get(
+    "/executions/{db_id}",
+    summary="List persisted pipeline executions for a database",
+)
+async def list_pipeline_executions(
+    db_id: int,
+    limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    result = await db.execute(
+        select(PipelineExecution)
+        .where(PipelineExecution.database_id == db_id)
+        .order_by(PipelineExecution.start_time.desc())
+        .limit(limit)
+    )
+    rows = result.scalars().all()
+    return {
+        "database_id": db_id,
+        "executions": [
+            {
+                "id": row.id,
+                "database_id": row.database_id,
+                "status": row.status,
+                "start_time": row.start_time,
+                "end_time": row.end_time,
+                "duration_seconds": row.duration_seconds,
+                "trace_id": row.trace_id,
+                "model_name": row.model_name,
+                "token_usage_json": row.token_usage_json,
+                "error_message": row.error_message,
+                "triggered_by": row.triggered_by,
+                "created_at": row.created_at,
+                "updated_at": row.updated_at,
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.get(
+    "/executions/{db_id}/stages",
+    summary="List persisted stage executions for a database",
+)
+async def list_stage_executions(
+    db_id: int,
+    pipeline_execution_id: int | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    stmt = select(StageExecution).where(StageExecution.database_id == db_id).order_by(StageExecution.start_time.desc()).limit(limit)
+    if pipeline_execution_id is not None:
+        stmt = stmt.where(StageExecution.pipeline_execution_id == pipeline_execution_id)
+    result = await db.execute(stmt)
+    rows = result.scalars().all()
+    return {
+        "database_id": db_id,
+        "pipeline_execution_id": pipeline_execution_id,
+        "stage_executions": [
+            {
+                "id": row.id,
+                "pipeline_execution_id": row.pipeline_execution_id,
+                "database_id": row.database_id,
+                "stage_name": row.stage_name,
+                "status": row.status,
+                "start_time": row.start_time,
+                "end_time": row.end_time,
+                "duration_seconds": row.duration_seconds,
+                "trace_id": row.trace_id,
+                "model_name": row.model_name,
+                "token_usage_json": row.token_usage_json,
+                "error_message": row.error_message,
+                "execution_order": row.execution_order,
+                "created_at": row.created_at,
+                "updated_at": row.updated_at,
+            }
+            for row in rows
+        ],
+    }

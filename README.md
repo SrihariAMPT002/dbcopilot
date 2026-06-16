@@ -1,286 +1,335 @@
 # DB Copilot
 
+DB Copilot is an AI-native Metadata Intelligence, Governance, and Retrieval Platform.
+
+It connects to enterprise databases, discovers metadata, builds governance and semantic intelligence, reasons over relationships, generates KPI and prompt artifacts, creates embeddings and retrieval assets, and evaluates AI readiness with full observability.
+
 ## Overview
 
-DB Copilot is an AI context engineering platform that transforms enterprise databases into AI-ready business context.
+Current capabilities in this repository:
 
-It connects to enterprise databases, discovers metadata, builds semantic understanding, generates retrieval-ready knowledge, and produces reusable AI context artifacts for chatbots, AI agents, RAG systems, copilots, and Text-to-SQL applications.
-
----
-
-## Key Capabilities
-
-- Database Connectivity
 - Metadata Discovery
-- Schema Exploration
-- Relationship Graph Generation
-- Jobs Dashboard and Pipeline Monitoring
+- Governance and PII Detection
 - Semantic Intelligence
-- PII Classification and Governance Scoring
-- Embeddings & Retrieval
+- Relationship Intelligence
+- KPI Intelligence
 - Prompt Studio
-- AI Readiness Assessment
-- Artifact Export Framework
-- AI Observability and Token Logging
+- Embeddings and Retrieval
+- AI Readiness
+- AI Observability
 
----
+The backend is the source of truth. The React frontend consumes package-driven APIs and renders the current intelligence state.
 
-## High-Level Architecture
+## Architecture
+
+Package-first execution flow:
 
 ```text
-External Databases
-  ↓
-Metadata Discovery
-  ↓
-Schema Explorer
-  ↓
-Relationship Graph
-  ↓
-Relationship Clustering and Targeted AI Calls
-  ↓
-Semantic Intelligence
-  ↓
-PII Governance Classification
-  ↓
-Embeddings & Retrieval
-  ↓
-Prompt Studio
-  ↓
-Jobs Dashboard
-  ↓
-AI Context Artifacts
+Metadata
+ -> Governance
+ -> Semantics
+ -> Relationships
+ -> KPI
+ -> Prompt Studio
+ -> Embeddings & Retrieval
+ -> AI Readiness
 ```
 
----
+Pipeline execution is tracked through persisted execution records and stage status APIs. Downstream stages consume persisted packages rather than rebuilding intelligence from raw metadata when package data already exists.
 
-## Technology Stack
+## Tech Stack
 
 ### Backend
 
 - FastAPI
-- Python 3.11
 - SQLAlchemy
 - Alembic
-- Pydantic
+- PostgreSQL
+- Azure OpenAI GPT-5 Nano
+- Qdrant
+- LangSmith / Langfuse observability integrations
+- Python 3.11
 
 ### Frontend
 
-- Streamlit
-
-### Databases
-
-- PostgreSQL
-- MySQL
-- SQL Server
-- MongoDB
-
-### AI & Semantic Layer
-
-- Azure OpenAI
-- OpenAI SDK
-- Qdrant
-- Vector Embeddings
-- LangSmith-compatible observability
-
-### Infrastructure
-
-- Docker
-- Docker Compose
-
----
+- React 19
+- TypeScript
+- Vite
+- TanStack Query
+- TanStack Router
+- Tailwind CSS v4
+- shadcn/ui
 
 ## Repository Structure
 
 ```text
 dbcopilot/
-app/
-├── api/
-├── config/
-├── connectors/
-├── core/
-├── db/
-├── models/
-├── schema_engine/
-├── services/
-├── prompts/
-├── workflows/
-└── main.py
-
-ui/
-├── components/
-├── pages/
-└── app.py
-
-alembic/
-docker/
-scripts/
-tests/
+├── app/
+│   ├── api/
+│   ├── config/
+│   ├── connectors/
+│   ├── core/
+│   ├── db/
+│   ├── models/
+│   ├── prompts/
+│   ├── schemas/
+│   ├── schema_engine/
+│   ├── services/
+│   ├── templates/
+│   ├── utils/
+│   └── workflows/
+├── alembic/
+├── docs/
+├── frontend/
+│   └── src/
+│       ├── api/
+│       ├── components/
+│       ├── context/
+│       ├── hooks/
+│       ├── lib/
+│       ├── pages/
+│       ├── routes/
+│       ├── services/
+│       └── types/
+├── scripts/
+├── tests/
+├── docker-compose.yml
+├── Dockerfile.api
+└── Dockerfile.frontend
 ```
 
----
+### Backend folders
 
-## Core Modules
+- `app/services/` - orchestration and domain services
+- `app/models/` - ORM models
+- `app/schemas/` - API and domain schemas
+- `app/prompts/` - prompt contracts and stage templates
+- `app/config/` - settings, feature flags, and prompt configuration
+- `app/api/` - FastAPI routes
+- `app/workflows/` - workflow helpers and execution logic
 
-### Connect Database
+### Frontend folders
 
-Responsible for secure database connectivity and metadata synchronization.
+- `frontend/src/routes/` - route registration
+- `frontend/src/pages/` - page composition
+- `frontend/src/components/` - reusable UI
+- `frontend/src/hooks/` - data fetching hooks
+- `frontend/src/services/` - UI transformation and domain services
+- `frontend/src/api/` - HTTP transport modules
+- `frontend/src/context/` - global application state
+- `frontend/src/types/` - backend-aligned TypeScript contracts
 
-### Jobs Dashboard
+## Supported Databases
 
-Provides pipeline visibility for queued, running, failed, and completed jobs.
+Implemented connectors and test paths currently support:
 
-Supports retries, cancellation, and monitoring for the core AI stages.
+- PostgreSQL
+- MySQL
+- MariaDB
+- SQL Server
+- MongoDB
 
-### Schema Explorer
+## AI Modules
 
-Provides visibility into schemas, tables, columns, and relationships.
+The repository includes these intelligence surfaces:
 
-### Relationship Graph
+- Governance intelligence and PII classification
+- Semantic intelligence
+- Relationship intelligence
+- KPI intelligence
+- Prompt Studio artifact generation
+- Embeddings and retrieval
+- Retrieval metrics and evaluation
+- AI readiness scoring
+- Business events
+- Business insights
+- Agent memory
+- Prompt budget auditing
 
-Builds entity relationships and dependency mapping.
+## Observability
 
-Relationship intelligence now uses clustered, targeted AI calls instead of sending the entire schema to one prompt.
+AI executions and pipeline stages record:
 
-### Semantic Intelligence
+- `trace_id`
+- `prompt_id`
+- `prompt_version`
+- `model_name`
+- token usage
+- `finish_reason`
+- latency
+- execution status
+- failure reason
 
-Generates business summaries, glossary terms, business entities, and use cases from metadata.
+Azure OpenAI calls go through the observability wrapper so raw responses and token metadata can be inspected during troubleshooting.
 
-Also powers governance-aware PII classification with rule-first and table-level fallback processing.
+## API Documentation
 
-### Embeddings & Retrieval
+Major API groups currently in the backend:
 
-Creates vector-searchable schema intelligence and semantic search capabilities.
+- Connections and database management
+- Metadata and schema exploration
+- Governance and column semantics
+- Semantics
+- Relationships
+- KPI intelligence
+- Prompt Studio
+- Embeddings and retrieval
+- Retrieval metrics and evaluation
+- AI readiness
+- Business events and business insights
+- Agent memory
+- Pipeline execution and job tracking
+- Prompt budgets
+- Dashboard and status summaries
 
-### Prompt Studio
+API docs are available through the FastAPI OpenAPI UI when the backend is running.
 
-Generates AI-ready artifacts:
+## Environment Variables
 
-- Database Context
-- System Prompt
-- RAG Context
-- Agent Context
-- Text-to-SQL Context
-- Database Intelligence Package
+Copy [`.env.example`](.env.example) to `.env` and configure the values for your environment.
 
-### AI Readiness
-
-Evaluates how prepared a database is for AI-driven applications.
-
-### Observability
-
-AI calls now log estimated input tokens, prompt tokens, completion tokens, output size, and latency.
-
-This improves visibility for semantic generation, PII classification, relationship intelligence, and embeddings.
-
-### Governance
-
-Prompt templates now use defensive defaults for `tojson` fields so missing values do not break rendering.
-
-Readiness, relationship, system, and semantic prompts are safer to render with partial context.
-
----
-
-## Prerequisites
-
-### Required
-
-- Docker 24+
-- Docker Compose 2+
-- Python 3.11+
-
-### Optional
-
-- Azure OpenAI Account
-- Qdrant Instance
-
----
-
-## Environment Setup
-
-Create `.env` from `.env.example` and configure:
+Backend environment variables used by the repository include:
 
 ```env
-DATABASE_URL=
-POSTGRES_USER=
-POSTGRES_PASSWORD=
+APP_NAME=DB Copilot
+APP_ENV=development
+APP_VERSION=1.0.0
+DEBUG=true
+LOG_LEVEL=INFO
+INTELLIGENCE_PACKAGES_ENABLED=true
 
-AZURE_OPENAI_ENDPOINT=
-AZURE_OPENAI_API_KEY=
-AZURE_OPENAI_DEPLOYMENT=
-AZURE_OPENAI_API_VERSION=
+API_HOST=0.0.0.0
+API_PORT=8000
+API_PREFIX=/api/v1
+WORKERS=1
+ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173
 
-QDRANT_HOST=
-QDRANT_PORT=
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_DB=dbcopilot_meta
+POSTGRES_USER=dbcopilot
+POSTGRES_PASSWORD=***
+DATABASE_URL=postgresql+asyncpg://...
+DATABASE_URL_SYNC=postgresql://...
 
-ENCRYPTION_KEY=
+ENCRYPTION_KEY=***
+SECRET_KEY=***
+
+QDRANT_URL=http://qdrant:6333
+QDRANT_HOST=qdrant
+QDRANT_PORT=6333
+
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_OPENAI_KEY=***
+AZURE_OPENAI_API_VERSION=2025-01-01-preview
+AZURE_OPENAI_DEPLOYMENT=gpt-5-nano
+
+AZURE_OPENAI_EMBEDDING_URL=
+AZURE_OPENAI_EMBEDDING_API_KEY=
+AZURE_OPENAI_EMBEDDING_DIMENSIONS=
+
+LANGSMITH_TRACING=false
+LANGSMITH_PROJECT=dbcopilot
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
 ```
 
----
+Frontend environment variables:
 
-## Running Locally
+```env
+VITE_API_BASE_URL=http://localhost:8000/api/v1
+VITE_APP_NAME=DBCopilot
+VITE_APP_ENV=development
+```
+
+## Local Development
+
+### Backend
 
 ```bash
-git clone <repo-url>
-cd dbcopilot
-cp .env.example .env
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+alembic upgrade head
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Build:
+
+```bash
+cd frontend
+npm run build
+```
+
+### Docker
+
+```bash
 docker compose up --build
 ```
 
----
+The Docker stack currently includes:
 
-## Access URLs
-
-- Frontend: `http://localhost:8501`
-- Backend API: `http://localhost:8000`
-- Swagger Documentation: `http://localhost:8000/docs`
-- Health Endpoint: `http://localhost:8000/health`
-
----
+- PostgreSQL metadata store
+- FastAPI backend
+- React frontend
+- Qdrant vector store
 
 ## Development Workflow
 
-### Create Migration
+- Create migrations with Alembic
+- Run the backend sync pipeline from the API or job orchestration layer
+- Use the Jobs page and dashboard to inspect execution status
+- Use prompt budget and execution tracking pages to verify AI behavior
+- Keep docs and tests aligned with the package-first architecture
+
+## Screenshots
+
+### Dashboard
+
+_Placeholder_
+
+### Governance
+
+_Placeholder_
+
+### Semantics
+
+_Placeholder_
+
+### Relationships
+
+_Placeholder_
+
+### Embeddings
+
+_Placeholder_
+
+### AI Readiness
+
+_Placeholder_
+
+## Roadmap
+
+Future work belongs here only if it is not already implemented in the repository.
+
+- Further prompt quality and retrieval improvements
+- Additional model/provider integrations
+- Expanded analytics and agent workflows
+
+## Testing
+
+Run the test suite with:
 
 ```bash
-alembic revision --autogenerate -m "message"
+pytest
 ```
 
-### Apply Migration
+If you want targeted coverage, run the existing module-specific tests under `tests/`.
 
-```bash
-alembic upgrade head
-```
-
-### Rollback Migration
-
-```bash
-alembic downgrade -1
-```
-
-### Run Tests
-
-```bash
-pytest tests/
-```
-
----
-
-## Security
-
-- Credentials encrypted at rest
-- Secrets stored in environment variables
-- No secrets committed to Git
-- No secrets baked into Docker images
-- Read-only metadata extraction
-
----
-
-## Troubleshooting
-
-Common issue:
-
-### Migration failures
-
-```bash
-alembic upgrade head
-```

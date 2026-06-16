@@ -1,5 +1,5 @@
 #!/bin/bash
-# Quick test: Verify API is running and endpoints are accessible
+# Quick test: verify API and execution endpoints are accessible
 
 echo "🧪 Testing DB Copilot API..."
 echo ""
@@ -33,19 +33,27 @@ curl -s http://localhost:8000/api/v1/connections | jq 'length'
 echo "   (connections found)"
 echo ""
 
+echo "3️⃣  Default database:"
+curl -s http://localhost:8000/api/v1/databases/default | jq '.'
+echo ""
+
 # If there are connections, test sync on first one
 FIRST_DB=$(curl -s http://localhost:8000/api/v1/connections | jq '.[0].id' 2>/dev/null)
 if [ ! -z "$FIRST_DB" ] && [ "$FIRST_DB" != "null" ]; then
-    echo "3️⃣  Testing sync on connection $FIRST_DB..."
+    echo "4️⃣  Testing sync on connection $FIRST_DB..."
     curl -s -X POST http://localhost:8000/api/v1/connections/$FIRST_DB/sync | jq '.message'
     echo ""
     
-    echo "4️⃣  Checking schemas after sync:"
+    echo "5️⃣  Checking schemas after sync:"
     SCHEMA_COUNT=$(curl -s http://localhost:8000/api/v1/metadata/databases/$FIRST_DB/schemas | jq 'length')
     echo "   Schemas found: $SCHEMA_COUNT"
     echo ""
     
-    echo "5️⃣  Diagnostic info:"
+    echo "6️⃣  Pipeline executions:"
+    curl -s http://localhost:8000/api/v1/pipeline/executions/$FIRST_DB | jq '.'
+    echo ""
+
+    echo "7️⃣  Diagnostic info:"
     curl -s http://localhost:8000/api/v1/metadata/diagnose/$FIRST_DB | jq '{tables_count, schemas_count, recommendation}'
 fi
 

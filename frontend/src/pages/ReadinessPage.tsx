@@ -1,116 +1,149 @@
-import { Gauge, ShieldCheck, BookOpenText, Network, TrendingUp, Boxes, Sparkles, Bot, Lightbulb } from "lucide-react";
+import { Gauge, ShieldCheck, BookOpenText, Network, TrendingUp, Boxes, Sparkles, Bot, Lightbulb, History } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { CoverageBar } from "@/components/coverage-bar";
-import { Button } from "@/components/ui/button";
-import { useReadiness } from "@/hooks/useReadiness";
 import { useDatabaseContext } from "@/context/database-context";
+import { useReadiness } from "@/hooks/useReadiness";
+import { useReadinessHistory } from "@/hooks/useReadinessHistory";
+import { useRemediation } from "@/hooks/useRemediation";
+import { ReadinessOverview } from "@/components/readiness/ReadinessOverview";
+import { DimensionScoreCard } from "@/components/readiness/DimensionScoreCard";
+import { RemediationPanel } from "@/components/readiness/RemediationPanel";
+import { EmptyState } from "@/components/empty-state";
 
 export function ReadinessPage() {
   const { selectedDatabaseId } = useDatabaseContext();
   const dbId = selectedDatabaseId ?? 1;
   const { data } = useReadiness(dbId);
-  const scores = [
-    { label: "Governance", value: data?.scores.metadata_score ?? 0, icon: ShieldCheck },
-    { label: "Semantic", value: data?.scores.semantic_score ?? 0, icon: BookOpenText },
-    { label: "Relationship", value: data?.scores.relationship_score ?? 0, icon: Network },
-    { label: "KPI", value: data?.scores.kpi_score ?? 0, icon: TrendingUp },
-    { label: "Embedding", value: data?.scores.embeddings_score ?? 0, icon: Boxes },
-    { label: "Prompt Studio", value: data?.scores.prompt_score ?? 0, icon: Sparkles },
-    { label: "Agent", value: data?.scores.overall_score ?? 0, icon: Bot },
+  const { data: history } = useReadinessHistory(dbId);
+  const { data: remediation } = useRemediation(dbId);
+
+  const dimensions = [
+    { label: "Governance", score: data?.category_scores.governance_readiness_score ?? 0, icon: ShieldCheck },
+    { label: "Semantic", score: data?.category_scores.semantic_readiness_score ?? 0, icon: BookOpenText },
+    { label: "Relationship", score: data?.category_scores.relationship_readiness_score ?? 0, icon: Network },
+    { label: "Retrieval", score: data?.category_scores.ai_context_readiness_score ?? 0, icon: Boxes },
+    { label: "Prompt", score: data?.scores.prompt_score ?? 0, icon: Sparkles },
+    { label: "Agent", score: data?.scores.overall_score ?? 0, icon: Bot },
+    { label: "RAG", score: data?.category_scores.ai_context_readiness_score ?? 0, icon: Gauge },
+    { label: "Text-to-SQL", score: data?.category_scores.semantic_readiness_score ?? 0, icon: TrendingUp },
   ];
-  const overall = data?.scores.overall_score ?? 0;
 
   return (
     <div className="space-y-6">
-      <PageHeader eyebrow="AI Surface" title="AI readiness" description="Composite score across persisted governance, semantic, relationship, KPI, embedding, and prompt packages." />
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <Card className="xl:col-span-1">
-          <CardHeader>
-            <CardTitle className="text-base">Overall readiness</CardTitle>
-            <CardDescription>Weighted across all intelligence packages.</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col items-center gap-4">
-            <div className="relative grid h-44 w-44 place-items-center">
-              <svg className="absolute inset-0 -rotate-90" viewBox="0 0 100 100">
-                <circle cx="50" cy="50" r="44" fill="none" stroke="var(--muted)" strokeWidth="9" />
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="44"
-                  fill="none"
-                  stroke="url(#rg)"
-                  strokeWidth="9"
-                  strokeLinecap="round"
-                  strokeDasharray={`${2 * Math.PI * 44 * (overall / 100)} ${2 * Math.PI * 44}`}
-                />
-                <defs>
-                  <linearGradient id="rg" x1="0" x2="1" y1="0" y2="1">
-                    <stop offset="0%" stopColor="var(--primary)" />
-                    <stop offset="100%" stopColor="var(--primary-glow)" />
-                  </linearGradient>
-                </defs>
-              </svg>
-              <div className="text-center">
-                <div className="text-4xl font-semibold tracking-tight text-foreground">{overall}</div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">readiness</div>
-              </div>
-            </div>
-            <Badge variant="outline" className="gap-1.5 border-[var(--success)]/40 bg-[var(--success)]/10 text-[var(--success)]">
-              <Gauge className="h-3 w-3" /> {data?.readiness_status ?? "pending"}
-            </Badge>
-          </CardContent>
-        </Card>
-        <Card className="xl:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-base">Per-package scores</CardTitle>
-            <CardDescription>Based on persisted package completeness and coverage.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {scores.map((s) => (
-              <div key={s.label} className="rounded-md border border-border bg-card p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-gradient-to-br from-primary/15 to-primary/0 text-primary">
-                      <s.icon className="h-3.5 w-3.5" />
-                    </div>
-                    <span className="text-sm font-medium text-foreground">{s.label}</span>
-                  </div>
-                  <span className="text-sm font-semibold tabular-nums text-foreground">{s.value}</span>
-                </div>
-                <CoverageBar
-                  value={s.value}
-                  className="mt-2"
-                  tone={s.value >= 80 ? "success" : s.value >= 60 ? "primary" : s.value >= 40 ? "warning" : "danger"}
-                />
-              </div>
+      <PageHeader
+        eyebrow="AI Surface"
+        title="AI readiness"
+        description="Persisted readiness snapshots, remediation actions, and maturity insights from packages."
+      />
+      <ReadinessOverview
+        overallScore={data?.scores.overall_score ?? 0}
+        maturityLevel={data?.readiness_status ?? "pending"}
+        confidence={data?.ai_confidence ?? 0}
+        traceId={data?.prompt_id ?? null}
+      />
+      <Tabs defaultValue="overview">
+        <TabsList className="flex-wrap">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="dimensions">Dimensions</TabsTrigger>
+          <TabsTrigger value="retrieval">Retrieval</TabsTrigger>
+          <TabsTrigger value="agents">Agents</TabsTrigger>
+          <TabsTrigger value="text-to-sql">Text-to-SQL</TabsTrigger>
+          <TabsTrigger value="rag">RAG</TabsTrigger>
+          <TabsTrigger value="remediation">Remediation</TabsTrigger>
+          <TabsTrigger value="history">History</TabsTrigger>
+        </TabsList>
+        <TabsContent value="overview" className="pt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Readiness snapshot</CardTitle>
+              <CardDescription>Latest persisted snapshot from the readiness engine.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm text-muted-foreground">
+              <div>Database: {data?.database_name ?? "n/a"}</div>
+              <div>Generated at: {data?.generated_at ?? "n/a"}</div>
+              <div>Top risks: {(data?.missing_stages ?? []).join(", ") || "none"}</div>
+              <div>Recommendations: {(data?.remediation_hints ?? []).length ?? 0}</div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+        <TabsContent value="dimensions" className="pt-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {dimensions.map((dimension) => (
+              <DimensionScoreCard key={dimension.label} label={dimension.label} score={dimension.score} confidence={data?.ai_confidence} />
             ))}
-          </CardContent>
-        </Card>
-      </div>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Recommendations</CardTitle>
-          <CardDescription>{data?.remediation_hints?.length ? "Generated from package gaps." : "No remediation hints available yet."}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {(data?.remediation_hints ?? []).map((hint) => (
-            <div key={hint} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-md border border-border bg-card p-3">
-              <div className="grid h-8 w-8 place-items-center rounded-md bg-primary/10 text-primary">
-                <Lightbulb className="h-4 w-4" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-sm font-medium text-foreground">Recommendation</div>
-                <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>
-              </div>
-              <Button variant="ghost" size="sm" className="shrink-0 text-xs">
-                Resolve
-              </Button>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+          </div>
+        </TabsContent>
+        <TabsContent value="retrieval" className="pt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Retrieval readiness</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="text-sm text-muted-foreground">Coverage and retrieval quality are consumed from persisted metrics and snapshots.</div>
+              <div className="text-sm">Current score: {data?.category_scores.ai_context_readiness_score ?? 0}</div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+        <TabsContent value="agents" className="pt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Agent readiness</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              Agent readiness is derived from governance, semantic, retrieval, prompt, and memory signals.
+            </CardContent>
+          </Card>
+        </TabsContent>
+        <TabsContent value="text-to-sql" className="pt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Text-to-SQL readiness</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              Text-to-SQL readiness is based on schema, relationships, glossary, and prompt quality.
+            </CardContent>
+          </Card>
+        </TabsContent>
+        <TabsContent value="rag" className="pt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">RAG readiness</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              RAG readiness is derived from retrieval quality, cache behavior, and graph coverage.
+            </CardContent>
+          </Card>
+        </TabsContent>
+        <TabsContent value="remediation" className="pt-4">
+          <RemediationPanel remediations={remediation?.remediations ?? []} />
+        </TabsContent>
+        <TabsContent value="history" className="pt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Readiness history</CardTitle>
+              <CardDescription>Persisted snapshots over time.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {(history?.snapshots ?? []).length ? (
+                history!.snapshots.slice(0, 5).map((item) => (
+                  <div key={item.id} className="rounded-md border border-border bg-card p-3 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-medium text-foreground">{item.maturity_level}</div>
+                      <Badge variant="outline">{item.overall_score}</Badge>
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">{item.generated_at}</div>
+                    <div className="mt-2 text-xs text-muted-foreground">{item.summary ?? "No summary persisted."}</div>
+                  </div>
+                ))
+              ) : (
+                <EmptyState icon={History} title="No readiness history yet" description="Run recalculation to persist snapshots." />
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

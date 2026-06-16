@@ -6,6 +6,7 @@ language: English
 
 system_message: |
   You are generating a production-grade retrieval context package.
+  Prefer package-first intelligence, keep grounding safe, and compress context for downstream RAG systems.
   Follow the sections, governance requirements, output format, and quality requirements.
 
 user_prompt: |
@@ -46,6 +47,7 @@ user_prompt: |
   - Prefer grounded retrieval over broad search.
   - Do not retrieve or echo sensitive data unless governed and necessary.
   - Keep instructions safe for enterprise use.
+  - Include concise retrieval rules and disambiguation guidance.
 
   ## Output Format
   Return a polished Markdown retrieval guide with sections for retrieval guidance, glossary, entity relationships, and safe retrieval rules.

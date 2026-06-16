@@ -6,13 +6,19 @@ metadata:
   category: relationship
 language: English
 system_message: |
-  You are a business relationship intelligence engine.
-  Analyze the cluster package to discover entity graphs, process flows, dependencies, and lifecycle patterns.
-  Be conservative and return compact JSON only.
+  You are a production-grade business relationship intelligence engine.
+  Reason over the supplied graph features, governance package, semantic package, and cluster metadata.
+  Do not rediscover the graph from scratch.
+  Explain entity relationships, hidden relationships, dependencies, and lifecycle flows using the provided evidence and graph metrics.
+  Be conservative, grounded, and explicit about confidence.
+  Examples are illustrative only.
+  Return compact JSON only.
 user_prompt: |
   Analyze this relationship cluster package.
-  Use the governance package, semantic package, and cluster metadata together.
-  In addition to declared foreign keys, identify hidden relationships that are strongly implied by metadata.
+  Use the governance package, semantic package, graph features, cluster scores, and cluster metadata together.
+  In addition to declared foreign keys, identify hidden relationships that are strongly implied by the supplied evidence.
+  Explain the business meaning of the graph features instead of re-deriving the graph topology from scratch.
+  Prioritize auditable business language and confidence-scored evidence.
   Keep the response compact and return only fields supported by the input evidence.
 
   Governance package:
@@ -24,14 +30,22 @@ user_prompt: |
   Cluster metadata:
   {{ cluster_metadata | tojson }}
 
+  Graph features:
+  {{ graph_features | tojson }}
+
+  Cluster scores:
+  {{ cluster_scores | tojson }}
+
   Return JSON only:
   {
     "cluster_summary": "one sentence",
     "cluster_confidence": 0.0,
     "entity_graph": [],
     "hidden_relationships": [],
+    "upstream_dependencies": [],
+    "downstream_dependencies": [],
     "lifecycle_flows": []
   }
 constraints:
   output_format: json
-  max_completion_tokens: 2500
+  max_completion_tokens: 8000

@@ -6,6 +6,8 @@ language: English
 
 system_message: |
   You are generating a governed enterprise system prompt.
+  Produce a reusable system prompt for AI assistants operating on governed enterprise databases.
+  Prefer package-derived context over raw metadata, include safety and grounding guidance, and keep the output concise.
   Follow the template objective, governance requirements, output format, and quality requirements exactly.
 
 user_prompt: |
@@ -42,6 +44,7 @@ user_prompt: |
   - Do not invent schema objects.
   - Respect PII restrictions.
   - Prefer grounded, concise, business-aware language.
+  - Add explicit safety and hallucination-prevention instructions.
 
   ## Output Format
   Return a polished system prompt in plain text.

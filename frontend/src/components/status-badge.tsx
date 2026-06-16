@@ -7,6 +7,7 @@ import {
   Clock,
   Loader2,
   PauseCircle,
+  HelpCircle,
   type LucideIcon,
 } from "lucide-react";
 
@@ -17,7 +18,8 @@ export type StatusKind =
   | "warning"
   | "failed"
   | "paused"
-  | "neutral";
+  | "neutral"
+  | "unknown";
 
 const config: Record<StatusKind, { label: string; icon: LucideIcon; cls: string }> = {
   success: {
@@ -51,33 +53,49 @@ const config: Record<StatusKind, { label: string; icon: LucideIcon; cls: string 
     cls: "bg-muted text-muted-foreground border-border",
   },
   neutral: {
-    label: "—",
+    label: "Neutral",
     icon: Clock,
     cls: "bg-muted text-muted-foreground border-border",
   },
+  unknown: {
+    label: "Unknown",
+    icon: HelpCircle,
+    cls: "bg-muted text-muted-foreground border-border",
+  },
 };
+
+function normalizeStatus(status?: string | null): StatusKind {
+  const value = (status ?? "unknown").trim().toLowerCase();
+  if (value in config) return value as StatusKind;
+  if (value === "completed" || value === "complete" || value === "done") return "success";
+  if (value === "success") return "success";
+  if (value === "running" || value === "in_progress" || value === "in-progress" || value === "processing")
+    return "running";
+  if (value === "queued" || value === "pending") return "queued";
+  if (value === "failed" || value === "error" || value === "failure") return "failed";
+  if (value === "cancelled" || value === "canceled" || value === "partial") return "warning";
+  if (value === "paused" || value === "stopped") return "paused";
+  return "unknown";
+}
 
 export function StatusBadge({
   status,
   label,
   className,
 }: {
-  status: StatusKind;
+  status?: string | null;
   label?: string;
   className?: string;
 }) {
-  const c = config[status];
+  const normalized = normalizeStatus(status);
+  const c = config[normalized] ?? config.unknown;
   const Icon = c.icon;
   return (
     <Badge
       variant="outline"
-      className={cn(
-        "gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
-        c.cls,
-        className,
-      )}
+      className={cn("gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium", c.cls, className)}
     >
-      <Icon className={cn("h-3 w-3", status === "running" && "animate-spin")} />
+      <Icon className={cn("h-3 w-3", normalized === "running" && "animate-spin")} />
       {label ?? c.label}
     </Badge>
   );

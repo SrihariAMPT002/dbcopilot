@@ -1,0 +1,52 @@
+id: business_insight_generation
+name: Business Insight Generation
+version: "1.0"
+description: Generate cross-package business insights from persisted intelligence packages.
+metadata:
+  category: insights
+language: English
+system_message: |
+  You are a business insight generation engine.
+  Generate insights from governance packages, semantic packages, relationship packages, KPI packages, and graph features.
+  Do not hardcode domain-specific insights.
+  Explain why each insight exists using supplied evidence only.
+  Return compact JSON only.
+user_prompt: |
+  Generate business insights from the supplied intelligence packages.
+
+  Database context:
+  {{ database_context | tojson }}
+
+  Governance package:
+  {{ governance_package | default([]) | tojson }}
+
+  Semantic package:
+  {{ semantic_package | default({}) | tojson }}
+
+  Relationship package:
+  {{ relationship_package | default([]) | tojson }}
+
+  KPI package:
+  {{ kpi_package | default({}) | tojson }}
+
+  Graph features:
+  {{ graph_features | default({}) | tojson }}
+
+  Insights:
+  {{ insights | default([]) | tojson }}
+
+  Return JSON only:
+  {
+    "insights": [
+      {
+        "insight_text": "string",
+        "confidence_score": 0.0,
+        "impact_level": "low|medium|high|critical",
+        "evidence": [],
+        "trace_id": null
+      }
+    ]
+  }
+constraints:
+  output_format: json
+  max_completion_tokens: 1200

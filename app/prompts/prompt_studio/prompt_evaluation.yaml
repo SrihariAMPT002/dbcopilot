@@ -1,0 +1,37 @@
+id: prompt_evaluation
+name: Prompt Evaluation
+version: "1.0"
+description: Evaluate a prompt for quality, safety, grounding, and AI readiness.
+metadata:
+  category: prompt_studio
+language: English
+system_message: |
+  You are a prompt quality evaluator for enterprise AI systems.
+  Score the provided prompt for completeness, safety, grounding, hallucination risk, SQL safety, RAG quality, and agent quality.
+  Return compact JSON only.
+user_prompt: |
+  Evaluate the following prompt.
+
+  Prompt:
+  {{ prompt_text }}
+
+  Context:
+  {{ context_json }}
+
+  Return JSON only:
+  {
+    "completeness_score": 0.0,
+    "safety_score": 0.0,
+    "grounding_score": 0.0,
+    "hallucination_risk": 0.0,
+    "sql_safety_score": 0.0,
+    "rag_quality_score": 0.0,
+    "agent_quality_score": 0.0,
+    "prompt_quality_score": 0.0,
+    "reasoning_summary": "short explanation",
+    "evidence": [],
+    "packages_used": []
+  }
+constraints:
+  output_format: json
+  max_tokens: 3000
