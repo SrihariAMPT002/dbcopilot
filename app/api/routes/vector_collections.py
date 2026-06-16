@@ -15,10 +15,13 @@ router = APIRouter(prefix="/embeddings/collections", tags=["Vector Collections"]
 @router.get("", response_model=VectorCollectionListResponse)
 async def list_vector_collections(db: AsyncSession = Depends(get_db)) -> VectorCollectionListResponse:
     service = VectorStoreService(db)
-    collections = await service.health_status()
-    return VectorCollectionListResponse(
-        collections=[VectorCollectionItem(**item) for item in collections]
-    )
+    try:
+        collections = await service.health_status()
+        return VectorCollectionListResponse(
+            collections=[VectorCollectionItem(**item) for item in collections]
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.post("/ensure", response_model=VectorCollectionListResponse)
@@ -38,6 +41,7 @@ async def ensure_vector_collections(db: AsyncSession = Depends(get_db)) -> Vecto
                 for row in rows
             ]
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
-

@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from app.config.manager import get_config_manager
+from app.config.package_registry import get_package_registry
 from app.models.readiness_snapshot import ReadinessStatus
 from app.services.readiness_service import ReadinessService
 
@@ -268,3 +270,11 @@ async def test_get_or_compute_hydrates_snapshot_ai_fields():
     assert breakdown.prompt_version == "2.0"
     assert breakdown.model_name == "gpt-5-nano"
     assert service._collect_stats.await_count == 1
+
+
+def test_readiness_dimensions_match_enabled_packages():
+    readiness = get_config_manager().get_readiness_rules()["readiness"]
+    dimensions = readiness["dimensions"]
+    packages = get_package_registry().get("packages", {})
+    enabled = [name for name, package in packages.items() if package.get("readiness_enabled", False)]
+    assert sorted(dimensions) == sorted(enabled)

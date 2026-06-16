@@ -8,7 +8,8 @@ import { useReranking } from "@/hooks/useReranking";
 
 export function RerankingPanel({ databaseId }: { databaseId: number }) {
   const [query, setQuery] = useState("");
-  const { data, isFetching } = useReranking(databaseId, query, 5);
+  const [submittedQuery, setSubmittedQuery] = useState("");
+  const { data, isFetching } = useReranking(databaseId, submittedQuery, 5);
   const results = data?.results ?? [];
 
   return (
@@ -20,7 +21,7 @@ export function RerankingPanel({ databaseId }: { databaseId: number }) {
       <CardContent className="space-y-4">
         <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
           <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Query for reranking..." />
-          <Button size="sm" disabled={isFetching || !query.trim()} className="gap-1.5">
+          <Button size="sm" disabled={isFetching || !query.trim()} className="gap-1.5" onClick={() => setSubmittedQuery(query.trim())}>
             {isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
             Rerank
           </Button>

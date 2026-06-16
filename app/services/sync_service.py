@@ -24,6 +24,7 @@ from app.core.security import decrypt_secret
 from app.models.metadata import (
     ConnectedDatabase,
     ConnectionStatus,
+    DatabaseLifecycleStatus,
     DatabaseColumn,
     DatabaseRelationship,
     DatabaseSchema,
@@ -78,6 +79,7 @@ class SyncService:
             _log_stage_duration(stage_label, stage_start, db_id=db_id)
         except Exception as exc:
             success = False
+            await self.db.rollback()
             stage_execution.status = "failed"
             stage_execution.end_time = datetime.now(timezone.utc)
             stage_execution.duration_seconds = time.monotonic() - stage_start
@@ -130,6 +132,12 @@ class SyncService:
         conn = await self.db.get(ConnectedDatabase, db_id)
         if not conn:
             return SyncResponse(success=False, message=f"Connection id={db_id} not found")
+        lifecycle_status = getattr(conn, "lifecycle_status", DatabaseLifecycleStatus.active)
+        if lifecycle_status != DatabaseLifecycleStatus.active:
+            return SyncResponse(
+                success=False,
+                message=f"Connection id={db_id} is {getattr(lifecycle_status, 'value', str(lifecycle_status))}; sync is disabled until it is ACTIVE.",
+            )
         conn_db_type = conn.db_type.value
 
         # Create a pending sync log
@@ -351,6 +359,8 @@ class SyncService:
             elapsed = time.monotonic() - start
             error_msg = str(exc)
             logger.error("Sync failed for db_id=%s: %s", db_id, error_msg, exc_info=True)
+
+            await self.db.rollback()
 
             sync_log.status = SyncStatus.failed
             sync_log.completed_at = datetime.now(timezone.utc)

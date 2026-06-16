@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { EmptyState } from "@/components/empty-state";
 import { ActiveDatabaseBadge } from "@/components/common/ActiveDatabaseBadge";
+import { TraceLink } from "@/components/common/TraceLink";
 import { useDatabaseContext } from "@/context/database-context";
 import { useDashboard } from "@/hooks/useDashboard";
 import { useJobs, useStageProgress } from "@/hooks/useJobs";
@@ -82,11 +83,13 @@ export function DashboardPage() {
         actions={
           <>
             <ActiveDatabaseBadge />
-            <Button variant="outline" size="sm" className="gap-1.5">
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => window.location.reload()}>
               <RefreshCw className="h-3.5 w-3.5" /> Refresh
             </Button>
-            <Button size="sm" className="gap-1.5 bg-gradient-to-br from-primary to-primary-glow text-primary-foreground shadow-[var(--shadow-glow)] hover:opacity-95">
-              <Play className="h-3.5 w-3.5" /> Run pipeline
+            <Button asChild size="sm" className="gap-1.5 bg-gradient-to-br from-primary to-primary-glow text-primary-foreground shadow-[var(--shadow-glow)] hover:opacity-95">
+              <Link to="/jobs">
+                <Play className="h-3.5 w-3.5" /> Run pipeline
+              </Link>
             </Button>
           </>
         }
@@ -145,6 +148,7 @@ export function DashboardPage() {
                   <div className="mt-2 text-xs text-muted-foreground">
                     Confidence: {Math.round((event.confidence_score ?? 0) * 100)}%{event.trace_id ? ` · Trace ${event.trace_id}` : ""}
                   </div>
+                  <TraceLink traceId={event.trace_id} label="Open trace" className="mt-2 text-[11px]" />
                   <div className="mt-2 text-xs text-muted-foreground">
                     Source tables: {(event.source_tables ?? []).length ? event.source_tables.join(", ") : "n/a"}
                   </div>
@@ -168,6 +172,7 @@ export function DashboardPage() {
                   <div className="mt-2 text-xs text-muted-foreground">
                     Trace: {insight.trace_id ?? "n/a"} · Confidence: {Math.round((insight.confidence_score ?? 0) * 100)}%
                   </div>
+                  <TraceLink traceId={insight.trace_id} label="Open trace" className="mt-2 text-[11px]" />
                   <pre className="mt-2 overflow-x-auto text-[11px] text-muted-foreground">{JSON.stringify(insight.evidence ?? [], null, 2)}</pre>
                 </div>
               ))
@@ -201,6 +206,7 @@ export function DashboardPage() {
                   <div className="mt-2 text-xs text-muted-foreground">
                     Confidence: {Math.round((insight.confidence_score ?? 0) * 100)}%{insight.trace_id ? ` · Trace ${insight.trace_id}` : ""}
                   </div>
+                  <TraceLink traceId={insight.trace_id} label="Open trace" className="mt-2 text-[11px]" />
                 </div>
               ))
             ) : (
@@ -310,15 +316,7 @@ export function DashboardPage() {
                   <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.response_text ?? "No response stored."}</div>
                   <div className="mt-2 text-[11px] text-muted-foreground">
                     Trace: {item.trace_id ?? "n/a"} · Tags: {item.tags?.length ? item.tags.join(", ") : "none"}
-                    {item.trace_id ? (
-                      <>
-                        {" "}
-                        ·
-                        <a href={`/jobs?trace_id=${encodeURIComponent(item.trace_id)}`} className="ml-1 text-primary underline-offset-2 hover:underline">
-                          Drill down
-                        </a>
-                      </>
-                    ) : null}
+                    <TraceLink traceId={item.trace_id} label="Open trace" className="ml-1 text-[11px]" />
                   </div>
                 </div>
               ))

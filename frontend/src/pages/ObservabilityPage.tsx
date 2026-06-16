@@ -1,0 +1,422 @@
+import { useEffect, useMemo, useState, type ComponentType } from "react";
+import { Clock3, Copy, Download, Search, Server, Sparkles, TextQuote, Workflow, Zap, Link as LinkIcon, RefreshCw } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { EmptyState } from "@/components/empty-state";
+import { useDatabaseContext } from "@/context/database-context";
+import { useLifecycleEvents, useObservabilityTraceDetail, useObservabilityTraces } from "@/hooks/useObservability";
+import { usePipelineExecutions } from "@/hooks/usePipelineExecutions";
+import { usePromptPackages } from "@/hooks/usePromptStudio";
+import { useConnections } from "@/hooks/useConnections";
+import { cn } from "@/lib/utils";
+
+export function ObservabilityPage() {
+  const { selectedDatabaseId } = useDatabaseContext();
+  const { data: connections = [] } = useConnections();
+  const [module, setModule] = useState("all");
+  const [model, setModel] = useState("all");
+  const [query, setQuery] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [selectedTraceId, setSelectedTraceId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("trace_id");
+  });
+  const dbId = selectedDatabaseId ?? 1;
+  const selectedDatabase = connections.find((db) => db.id === dbId);
+  const { data } = useObservabilityTraces(dbId, {
+    module: module === "all" ? undefined : module,
+    model_name: model === "all" ? undefined : model,
+    trace_id: query.trim() || undefined,
+    from_date: fromDate || undefined,
+    to_date: toDate || undefined,
+  });
+  const { data: traceDetail } = useObservabilityTraceDetail(dbId, selectedTraceId);
+  const { data: pipelineExecutions } = usePipelineExecutions(dbId, 10);
+  const { data: promptPackages } = usePromptPackages(dbId);
+  const { data: lifecycleEvents } = useLifecycleEvents(dbId);
+
+  const traces = data?.traces ?? [];
+  const models = useMemo(() => Array.from(new Set(traces.map((t) => t.model_name).filter(Boolean) as string[])), [traces]);
+  const modules = useMemo(() => Array.from(new Set(traces.map((t) => t.module).filter(Boolean) as string[])), [traces]);
+  const totalTokens = traces.reduce((sum, item) => sum + item.prompt_tokens + item.completion_tokens + item.reasoning_tokens, 0);
+  const totalCost = traces.reduce((sum, item) => sum + item.estimated_cost_usd, 0);
+
+  const promptVersions = traceDetail?.prompt_versions ?? [];
+  const promptObservability = traceDetail?.prompt_observability ?? [];
+  const lifecycle = lifecycleEvents?.events ?? [];
+
+  useEffect(() => {
+    const syncTraceFromUrl = () => {
+      if (typeof window === "undefined") return;
+      setSelectedTraceId(new URLSearchParams(window.location.search).get("trace_id"));
+    };
+
+    syncTraceFromUrl();
+    window.addEventListener("popstate", syncTraceFromUrl);
+    return () => window.removeEventListener("popstate", syncTraceFromUrl);
+  }, []);
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Platform"
+        title="AI observability"
+        description="Trace visibility for prompts, pipeline executions, token usage, latency, cost estimates, and lifecycle events."
+        actions={
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="gap-1.5 text-[11px]">
+              <Server className="h-3.5 w-3.5" />
+              DB {dbId}
+            </Badge>
+            <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+              <RefreshCw className="mr-2 h-4 w-4" /> Refresh
+            </Button>
+            {selectedTraceId ? (
+              <Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(selectedTraceId)}>
+                <Copy className="mr-2 h-4 w-4" /> Copy trace
+              </Button>
+            ) : null}
+          </div>
+        }
+      />
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Metric label="Traces" value={String(traces.length)} icon={Workflow} />
+        <Metric label="Tokens" value={String(totalTokens)} icon={Zap} />
+        <Metric label="Estimated cost" value={`$${totalCost.toFixed(4)}`} icon={Clock3} />
+        <Metric label="Prompt packages" value={String(promptPackages?.prompt_packages?.length ?? 0)} icon={Sparkles} />
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-[1.3fr_0.7fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Trace filters</CardTitle>
+            <CardDescription>Filter by database, module, model, date, and trace id.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 lg:grid-cols-5">
+            <Select value={module} onValueChange={setModule}>
+              <SelectTrigger>
+                <SelectValue placeholder="Module" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All modules</SelectItem>
+                {modules.map((item) => (
+                  <SelectItem key={item} value={item}>
+                    {item}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={model} onValueChange={setModel}>
+              <SelectTrigger>
+                <SelectValue placeholder="Model" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All models</SelectItem>
+                {models.map((item) => (
+                  <SelectItem key={item} value={item}>
+                    {item}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search trace_id" />
+            <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+            <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Trace summary</CardTitle>
+            <CardDescription>{selectedDatabase ? selectedDatabase.name : "Select a database"}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm text-muted-foreground">
+            <TraceSummary label="Last sync" value={selectedDatabase?.last_sync_at ? new Date(selectedDatabase.last_sync_at).toLocaleString() : "n/a"} />
+            <TraceSummary label="Lifecycle" value={selectedDatabase?.lifecycle_status ?? "ACTIVE"} />
+            <TraceSummary label="Total modules" value={String(modules.length)} />
+            <TraceSummary label="Recent lifecycle events" value={String(lifecycle.length)} />
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Trace table</CardTitle>
+            <CardDescription>Prompt, pipeline, and stage traces with execution details.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {traces.length ? (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/40 hover:bg-muted/40">
+                      <TableHead>Trace</TableHead>
+                      <TableHead>Prompt / Module</TableHead>
+                      <TableHead>Model</TableHead>
+                      <TableHead>Tokens</TableHead>
+                      <TableHead>Latency</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {traces.map((trace) => (
+                      <TableRow
+                        key={`${trace.source_type}-${trace.trace_id ?? trace.created_at}`}
+                        className="cursor-pointer hover:bg-muted/30"
+                        onClick={() => trace.trace_id && setSelectedTraceId(trace.trace_id)}
+                      >
+                        <TableCell>
+                          <div className="font-mono text-[11px] text-foreground">{trace.trace_id ?? "n/a"}</div>
+                          <div className="text-[11px] text-muted-foreground">{trace.source_type}</div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="text-sm text-foreground">{trace.prompt_id ?? "n/a"}</div>
+                          <div className="text-[11px] text-muted-foreground">
+                            {trace.module ?? "n/a"} · v{trace.prompt_version ?? "n/a"}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{trace.model_name ?? "n/a"}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          P {trace.prompt_tokens} / C {trace.completion_tokens} / R {trace.reasoning_tokens}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{Math.round(trace.latency_ms)} ms</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-[10px] uppercase">
+                            {trace.execution_status ?? trace.finish_reason ?? "unknown"}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <EmptyState icon={Search} title="No traces found" description="Adjust filters or run a pipeline to collect observability traces." />
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Token analytics</CardTitle>
+            <CardDescription>Prompt, completion, reasoning, latency, and estimated cost.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Metric label="Prompt tokens" value={String(traceDetail?.prompt_tokens ?? 0)} icon={TextQuote} />
+            <Metric label="Completion tokens" value={String(traceDetail?.completion_tokens ?? 0)} icon={TextQuote} />
+            <Metric label="Reasoning tokens" value={String(traceDetail?.reasoning_tokens ?? 0)} icon={TextQuote} />
+            <Metric label="Estimated cost" value={`$${(traceDetail?.estimated_cost_usd ?? 0).toFixed(4)}`} icon={Zap} />
+            <Metric label="Latency" value={`${Math.round(traceDetail?.latency_ms ?? 0)} ms`} icon={Clock3} />
+            <div className="rounded-md border border-border bg-card p-3 text-xs text-muted-foreground">
+              Finish reason: {traceDetail?.finish_reason ?? "n/a"}
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Pipeline timeline</CardTitle>
+            <CardDescription>Pipeline and stage execution history for the selected database.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {(pipelineExecutions?.executions ?? []).slice(0, 5).map((item) => (
+              <div key={item.id} className="rounded-md border border-border bg-card p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm font-medium text-foreground">Execution #{item.id}</div>
+                  <Badge variant="outline" className="text-[10px] uppercase">
+                    {item.status}
+                  </Badge>
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Trace: {item.trace_id ?? "n/a"} · Model: {item.model_name ?? "n/a"}
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Duration: {item.duration_seconds?.toFixed(2) ?? "n/a"}s · Error: {item.error_message ?? "none"}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Lifecycle events</CardTitle>
+            <CardDescription>Connection lifecycle, archive, restore, and deletion audit trail.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {lifecycle.length ? (
+              lifecycle.slice(0, 6).map((event) => (
+                <div key={event.id} className="rounded-md border border-border bg-card p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-medium text-foreground">{event.event_type}</div>
+                    <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[11px]" asChild>
+                      <a href={`/observability?trace_id=${encodeURIComponent(event.trace_id ?? "")}`}>
+                        <LinkIcon className="h-3.5 w-3.5" /> Open trace
+                      </a>
+                    </Button>
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {event.reason ?? "n/a"} · {event.created_at ? new Date(event.created_at).toLocaleString() : "n/a"}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <EmptyState icon={Workflow} title="No lifecycle events" description="Disconnect, archive, restore, or delete a database to populate lifecycle audit entries." />
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Prompt inspector</CardTitle>
+            <CardDescription>Versions and observability records for the selected trace.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {promptVersions.length ? (
+              promptVersions.slice(0, 3).map((version) => (
+                <div key={String(version.id ?? version.trace_id ?? Math.random())} className="rounded-md border border-border bg-card p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-medium text-foreground">Version {String(version.version ?? "n/a")}</div>
+                    <Badge variant="outline" className="text-[10px] uppercase">
+                      {String(version.model_name ?? "unknown")}
+                    </Badge>
+                  </div>
+                  <pre className="mt-2 max-h-32 overflow-auto rounded bg-muted/30 p-2 text-[11px] text-muted-foreground">
+                    {String(version.generated_prompt ?? "")}
+                  </pre>
+                </div>
+              ))
+            ) : (
+              <EmptyState icon={Sparkles} title="No prompt versions selected" description="Select a trace to inspect prompt versions and observability." />
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">AI response inspector</CardTitle>
+            <CardDescription>Raw response, parsed response, validation, fallback usage, and retry count.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Detail label="Deployment" value={traceDetail?.deployment ?? traceDetail?.model_name ?? "n/a"} />
+            <Detail label="Artifact type" value={traceDetail?.artifact_type ?? "n/a"} />
+            <Detail label="Module" value={traceDetail?.module ?? "n/a"} />
+            <Detail label="Database" value={String(traceDetail?.database_id ?? dbId)} />
+            <Detail label="Finish reason" value={traceDetail?.finish_reason ?? "n/a"} />
+            <Detail label="Validation result" value={traceDetail?.execution_status ?? "n/a"} />
+            <div className="rounded-md border border-border bg-card p-3">
+              <div className="flex items-center justify-between">
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Prompt observability JSON</div>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[11px]" onClick={() => navigator.clipboard.writeText(JSON.stringify(promptObservability, null, 2))}>
+                    <Copy className="h-3.5 w-3.5" /> Copy
+                  </Button>
+                  <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[11px]" onClick={() => downloadJson(`observability-trace-${selectedTraceId ?? "trace"}.json`, traceDetail ?? {})}>
+                    <Download className="h-3.5 w-3.5" /> Download
+                  </Button>
+                </div>
+              </div>
+              <pre className={cn("mt-2 max-h-72 overflow-auto rounded-md p-3 text-[11px] leading-5", traceDetail?.finish_reason === "length" ? "bg-destructive/10 text-destructive" : "bg-muted/20 text-muted-foreground")}>
+                {JSON.stringify(promptObservability, null, 2)}
+              </pre>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <Sheet open={Boolean(selectedTraceId)} onOpenChange={(open) => !open && setSelectedTraceId(null)}>
+        <SheetContent className="w-full overflow-y-auto sm:max-w-3xl">
+          <SheetHeader>
+            <SheetTitle>Trace details</SheetTitle>
+            <SheetDescription>{selectedTraceId ?? "n/a"}</SheetDescription>
+          </SheetHeader>
+          <div className="mt-6 space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Detail label="Trace ID" value={traceDetail?.trace_id ?? "n/a"} />
+              <Detail label="Prompt ID" value={traceDetail?.prompt_id ?? "n/a"} />
+              <Detail label="Prompt version" value={traceDetail?.prompt_version ?? "n/a"} />
+              <Detail label="Model" value={traceDetail?.model_name ?? "n/a"} />
+              <Detail label="Deployment" value={traceDetail?.deployment ?? "n/a"} />
+              <Detail label="Module" value={traceDetail?.module ?? "n/a"} />
+              <Detail label="Artifact type" value={traceDetail?.artifact_type ?? "n/a"} />
+              <Detail label="Database" value={String(traceDetail?.database_id ?? dbId)} />
+              <Detail label="Execution status" value={traceDetail?.execution_status ?? "n/a"} />
+              <Detail label="Finish reason" value={traceDetail?.finish_reason ?? "n/a"} />
+              <Detail label="Prompt tokens" value={String(traceDetail?.prompt_tokens ?? 0)} />
+              <Detail label="Completion tokens" value={String(traceDetail?.completion_tokens ?? 0)} />
+              <Detail label="Reasoning tokens" value={String(traceDetail?.reasoning_tokens ?? 0)} />
+              <Detail label="Estimated cost" value={`$${(traceDetail?.estimated_cost_usd ?? 0).toFixed(4)}`} />
+            </div>
+            <TraceJsonPanel title="Prompt observability" value={traceDetail?.prompt_observability ?? []} />
+            <TraceJsonPanel title="Stage executions" value={traceDetail?.stage_executions ?? []} />
+            <TraceJsonPanel title="Pipeline executions" value={traceDetail?.pipeline_executions ?? []} />
+            <TraceJsonPanel title="Prompt versions" value={traceDetail?.prompt_versions ?? []} />
+          </div>
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+}
+
+function Metric({ label, value, icon: Icon }: { label: string; value: string; icon: ComponentType<{ className?: string }> }) {
+  return (
+    <div className="rounded-md border border-border bg-card p-3">
+      <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+        <Icon className="h-3.5 w-3.5" />
+        {label}
+      </div>
+      <div className="mt-1 text-lg font-semibold text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-border bg-card p-3">
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="mt-1 text-sm text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function TraceSummary({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/20 px-3 py-2">
+      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</span>
+      <span className="text-sm text-foreground">{value}</span>
+    </div>
+  );
+}
+
+function TraceJsonPanel({ title, value }: { title: string; value: Array<Record<string, unknown>> }) {
+  return (
+    <div className="space-y-2">
+      <div className="text-xs uppercase tracking-wider text-muted-foreground">{title}</div>
+      <pre className="max-h-64 overflow-auto rounded-md border border-border bg-muted/20 p-3 text-[11px] leading-5 text-muted-foreground">
+        {JSON.stringify(value, null, 2)}
+      </pre>
+    </div>
+  );
+}
+
+function downloadJson(filename: string, payload: unknown) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}

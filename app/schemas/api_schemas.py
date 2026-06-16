@@ -76,11 +76,39 @@ class ConnectionSummary(BaseModel):
     username: str
     ssl_enabled: bool = False
     status: str
+    lifecycle_status: str = "ACTIVE"
     last_sync_at: Optional[datetime]
     created_at: datetime
+    disconnected_at: Optional[datetime] = None
+    archived_at: Optional[datetime] = None
+    deleted_at: Optional[datetime] = None
+    deletion_summary: Optional[str] = None
     schema_count: int = 0
     table_count: int = 0
     last_error: Optional[str] = None
+
+
+class ConnectionLifecycleDeleteRequest(BaseModel):
+    confirmation_text: str
+    delete_metadata: bool = True
+    delete_packages: bool = True
+    delete_embeddings: bool = True
+    delete_observability: bool = True
+
+
+class ConnectionLifecycleConfirmRequest(BaseModel):
+    confirmation_text: str
+    reason: Optional[str] = None
+
+
+class ConnectionLifecycleResponse(BaseModel):
+    database_id: int
+    database_name: str
+    lifecycle_status: str
+    message: str
+    preserved_resources: Dict[str, int] = Field(default_factory=dict)
+    deleted_resources: Dict[str, Any] = Field(default_factory=dict)
+    trace_id: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

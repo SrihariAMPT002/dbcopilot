@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { databasesApi } from "@/api/databases";
-import type { DatabaseSummary, DefaultDatabaseResponse } from "@/types/backend";
+import type { DatabaseSummary } from "@/types/backend";
 
 const STORAGE_KEY = "dbcopilot.selectedDatabaseId";
 
@@ -16,10 +16,21 @@ type DatabaseContextValue = {
 const DatabaseContext = createContext<DatabaseContextValue | null>(null);
 
 export function DatabaseProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const { data: databases = [] } = useQuery({ queryKey: ["databases"], queryFn: databasesApi.list });
-  const { data: defaultDatabase } = useQuery({ queryKey: ["databases", "default"], queryFn: () => databasesApi.default() });
   const [selectedDatabaseId, setSelectedDatabaseIdState] = useState<number | null>(null);
   const [hydrated, setHydrated] = useState(false);
+
+  const selectedDatabaseExists = useMemo(
+    () => selectedDatabaseId == null || databases.some((db) => db.database_id === selectedDatabaseId),
+    [databases, selectedDatabaseId],
+  );
+
+  const defaultDatabaseQuery = useQuery({
+    queryKey: ["databases", "default", selectedDatabaseId],
+    queryFn: () => databasesApi.default(selectedDatabaseId),
+    enabled: hydrated,
+  });
 
   useEffect(() => {
     const stored = window.localStorage.getItem(STORAGE_KEY);
@@ -32,17 +43,19 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!hydrated) return;
-    if (selectedDatabaseId != null) return;
-
-    if (defaultDatabase?.database_id) {
-      setSelectedDatabaseIdState(defaultDatabase.database_id);
+    if (selectedDatabaseId != null && !selectedDatabaseExists) {
+      const fallback = defaultDatabaseQuery.data?.database_id ?? databases[0]?.database_id ?? null;
+      setSelectedDatabaseIdState(fallback);
       return;
     }
 
-    if (databases.length) {
-      setSelectedDatabaseIdState(databases[0].database_id);
+    if (selectedDatabaseId == null) {
+      const fallback = defaultDatabaseQuery.data?.database_id ?? databases[0]?.database_id ?? null;
+      if (fallback != null) {
+        setSelectedDatabaseIdState(fallback);
+      }
     }
-  }, [databases, defaultDatabase, hydrated, selectedDatabaseId]);
+  }, [databases, defaultDatabaseQuery.data, hydrated, selectedDatabaseExists, selectedDatabaseId]);
 
   useEffect(() => {
     if (selectedDatabaseId == null) {
@@ -50,7 +63,15 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     } else {
       window.localStorage.setItem(STORAGE_KEY, String(selectedDatabaseId));
     }
-  }, [selectedDatabaseId]);
+    if (hydrated) {
+      void queryClient.invalidateQueries({
+        predicate: (query) => {
+          const key = query.queryKey;
+          return Array.isArray(key) && typeof key[0] === "string" && ["governance", "semantics", "relationships", "kpi", "embeddings", "prompt-packages", "prompt-bundle", "readiness", "jobs", "agent-memory", "retrieval-metrics", "retrieval-evaluation", "semantic-cache", "business-events", "business-insights", "business-intelligence", "dashboard", "pipeline", "readiness-history"].includes(key[0]);
+        },
+      });
+    }
+  }, [hydrated, queryClient, selectedDatabaseId]);
 
   const selectedDatabase = useMemo(
     () => databases.find((db) => db.database_id === selectedDatabaseId) ?? null,

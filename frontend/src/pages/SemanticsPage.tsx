@@ -1,14 +1,14 @@
 import { useMemo, useState } from "react";
-import { BookOpenText, Building2, Workflow, Sparkles, Search, Activity, ExternalLink } from "lucide-react";
+import { BookOpenText, Building2, Workflow, Sparkles, Search, Activity } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { MetricCard } from "@/components/metric-card";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useSemantics, useSemanticEvidence } from "@/hooks/useSemantics";
 import { useDatabaseContext } from "@/context/database-context";
+import { TraceLink } from "@/components/common/TraceLink";
 
 export function SemanticsPage() {
   const { selectedDatabaseId } = useDatabaseContext();
@@ -62,36 +62,34 @@ export function SemanticsPage() {
             </CardHeader>
           </div>
           <CardContent className="space-y-4 pt-0">
-            <Tabs defaultValue="entities">
-              <TabsList>
-                <TabsTrigger value="entities">Entities</TabsTrigger>
-                <TabsTrigger value="processes">Processes</TabsTrigger>
-                <TabsTrigger value="capabilities">Capabilities</TabsTrigger>
-              </TabsList>
-              <TabsContent value="entities" className="pt-4">
-                <div className="flex flex-wrap gap-2">
-                  {entities.length ? entities.map((e) => (
-                    <Badge key={e} variant="outline" className="gap-1 rounded-full border-border bg-card px-2.5 py-1 text-xs">
-                      <Sparkles className="h-3 w-3 text-primary" /> {e}
-                    </Badge>
-                  )) : <div className="text-sm text-muted-foreground">No semantic entities found yet.</div>}
-                </div>
-              </TabsContent>
-              <TabsContent value="processes" className="space-y-3 pt-4">
-                {processes.length ? processes.map((p) => (
-                  <div key={p} className="rounded-md border border-border bg-card p-3">
-                    <div className="mb-2 flex items-center gap-2 text-sm font-medium text-foreground">
-                      <Workflow className="h-4 w-4 text-primary" /> {p}
-                    </div>
+            <section className="space-y-2">
+              <div className="text-sm font-semibold text-foreground">Business entities</div>
+              <div className="flex flex-wrap gap-2">
+                {entities.length ? entities.map((e) => (
+                  <Badge key={e} variant="outline" className="gap-1 rounded-full border-border bg-card px-2.5 py-1 text-xs">
+                    <Sparkles className="h-3 w-3 text-primary" /> {e}
+                  </Badge>
+                )) : <div className="text-sm text-muted-foreground">No semantic entities found yet.</div>}
+              </div>
+            </section>
+            <section className="space-y-2">
+              <div className="text-sm font-semibold text-foreground">Business processes</div>
+              {processes.length ? processes.map((p) => (
+                <div key={p} className="rounded-md border border-border bg-card p-3">
+                  <div className="mb-2 flex items-center gap-2 text-sm font-medium text-foreground">
+                    <Workflow className="h-4 w-4 text-primary" /> {p}
                   </div>
-                )) : <div className="text-sm text-muted-foreground">No semantic processes found yet.</div>}
-              </TabsContent>
-              <TabsContent value="capabilities" className="grid grid-cols-2 gap-2 pt-4 sm:grid-cols-3">
+                </div>
+              )) : <div className="text-sm text-muted-foreground">No semantic processes found yet.</div>}
+            </section>
+            <section className="space-y-2">
+              <div className="text-sm font-semibold text-foreground">Business capabilities</div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {capabilities.length ? capabilities.map((c) => (
                   <div key={c} className="rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground">{c}</div>
                 )) : <div className="text-sm text-muted-foreground">No capabilities found yet.</div>}
-              </TabsContent>
-            </Tabs>
+              </div>
+            </section>
           </CardContent>
         </Card>
 
@@ -116,18 +114,9 @@ export function SemanticsPage() {
                   </div>
                 )) : <div className="text-xs text-muted-foreground">No semantic domain scores available yet.</div>}
               </div>
-              {(data?.trace_id || evidence?.evidence?.[0]) && (
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  {data?.trace_id ? (
-                    <a
-                      href={`/jobs?trace_id=${encodeURIComponent(data.trace_id)}`}
-                      className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline"
-                    >
-                      Trace drill-down <ExternalLink className="h-3 w-3" />
-                    </a>
-                  ) : null}
-                </div>
-              )}
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <TraceLink traceId={data?.trace_id} label="Open trace" />
+              </div>
             </div>
 
             <div>

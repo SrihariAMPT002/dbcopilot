@@ -1,5 +1,6 @@
 import { useRouterState } from "@tanstack/react-router";
-import { Search, Bell, Command as CmdIcon, Sun, Moon, ChevronDown } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { Search, Command as CmdIcon, Sun, Moon, ChevronDown } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Input } from "@/components/ui/input";
@@ -16,8 +17,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Breadcrumbs } from "@/components/common/Breadcrumbs";
-import { DatabaseSelector } from "@/components/common/DatabaseSelector";
-import { ActiveDatabaseBadge } from "@/components/common/ActiveDatabaseBadge";
 import { navGroups } from "@/lib/nav";
 
 export function AppHeader() {
@@ -62,15 +61,9 @@ export function AppHeader() {
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        <ActiveDatabaseBadge />
-        <DatabaseSelector />
         <Separator orientation="vertical" className="hidden h-6 sm:block" />
         <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Toggle theme">
           {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        </Button>
-        <Button variant="ghost" size="icon" className="relative" aria-label="Notifications">
-          <Bell className="h-4 w-4" />
-          <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-[var(--warning)]" />
         </Button>
         <Separator orientation="vertical" className="hidden h-6 sm:block" />
         <DropdownMenu>
@@ -90,11 +83,17 @@ export function AppHeader() {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuLabel>Workspace</DropdownMenuLabel>
-            <DropdownMenuItem>Members</DropdownMenuItem>
-            <DropdownMenuItem>API tokens</DropdownMenuItem>
-            <DropdownMenuItem>Audit log</DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link to="/settings">Members</Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link to="/settings">API tokens</Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link to="/jobs">Audit log</Link>
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>Sign out</DropdownMenuItem>
+            <DropdownMenuItem disabled>Sign out</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

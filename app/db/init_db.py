@@ -8,6 +8,7 @@ import logging
 from sqlalchemy import text
 
 from app.db.session import engine
+from app.db.schema_audit import audit_schema
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,17 @@ async def init_db() -> None:
     logger.info("Initializing internal metadata database…")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_validate_schema_drift)
     logger.info("Metadata database initialized.")
+
+
+def _validate_schema_drift(sync_conn) -> None:
+    report = audit_schema(sync_conn)
+    if report.requires_manual_review:
+        for item in report.requires_manual_review:
+            logger.warning("Schema audit manual review: %s", item)
+    if report.has_errors or report.requires_manual_review:
+        raise RuntimeError(report.format_message())
 
 
 async def check_db_health() -> bool:

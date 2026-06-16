@@ -34,6 +34,7 @@ from app.api.routes import (
     agent_memory,
     databases,
     dashboard,
+    observability,
 )
 
 api_router = APIRouter()
@@ -71,3 +72,4 @@ api_router.include_router(semantic_cache.router)
 api_router.include_router(retrieval_evaluation.router)
 api_router.include_router(databases.router)
 api_router.include_router(dashboard.router)
+api_router.include_router(observability.router)

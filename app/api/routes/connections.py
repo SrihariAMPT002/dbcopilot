@@ -6,20 +6,21 @@ import logging
 import time
 from typing import List
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.db.session import db_session
 from app.models.pipeline_job import JobStatus, JobType
 from app.schemas.api_schemas import (
-    ConnectionDetail,
+    ConnectionLifecycleConfirmRequest,
+    ConnectionLifecycleDeleteRequest,
+    ConnectionLifecycleResponse,
     ConnectionRequest,
     ConnectionSummary,
     JobQueueResponse,
     TestConnectionRequest,
     TestConnectionResponse,
-    APIResponse,
 )
 from app.services.connection_service import ConnectionService
 from app.services.sync_service import SyncService
@@ -82,11 +83,12 @@ async def create_connection(
     summary="List all registered connections",
 )
 async def list_connections(
+    include_archived: bool = False,
     db: AsyncSession = Depends(get_db),
 ) -> List[ConnectionSummary]:
     svc = ConnectionService(db)
     # Service now returns List[ConnectionSummary], not raw ORM objects
-    return await svc.list_connections()
+    return await svc.list_connections(include_archived=include_archived)
 
 
 # ── GET /connections/{db_id} ──────────────────────────────────────────────────
@@ -166,10 +168,86 @@ async def sync_schema(
 )
 async def delete_connection(
     db_id: int,
+    payload: ConnectionLifecycleDeleteRequest = Body(...),
     db: AsyncSession = Depends(get_db),
-) -> APIResponse:
+) -> ConnectionLifecycleResponse:
     svc = ConnectionService(db)
-    deleted = await svc.delete_connection(db_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail=f"Connection id={db_id} not found")
-    return APIResponse(success=True, message=f"Connection id={db_id} deleted successfully")
+    try:
+        return await svc.delete_connection_hard(
+            db_id,
+            delete_metadata=payload.delete_metadata,
+            delete_packages=payload.delete_packages,
+            delete_embeddings=payload.delete_embeddings,
+            delete_observability=payload.delete_observability,
+            confirmation_text=payload.confirmation_text,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post(
+    "/{db_id}/disconnect",
+    response_model=ConnectionLifecycleResponse,
+    summary="Disconnect a connection while preserving intelligence artifacts",
+)
+async def disconnect_connection(
+    db_id: int,
+    payload: ConnectionLifecycleConfirmRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+) -> ConnectionLifecycleResponse:
+    svc = ConnectionService(db)
+    try:
+        return await svc.disconnect_connection(db_id, confirmation_text=payload.confirmation_text, reason=payload.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post(
+    "/{db_id}/reconnect",
+    response_model=ConnectionLifecycleResponse,
+    summary="Reconnect a disconnected or archived database",
+)
+async def reconnect_connection(
+    db_id: int,
+    payload: ConnectionLifecycleConfirmRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+) -> ConnectionLifecycleResponse:
+    svc = ConnectionService(db)
+    try:
+        return await svc.reconnect_connection(db_id, confirmation_text=payload.confirmation_text, reason=payload.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post(
+    "/{db_id}/archive",
+    response_model=ConnectionLifecycleResponse,
+    summary="Archive a connection and preserve all intelligence artifacts",
+)
+async def archive_connection(
+    db_id: int,
+    payload: ConnectionLifecycleConfirmRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+) -> ConnectionLifecycleResponse:
+    svc = ConnectionService(db)
+    try:
+        return await svc.archive_connection(db_id, confirmation_text=payload.confirmation_text, reason=payload.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post(
+    "/{db_id}/restore",
+    response_model=ConnectionLifecycleResponse,
+    summary="Restore an archived connection",
+)
+async def restore_connection(
+    db_id: int,
+    payload: ConnectionLifecycleConfirmRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+) -> ConnectionLifecycleResponse:
+    svc = ConnectionService(db)
+    try:
+        return await svc.restore_connection(db_id, confirmation_text=payload.confirmation_text, reason=payload.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))

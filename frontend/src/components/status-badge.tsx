@@ -8,6 +8,7 @@ import {
   Loader2,
   PauseCircle,
   HelpCircle,
+  Archive,
   type LucideIcon,
 } from "lucide-react";
 
@@ -19,6 +20,10 @@ export type StatusKind =
   | "failed"
   | "paused"
   | "neutral"
+  | "active"
+  | "disconnected"
+  | "archived"
+  | "deleted"
   | "unknown";
 
 const config: Record<StatusKind, { label: string; icon: LucideIcon; cls: string }> = {
@@ -57,6 +62,26 @@ const config: Record<StatusKind, { label: string; icon: LucideIcon; cls: string 
     icon: Clock,
     cls: "bg-muted text-muted-foreground border-border",
   },
+  active: {
+    label: "Active",
+    icon: CheckCircle2,
+    cls: "bg-[var(--success)]/10 text-[var(--success)] border-[var(--success)]/25",
+  },
+  disconnected: {
+    label: "Disconnected",
+    icon: PauseCircle,
+    cls: "bg-muted text-muted-foreground border-border",
+  },
+  archived: {
+    label: "Archived",
+    icon: Archive,
+    cls: "bg-[var(--warning)]/15 text-[var(--warning)] border-[var(--warning)]/30",
+  },
+  deleted: {
+    label: "Deleted",
+    icon: XCircle,
+    cls: "bg-destructive/10 text-destructive border-destructive/25",
+  },
   unknown: {
     label: "Unknown",
     icon: HelpCircle,
@@ -75,6 +100,10 @@ function normalizeStatus(status?: string | null): StatusKind {
   if (value === "failed" || value === "error" || value === "failure") return "failed";
   if (value === "cancelled" || value === "canceled" || value === "partial") return "warning";
   if (value === "paused" || value === "stopped") return "paused";
+  if (value === "active") return "active";
+  if (value === "disconnected") return "disconnected";
+  if (value === "archived") return "archived";
+  if (value === "deleted") return "deleted";
   return "unknown";
 }
 

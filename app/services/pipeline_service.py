@@ -12,7 +12,7 @@ from typing import Optional
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.metadata import ConnectedDatabase
+from app.models.metadata import ConnectedDatabase, DatabaseLifecycleStatus
 from app.models.pipeline_job import JobStatus, JobType, PipelineJob
 
 
@@ -170,7 +170,13 @@ class PipelineService:
 
     async def _ensure_database(self, database_id: int) -> None:
         result = await self.db.execute(
-            select(ConnectedDatabase.id).where(ConnectedDatabase.id == database_id)
+            select(ConnectedDatabase).where(ConnectedDatabase.id == database_id)
         )
-        if result.scalar_one_or_none() is None:
+        row = result.scalars().first()
+        if row is None:
             raise ValueError(f"Database {database_id} not found")
+        lifecycle_status = getattr(row, "lifecycle_status", DatabaseLifecycleStatus.active)
+        if lifecycle_status != DatabaseLifecycleStatus.active:
+            raise ValueError(
+                f"Database {database_id} is {getattr(lifecycle_status, 'value', str(lifecycle_status))} and cannot run jobs"
+            )

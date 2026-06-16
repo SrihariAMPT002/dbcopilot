@@ -8,6 +8,9 @@ readiness:
     - metadata
     - semantic
     - relationship
+    - rag
+    - agent
+    - text_to_sql
     - ai_context
     - governance
     - kpi
@@ -16,6 +19,9 @@ readiness:
     - metadata
     - semantic
     - relationships
+    - rag
+    - agent
+    - text_to_sql
     - ai_context
     - governance
     - kpi
@@ -24,7 +30,10 @@ readiness:
     metadata: 0.24
     semantic: 0.24
     relationship: 0.20
-    ai_context: 0.18
+    rag: 0.06
+    agent: 0.04
+    text_to_sql: 0.04
+    ai_context: 0.04
     governance: 0.10
     kpi: 0.04
 

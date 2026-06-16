@@ -1,12 +1,11 @@
-import { Network, GitBranch, Workflow, Search, Layers, BarChart3, BadgeInfo, ExternalLink } from "lucide-react";
-import { Link } from "@tanstack/react-router";
+import { Network, GitBranch, Workflow, Search, Layers, BarChart3, BadgeInfo } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CoverageBar } from "@/components/coverage-bar";
 import { useRelationships } from "@/hooks/useRelationships";
 import { useDatabaseContext } from "@/context/database-context";
+import { TraceLink } from "@/components/common/TraceLink";
 
 function MetricItem({ label, value }: { label: string; value: string | number }) {
   return (
@@ -42,103 +41,38 @@ export function RelationshipsPage() {
             <CardDescription>Hidden relationships, process flows, lifecycle flows, and cluster scoring.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Tabs defaultValue="hidden">
-              <TabsList className="flex flex-wrap gap-2">
-                <TabsTrigger value="hidden">
-                  <Search className="mr-1 h-3.5 w-3.5" /> Hidden
-                </TabsTrigger>
-                <TabsTrigger value="processes">
-                  <Workflow className="mr-1 h-3.5 w-3.5" /> Process flows
-                </TabsTrigger>
-                <TabsTrigger value="lifecycle">
-                  <GitBranch className="mr-1 h-3.5 w-3.5" /> Lifecycle
-                </TabsTrigger>
-                <TabsTrigger value="deps">
-                  <Layers className="mr-1 h-3.5 w-3.5" /> Dependencies
-                </TabsTrigger>
-                <TabsTrigger value="metrics">
-                  <BarChart3 className="mr-1 h-3.5 w-3.5" /> Metrics
-                </TabsTrigger>
-                <TabsTrigger value="evidence">
-                  <BadgeInfo className="mr-1 h-3.5 w-3.5" /> Evidence
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="hidden" className="space-y-2 pt-4">
-                {clusters.length ? (
-                  clusters
-                    .flatMap((c) => (c.hidden_relationships ?? []).map((r) => ({ cluster_id: c.cluster_id, relationship: r })))
-                    .slice(0, 8)
-                    .map((item: any, i: number) => (
-                      <div key={`${item.cluster_id}-${i}`} className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-card p-3">
-                        <Network className="h-4 w-4 text-primary" />
-                        <code className="text-xs text-foreground">{item.relationship.left ?? item.relationship.source ?? "unknown"}</code>
-                        <span className="text-xs text-muted-foreground">-&gt;</span>
-                        <code className="text-xs text-foreground">{item.relationship.right ?? item.relationship.target ?? "unknown"}</code>
-                        <span className="ml-auto text-[11px] text-muted-foreground">{item.relationship.note ?? item.relationship.summary ?? "persisted hidden relationship"}</span>
-                      </div>
-                    ))
-                ) : (
-                  <div className="text-sm text-muted-foreground">No relationship packages found yet.</div>
-                )}
-              </TabsContent>
-
-              <TabsContent value="processes" className="pt-4 text-sm text-muted-foreground">
-                {clusters.length ? (clusters[0].business_process_flows?.map((p: any) => p.summary ?? JSON.stringify(p)) ?? []).join(" | ") : "No process flows available."}
-              </TabsContent>
-
-              <TabsContent value="lifecycle" className="pt-4 text-sm text-muted-foreground">
-                {clusters.length ? (clusters[0].lifecycle_flows?.map((p: any) => p.summary ?? JSON.stringify(p)) ?? []).join(" | ") : "No lifecycle flows available."}
-              </TabsContent>
-
-              <TabsContent value="deps" className="pt-4 text-sm text-muted-foreground">
-                {clusters.length ? (
-                  <div className="space-y-2">
-                    {clusters.slice(0, 5).map((c) => (
-                      <div key={c.cluster_id} className="rounded-md border border-border bg-card p-3">
-                        <div className="text-sm font-medium text-foreground">{c.cluster_summary ?? c.domain_name ?? c.cluster_id}</div>
-                        <CoverageBar value={Math.round((c.cluster_confidence ?? 0) * 100)} className="mt-2" />
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  "No dependencies available."
-                )}
-              </TabsContent>
-
-              <TabsContent value="metrics" className="pt-4">
-                {selectedCluster ? (
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                    <MetricItem label="Cluster confidence" value={`${Math.round((selectedCluster.cluster_confidence ?? 0) * 100)}%`} />
-                    <MetricItem label="Cluster size" value={selectedCluster.cluster_label ?? selectedCluster.cluster_id} />
-                    <MetricItem label="Graph nodes" value={String((graphMetrics as any).node_count ?? 0)} />
-                    <MetricItem label="Graph edges" value={String((graphMetrics as any).edge_count ?? 0)} />
-                    <MetricItem label="Density" value={String((graphMetrics as any).density ?? 0)} />
-                    <MetricItem label="Communities" value={String((graphMetrics as any).community_count ?? 0)} />
-                    <MetricItem label="Execution status" value={selectedCluster.analysis_status ?? "unknown"} />
-                    <MetricItem label="Confidence source" value={String((confidenceDetails as any).ai_confidence ?? selectedCluster.cluster_confidence ?? 0)} />
-                  </div>
-                ) : (
-                  <div className="text-sm text-muted-foreground">No cluster metrics available yet.</div>
-                )}
-              </TabsContent>
-
-              <TabsContent value="evidence" className="space-y-2 pt-4">
-                {evidence.length ? (
-                  evidence.slice(0, 12).map((item: any, index: number) => (
-                    <div key={`${item.source ?? "evidence"}-${index}`} className="rounded-md border border-border bg-card p-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-sm font-medium text-foreground">{item.source ?? "graph"}</div>
-                        <Badge variant="outline">{item.metric ?? item.type ?? "evidence"}</Badge>
-                      </div>
-                      <pre className="mt-2 overflow-x-auto text-xs text-muted-foreground">{JSON.stringify(item, null, 2)}</pre>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-sm text-muted-foreground">No persisted relationship evidence yet.</div>
-                )}
-              </TabsContent>
-            </Tabs>
+            <section className="space-y-2">
+              <div className="text-sm font-semibold text-foreground">Hidden relationships</div>
+              {clusters.length ? clusters.flatMap((c) => (c.hidden_relationships ?? []).map((r) => ({ cluster_id: c.cluster_id, relationship: r }))).slice(0, 8).map((item: any, i: number) => (
+                <div key={`${item.cluster_id}-${i}`} className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-card p-3">
+                  <Network className="h-4 w-4 text-primary" />
+                  <code className="text-xs text-foreground">{item.relationship.left ?? item.relationship.source ?? "unknown"}</code>
+                  <span className="text-xs text-muted-foreground">-&gt;</span>
+                  <code className="text-xs text-foreground">{item.relationship.right ?? item.relationship.target ?? "unknown"}</code>
+                  <span className="ml-auto text-[11px] text-muted-foreground">{item.relationship.note ?? item.relationship.summary ?? "persisted hidden relationship"}</span>
+                </div>
+              )) : <div className="text-sm text-muted-foreground">No relationship packages found yet.</div>}
+            </section>
+            <section className="space-y-2">
+              <div className="text-sm font-semibold text-foreground">Process flows</div>
+              <div className="text-sm text-muted-foreground">{clusters.length ? (clusters[0].business_process_flows?.map((p: any) => p.summary ?? JSON.stringify(p)) ?? []).join(" | ") : "No process flows available."}</div>
+            </section>
+            <section className="space-y-2">
+              <div className="text-sm font-semibold text-foreground">Lifecycle flows</div>
+              <div className="text-sm text-muted-foreground">{clusters.length ? (clusters[0].lifecycle_flows?.map((p: any) => p.summary ?? JSON.stringify(p)) ?? []).join(" | ") : "No lifecycle flows available."}</div>
+            </section>
+            <section className="space-y-2">
+              <div className="text-sm font-semibold text-foreground">Cluster dependencies</div>
+              {clusters.length ? <div className="space-y-2">{clusters.slice(0, 5).map((c) => (<div key={c.cluster_id} className="rounded-md border border-border bg-card p-3"><div className="text-sm font-medium text-foreground">{c.cluster_summary ?? c.domain_name ?? c.cluster_id}</div><CoverageBar value={Math.round((c.cluster_confidence ?? 0) * 100)} className="mt-2" /></div>))}</div> : <div className="text-sm text-muted-foreground">No dependencies available.</div>}
+            </section>
+            <section className="space-y-2">
+              <div className="text-sm font-semibold text-foreground">Cluster metrics</div>
+              {selectedCluster ? <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"><MetricItem label="Cluster confidence" value={`${Math.round((selectedCluster.cluster_confidence ?? 0) * 100)}%`} /><MetricItem label="Cluster size" value={selectedCluster.cluster_label ?? selectedCluster.cluster_id} /><MetricItem label="Graph nodes" value={String((graphMetrics as any).node_count ?? 0)} /><MetricItem label="Graph edges" value={String((graphMetrics as any).edge_count ?? 0)} /><MetricItem label="Density" value={String((graphMetrics as any).density ?? 0)} /><MetricItem label="Communities" value={String((graphMetrics as any).community_count ?? 0)} /><MetricItem label="Execution status" value={selectedCluster.analysis_status ?? "unknown"} /><MetricItem label="Confidence source" value={String((confidenceDetails as any).ai_confidence ?? selectedCluster.cluster_confidence ?? 0)} /></div> : <div className="text-sm text-muted-foreground">No cluster metrics available yet.</div>}
+            </section>
+            <section className="space-y-2">
+              <div className="text-sm font-semibold text-foreground">Evidence</div>
+              {evidence.length ? evidence.slice(0, 12).map((item: any, index: number) => (<div key={`${item.source ?? "evidence"}-${index}`} className="rounded-md border border-border bg-card p-3"><div className="flex flex-wrap items-center gap-2"><div className="text-sm font-medium text-foreground">{item.source ?? "graph"}</div><Badge variant="outline">{item.metric ?? item.type ?? "evidence"}</Badge></div><pre className="mt-2 overflow-x-auto text-xs text-muted-foreground">{JSON.stringify(item, null, 2)}</pre></div>)) : <div className="text-sm text-muted-foreground">No persisted relationship evidence yet.</div>}
+            </section>
           </CardContent>
         </Card>
       </div>
@@ -160,16 +94,9 @@ export function RelationshipsPage() {
               <pre className="max-h-64 overflow-auto rounded-md border border-border bg-muted/20 p-3 text-[11px] leading-5 text-muted-foreground">
                 {JSON.stringify(evidence ?? [], null, 2)}
               </pre>
-              {(confidenceDetails as any)?.trace_id ? (
-                <div className="mt-2">
-                  <a
-                    href={`/jobs?trace_id=${encodeURIComponent((confidenceDetails as any).trace_id)}`}
-                    className="inline-flex items-center gap-1 text-xs text-primary underline-offset-2 hover:underline"
-                  >
-                    Trace drill-down <ExternalLink className="h-3 w-3" />
-                  </a>
-                </div>
-              ) : null}
+              <div className="mt-2">
+                <TraceLink traceId={(confidenceDetails as any)?.trace_id} label="Open trace" className="text-xs" />
+              </div>
             </div>
           </div>
           <div className="space-y-3">

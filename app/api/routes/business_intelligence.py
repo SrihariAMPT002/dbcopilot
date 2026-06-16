@@ -43,24 +43,39 @@ async def generate_business_intelligence(db_id: int, db: AsyncSession = Depends(
 
 @router.get("/opportunities/{db_id}")
 async def get_opportunities(db_id: int, db: AsyncSession = Depends(get_db)) -> dict:
-    return await OpportunityService(db).get_opportunities(db_id)
+    try:
+        return await OpportunityService(db).get_opportunities(db_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.get("/data-products/{db_id}")
 async def get_data_products(db_id: int, db: AsyncSession = Depends(get_db)) -> dict:
-    return await DataProductService(db).get_products(db_id)
+    try:
+        return await DataProductService(db).get_products(db_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.get("/warehouse-designs/{db_id}")
 async def get_warehouse_designs(db_id: int, db: AsyncSession = Depends(get_db)) -> dict:
-    return await WarehouseDesignService(db).get_designs(db_id)
+    try:
+        return await WarehouseDesignService(db).get_designs(db_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.get("/recommendations/{db_id}")
 async def get_recommendations(db_id: int, db: AsyncSession = Depends(get_db)) -> dict:
-    return await RecommendationService(db).get_recommendations(db_id)
+    try:
+        return await RecommendationService(db).get_recommendations(db_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.get("/predictive-readiness/{db_id}")
 async def get_predictive_readiness(db_id: int, db: AsyncSession = Depends(get_db)) -> dict:
-    return await PredictiveReadinessService(db).get_predictive_readiness(db_id)
+    try:
+        return await PredictiveReadinessService(db).get_predictive_readiness(db_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

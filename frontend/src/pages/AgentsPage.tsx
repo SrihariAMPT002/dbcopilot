@@ -13,6 +13,7 @@ import { EmptyState } from "@/components/empty-state";
 import { useDatabaseContext } from "@/context/database-context";
 import { useAgentMemoryHistory, useAgentMemorySearch } from "@/hooks/useAgentMemory";
 import { AgentMemoryService } from "@/services/agentMemoryService";
+import { TraceLink } from "@/components/common/TraceLink";
 
 export function AgentsPage() {
   const { selectedDatabaseId } = useDatabaseContext();
@@ -95,11 +96,7 @@ export function AgentsPage() {
                   <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
                     <span>Trace: {item.trace_id ?? "n/a"}</span>
                     <span>Tags: {item.tags?.length ? item.tags.join(", ") : "none"}</span>
-                    {item.trace_id ? (
-                      <Link to="/jobs" className="text-primary underline-offset-2 hover:underline">
-                        Drill down
-                      </Link>
-                    ) : null}
+                    <TraceLink traceId={item.trace_id} label="Open trace" className="text-[11px]" />
                   </div>
                 </div>
               ))
@@ -144,15 +141,7 @@ export function AgentsPage() {
                       <span>{item.memory_type}</span>
                       <ArrowRight className="h-3 w-3" />
                       <span>Trace {item.trace_id ?? "n/a"}</span>
-                      {item.trace_id ? (
-                        <a
-                          href={`/jobs?trace_id=${encodeURIComponent(item.trace_id)}`}
-                          className="text-primary underline-offset-2 hover:underline"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          Open
-                        </a>
-                      ) : null}
+                      <TraceLink traceId={item.trace_id} label="Open trace" className="text-primary" />
                     </div>
                   </button>
                 ))}
@@ -184,11 +173,7 @@ export function AgentsPage() {
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
                   <span>Stored at: {selectedSearchHit.created_at ?? "n/a"}</span>
-                  {selectedSearchHit.trace_id ? (
-                    <Link to="/jobs" className="text-primary underline-offset-2 hover:underline">
-                      Trace drill-down
-                    </Link>
-                  ) : null}
+                  <TraceLink traceId={selectedSearchHit.trace_id} label="Open trace" />
                 </div>
               </div>
             ) : (

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
@@ -21,15 +21,18 @@ router = APIRouter(prefix="/agent-memory", tags=["Agent Memory"])
 
 @router.post("", response_model=AgentMemoryResponse)
 async def create_memory(request: AgentMemoryCreate, db: AsyncSession = Depends(get_db)) -> AgentMemoryResponse:
-    row = await AgentMemoryService(db).record_memory(
-        database_id=request.database_id,
-        query_text=request.query_text,
-        response_text=request.response_text,
-        context_json=request.context_json,
-        memory_type=request.memory_type,
-        tags=request.tags,
-        trace_id=request.trace_id,
-    )
+    try:
+        row = await AgentMemoryService(db).record_memory(
+            database_id=request.database_id,
+            query_text=request.query_text,
+            response_text=request.response_text,
+            context_json=request.context_json,
+            memory_type=request.memory_type,
+            tags=request.tags,
+            trace_id=request.trace_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return AgentMemoryResponse(
         id=row.id,
         database_id=row.database_id,
@@ -48,13 +51,19 @@ async def create_memory(request: AgentMemoryCreate, db: AsyncSession = Depends(g
 
 @router.get("/{database_id}", response_model=AgentMemoryHistoryResponse)
 async def history(database_id: int, limit: int = 20, db: AsyncSession = Depends(get_db)) -> AgentMemoryHistoryResponse:
-    payload = await AgentMemoryService(db).get_history(database_id, limit=limit)
+    try:
+        payload = await AgentMemoryService(db).get_history(database_id, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return AgentMemoryHistoryResponse(**payload)
 
 
 @router.post("/search", response_model=AgentMemorySearchResponse)
 async def search(request: AgentMemorySearchRequest, db: AsyncSession = Depends(get_db)) -> AgentMemorySearchResponse:
-    payload = await AgentMemoryService(db).search_history(request.database_id, request.query, top_k=request.top_k)
+    try:
+        payload = await AgentMemoryService(db).search_history(request.database_id, request.query, top_k=request.top_k)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return AgentMemorySearchResponse(
         database_id=payload["database_id"],
         query=payload["query"],

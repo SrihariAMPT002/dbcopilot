@@ -8,7 +8,8 @@ import { useRetrievalSearch } from "@/hooks/useRetrievalSearch";
 
 export function RetrievalPlayground({ databaseId }: { databaseId: number }) {
   const [query, setQuery] = useState("");
-  const { data, isFetching } = useRetrievalSearch(databaseId, query, 5);
+  const [submittedQuery, setSubmittedQuery] = useState("");
+  const { data, isFetching } = useRetrievalSearch(databaseId, submittedQuery, 5);
   const hits = data?.results ?? [];
 
   return (
@@ -20,7 +21,7 @@ export function RetrievalPlayground({ databaseId }: { databaseId: number }) {
       <CardContent className="space-y-4">
         <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
           <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search retrieved knowledge..." />
-          <Button size="sm" disabled={isFetching || !query.trim()} className="gap-1.5">
+          <Button size="sm" disabled={isFetching || !query.trim()} className="gap-1.5" onClick={() => setSubmittedQuery(query.trim())}>
             {isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
             Search
           </Button>

@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.metadata import ConnectedDatabase, DatabaseSchema, DatabaseTable, DatabaseType
+from app.models.pipeline_job import PipelineJob
 from app.models.pipeline_job import JobStatus, JobType
 from app.schema_engine.embeddings import EmbeddingEngine
 from app.schema_engine.enricher import SchemaEnricher
@@ -223,8 +224,6 @@ class DatabasePipelineOrchestrator:
         return result.scalars().all()
 
     async def _child_job_id(self, parent_job_id: int, job_type: JobType, table_id: int) -> Optional[int]:
-        from app.models.pipeline_job import PipelineJob
-
         res = await self.db.execute(
             select(PipelineJob.id)
             .where(
@@ -237,8 +236,6 @@ class DatabasePipelineOrchestrator:
         return res.scalar_one_or_none()
 
     async def _stage_job_id(self, parent_job_id: int, stage_name: str) -> Optional[int]:
-        from app.models.pipeline_job import PipelineJob
-
         res = await self.db.execute(
             select(PipelineJob.id)
             .where(
@@ -255,7 +252,6 @@ class DatabasePipelineOrchestrator:
 
     async def _count_failed_children(self, parent_job_id: int) -> int:
         from sqlalchemy import func
-        from app.models.pipeline_job import PipelineJob
 
         res = await self.db.execute(
             select(func.count(PipelineJob.id))

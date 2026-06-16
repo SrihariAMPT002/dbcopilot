@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity, Download, EyeOff, Filter, ShieldAlert, ShieldCheck, ExternalLink } from "lucide-react";
+import { Activity, Download, EyeOff, Filter, ShieldAlert, ShieldCheck } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { MetricCard } from "@/components/metric-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CoverageBar } from "@/components/coverage-bar";
+import { TraceLink } from "@/components/common/TraceLink";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
@@ -20,6 +21,7 @@ type Row = {
   risk: "high" | "medium" | "low";
   confidence: number;
   purpose: string;
+  aiReasoning: string;
   rowEvidence: Array<Record<string, unknown>>;
   ruleMatches: Array<Record<string, unknown>>;
   samplePatterns: Array<Record<string, unknown> | string>;
@@ -60,6 +62,7 @@ export function GovernancePage() {
           risk: (c.risk_level as "high" | "medium" | "low") ?? "low",
           confidence: c.confidence_score ?? 0,
           purpose: c.business_meaning ?? pkg.business_purpose ?? "",
+          aiReasoning: c.governance_reasoning ?? "",
           rowEvidence: pkg.evidence ?? [],
           ruleMatches: pkg.rule_matches ?? [],
           samplePatterns: pkg.sample_patterns ?? [],
@@ -84,6 +87,16 @@ export function GovernancePage() {
     ? (packages.reduce((a, p) => a + (p.confidence_score ?? 0), 0) / packages.length).toFixed(2)
     : "0.00";
 
+  const exportPackage = () => {
+    const blob = new Blob([JSON.stringify({ summary, packages, evidence: evidence ?? null }, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `governance-${dbId}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -95,11 +108,11 @@ export function GovernancePage() {
             <Badge variant="outline" className="text-[11px]">
               db {dbId}
             </Badge>
-            <Button variant="outline" size="sm" className="gap-1.5">
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => document.querySelector('table')?.scrollIntoView({ behavior: "smooth", block: "start" })}>
               <Filter className="h-3.5 w-3.5" />
               Filter
             </Button>
-            <Button variant="outline" size="sm" className="gap-1.5">
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={exportPackage}>
               <Download className="h-3.5 w-3.5" />
               Export package
             </Button>
@@ -266,18 +279,9 @@ export function GovernancePage() {
                   <div className="font-medium tabular-nums">{Math.round(evidence?.latency_ms ?? selectedPackage?.latency_ms ?? 0)} ms</div>
                 </div>
               </div>
-              {(selectedPackage?.trace_id || evidence?.evidence?.[0]) && (
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  {selectedPackage?.trace_id ? (
-                    <a
-                      href={`/jobs?trace_id=${encodeURIComponent(selectedPackage.trace_id)}`}
-                      className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline"
-                    >
-                      Trace drill-down <ExternalLink className="h-3 w-3" />
-                    </a>
-                  ) : null}
-                </div>
-              )}
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <TraceLink traceId={selectedPackage?.trace_id} label="Open trace" />
+              </div>
             </div>
 
             <div>
@@ -322,40 +326,117 @@ export function GovernancePage() {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Governance traceability</CardTitle>
-          <CardDescription>Prompt telemetry, evidence, and column-level reasoning for the selected governance package.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {selectedPackage ? (
-            <>
-              <div className="grid gap-3 md:grid-cols-4">
-                <MetricCard label="Prompt tokens" value={String(selectedPackage.prompt_tokens ?? 0)} icon={Activity} tone="info" />
-                <MetricCard label="Completion tokens" value={String(selectedPackage.completion_tokens ?? 0)} icon={Activity} tone="default" />
-                <MetricCard label="Reasoning tokens" value={String(selectedPackage.reasoning_tokens ?? 0)} icon={Activity} tone="warning" />
-                <MetricCard label="Latency" value={`${Math.round(selectedPackage.latency_ms ?? 0)} ms`} icon={Activity} tone="success" />
+      <section className="grid gap-4 xl:grid-cols-3">
+        <Card className="xl:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-base">Column reasoning</CardTitle>
+            <CardDescription>Structured AI reasoning and evidence for the selected governance package.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {selectedPackage ? (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/40 hover:bg-muted/40">
+                      <TableHead>Column</TableHead>
+                      <TableHead>Classification</TableHead>
+                      <TableHead>Risk</TableHead>
+                      <TableHead>Reasoning</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.filter((row) => row.tableId === selectedPackage.table_id).length ? (
+                      rows
+                        .filter((row) => row.tableId === selectedPackage.table_id)
+                        .map((row) => (
+                          <TableRow key={`${row.table}.${row.col}`}>
+                            <TableCell>
+                              <span className="text-muted-foreground">{row.table}.</span>
+                              <span className="font-medium text-foreground">{row.col}</span>
+                            </TableCell>
+                            <TableCell>{row.classification}</TableCell>
+                            <TableCell>
+                              <RiskBadge risk={row.risk} />
+                            </TableCell>
+                            <TableCell className="max-w-[700px] text-sm text-muted-foreground">
+                              <div className="space-y-2">
+                                <div>{row.aiReasoning || "No AI reasoning captured."}</div>
+                                <div className="flex flex-wrap gap-2">
+                                  {(row.rowEvidence ?? []).slice(0, 3).map((item, index) => (
+                                    <Badge key={`${row.table}-${row.col}-${index}`} variant="outline" className="text-[10px]">
+                                      {String(item.evidence_type ?? item.type ?? item.reason ?? "evidence")}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={4} className="text-sm text-muted-foreground">
+                          No AI reasoning available for the selected package.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
               </div>
-              <div className="grid gap-3 lg:grid-cols-2">
+            ) : (
+              <div className="text-sm text-muted-foreground">No governance package selected.</div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Evidence summary</CardTitle>
+            <CardDescription>Telemetry and raw evidence distilled into compact cards.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {selectedPackage ? (
+              <>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-1">
+                  <MetricCard label="Prompt tokens" value={String(selectedPackage.prompt_tokens ?? 0)} icon={Activity} tone="info" />
+                  <MetricCard label="Completion tokens" value={String(selectedPackage.completion_tokens ?? 0)} icon={Activity} tone="default" />
+                  <MetricCard label="Reasoning tokens" value={String(selectedPackage.reasoning_tokens ?? 0)} icon={Activity} tone="warning" />
+                  <MetricCard label="Latency" value={`${Math.round(selectedPackage.latency_ms ?? 0)} ms`} icon={Activity} tone="success" />
+                </div>
                 <div className="space-y-2">
                   <div className="text-xs uppercase tracking-wider text-muted-foreground">Rule matches</div>
-                  <pre className="max-h-56 overflow-auto rounded-md border border-border bg-muted/20 p-3 text-[11px] leading-5 text-muted-foreground">
-                    {JSON.stringify(selectedPackage.rule_matches ?? [], null, 2)}
-                  </pre>
+                  <div className="flex flex-wrap gap-2">
+                    {(selectedPackage.rule_matches ?? []).length ? (
+                      selectedPackage.rule_matches.slice(0, 12).map((item, index) => (
+                        <Badge key={`rule-${index}`} variant="outline" className="text-[10px]">
+                          {String((item as Record<string, unknown>).rule_name ?? (item as Record<string, unknown>).pattern ?? (item as Record<string, unknown>).name ?? "rule")}
+                        </Badge>
+                      ))
+                    ) : (
+                      <div className="text-sm text-muted-foreground">No rule matches persisted.</div>
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-2">
-                  <div className="text-xs uppercase tracking-wider text-muted-foreground">Evidence payload</div>
-                  <pre className="max-h-56 overflow-auto rounded-md border border-border bg-muted/20 p-3 text-[11px] leading-5 text-muted-foreground">
-                    {JSON.stringify(selectedPackage.evidence ?? [], null, 2)}
-                  </pre>
+                  <div className="text-xs uppercase tracking-wider text-muted-foreground">Sample patterns</div>
+                  <div className="space-y-2">
+                    {(selectedPackage.sample_patterns ?? []).length ? (
+                      selectedPackage.sample_patterns.slice(0, 6).map((item, index) => (
+                        <div key={`sample-${index}`} className="rounded-md border border-border bg-card p-3 text-xs text-muted-foreground">
+                          {typeof item === "string" ? item : JSON.stringify(item, null, 2)}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-sm text-muted-foreground">No sample patterns persisted.</div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </>
-          ) : (
-            <div className="text-sm text-muted-foreground">No governance package selected.</div>
-          )}
-        </CardContent>
-      </Card>
+              </>
+            ) : (
+              <div className="text-sm text-muted-foreground">No governance package selected.</div>
+            )}
+          </CardContent>
+        </Card>
+      </section>
     </div>
   );
 }

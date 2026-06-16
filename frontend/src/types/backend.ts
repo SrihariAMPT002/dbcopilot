@@ -8,8 +8,13 @@ export type Connection = {
   username: string;
   ssl_enabled?: boolean;
   status: string;
+  lifecycle_status?: string;
   last_sync_at?: string | null;
   created_at?: string;
+  disconnected_at?: string | null;
+  archived_at?: string | null;
+  deleted_at?: string | null;
+  deletion_summary?: string | null;
   schema_count?: number;
   table_count?: number;
   last_error?: string | null;
@@ -48,6 +53,7 @@ export type DatabaseSummary = {
   database_name: string;
   db_type: string;
   status: string;
+  lifecycle_status?: string | null;
   connected_at?: string | null;
 };
 
@@ -55,6 +61,7 @@ export type DefaultDatabaseResponse = {
   database_id?: number | null;
   database_name?: string | null;
   db_type?: string | null;
+  lifecycle_status?: string | null;
   connected_at?: string | null;
 };
 
@@ -873,6 +880,23 @@ export type PromptBudgetResponse = {
   prompts: PromptBudgetItem[];
 };
 
+export type ConnectionLifecycleResponse = {
+  database_id: number;
+  database_name: string;
+  lifecycle_status: string;
+  message: string;
+  preserved_resources: Record<string, number>;
+  deleted_resources?: Record<string, unknown>;
+  trace_id?: string | null;
+};
+
+export type ConnectionLifecycleDeleteRequest = {
+  delete_metadata?: boolean;
+  delete_packages?: boolean;
+  delete_embeddings?: boolean;
+  delete_observability?: boolean;
+};
+
 export type PipelineJob = {
   id: number;
   job_type: string;
@@ -955,4 +979,47 @@ export type StageProgressResponse = {
   stages: StageProgressItem[];
   graph: Array<{ stage: string; depends_on: string[] }>;
   message: string;
+};
+
+export type ObservabilityTraceItem = {
+  source_type: string;
+  trace_id?: string | null;
+  prompt_id?: string | null;
+  prompt_version?: string | null;
+  model_name?: string | null;
+  database_id?: number | null;
+  module?: string | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  reasoning_tokens: number;
+  latency_ms: number;
+  finish_reason?: string | null;
+  execution_status?: string | null;
+  estimated_cost_usd: number;
+  created_at?: string | null;
+  details: Record<string, unknown>;
+};
+
+export type ObservabilityTraceListResponse = {
+  database_id?: number | null;
+  trace_id?: string | null;
+  traces: ObservabilityTraceItem[];
+};
+
+export type ObservabilityTraceDetailResponse = {
+  trace_id: string;
+  prompt_id?: string | null;
+  prompt_version?: string | null;
+  model_name?: string | null;
+  latency_ms: number;
+  finish_reason?: string | null;
+  execution_status?: string | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  reasoning_tokens: number;
+  estimated_cost_usd: number;
+  prompt_versions: Array<Record<string, unknown>>;
+  pipeline_executions: Array<Record<string, unknown>>;
+  stage_executions: Array<Record<string, unknown>>;
+  prompt_observability: Array<Record<string, unknown>>;
 };

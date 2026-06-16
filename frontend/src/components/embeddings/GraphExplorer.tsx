@@ -8,7 +8,8 @@ import { useRetrievalGraph } from "@/hooks/useRetrievalSearch";
 
 export function GraphExplorer({ databaseId }: { databaseId: number }) {
   const [query, setQuery] = useState("");
-  const { data, isFetching } = useRetrievalGraph(databaseId, query, 2, 5);
+  const [submittedQuery, setSubmittedQuery] = useState("");
+  const { data, isFetching } = useRetrievalGraph(databaseId, submittedQuery, 2, 5);
   const neighbors = data?.neighbors ?? [];
   const paths = data?.shortest_paths ?? [];
 
@@ -21,7 +22,7 @@ export function GraphExplorer({ databaseId }: { databaseId: number }) {
       <CardContent className="space-y-4">
         <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
           <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search graph context..." />
-          <Button size="sm" disabled={isFetching || !query.trim()} className="gap-1.5">
+          <Button size="sm" disabled={isFetching || !query.trim()} className="gap-1.5" onClick={() => setSubmittedQuery(query.trim())}>
             {isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <GitBranch className="h-3.5 w-3.5" />}
             Explore
           </Button>

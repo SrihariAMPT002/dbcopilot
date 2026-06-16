@@ -11,6 +11,7 @@ import {
   Sparkles,
   Gauge,
   Activity,
+  ShieldAlert,
   Bot,
   Settings,
   type LucideIcon,
@@ -57,6 +58,7 @@ export const navGroups: NavGroup[] = [
     label: "Platform",
     items: [
       { title: "Jobs & Operations", to: "/jobs", icon: Activity },
+      { title: "AI Observability", to: "/observability", icon: ShieldAlert },
       { title: "Agents", to: "/agents", icon: Bot },
       { title: "Settings", to: "/settings", icon: Settings },
     ],

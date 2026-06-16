@@ -54,6 +54,13 @@ class ConnectionStatus(str, enum.Enum):
     testing = "testing"
 
 
+class DatabaseLifecycleStatus(str, enum.Enum):
+    active = "ACTIVE"
+    disconnected = "DISCONNECTED"
+    archived = "ARCHIVED"
+    deleted = "DELETED"
+
+
 class SyncStatus(str, enum.Enum):
     pending = "pending"
     running = "running"
@@ -109,7 +116,18 @@ class ConnectedDatabase(Base):
         nullable=False,
         index=True,
     )
+    lifecycle_status: Mapped[DatabaseLifecycleStatus] = mapped_column(
+        Enum(DatabaseLifecycleStatus, name="database_lifecycle_status_enum"),
+        default=DatabaseLifecycleStatus.active,
+        nullable=False,
+        index=True,
+    )
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    disconnected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    disconnected_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    deletion_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Audit
     created_at: Mapped[datetime] = mapped_column(
@@ -138,9 +156,38 @@ class ConnectedDatabase(Base):
         cascade="all, delete-orphan",
         lazy="raise",
     )
+    lifecycle_events: Mapped[List["DatabaseLifecycleEvent"]] = relationship(
+        "DatabaseLifecycleEvent",
+        back_populates="connected_database",
+        cascade="all, delete-orphan",
+        lazy="raise",
+    )
 
     def __repr__(self) -> str:
         return f"<ConnectedDatabase id={self.id} name={self.name!r} type={self.db_type}>"
+
+
+class DatabaseLifecycleEvent(Base):
+    """Audit trail for database lifecycle transitions."""
+
+    __tablename__ = "database_lifecycle_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    connected_db_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("connected_databases.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    actor: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    connected_database: Mapped["ConnectedDatabase"] = relationship(
+        "ConnectedDatabase", back_populates="lifecycle_events", lazy="raise"
+    )
 
 
 class DatabaseSchema(Base):

@@ -709,10 +709,14 @@ class PromptStudioService:
         return list(result.scalars().all())
 
     async def _fetch_kpi_summary(self, database_id: int) -> dict[str, Any]:
-        result = await self.db.execute(
-            select(KPIIntelligence).where(KPIIntelligence.database_id == database_id)
-        )
-        rows = list(result.scalars().all())
+        try:
+            result = await self.db.execute(
+                select(KPIIntelligence).where(KPIIntelligence.database_id == database_id)
+            )
+            rows = list(result.scalars().all())
+        except Exception as exc:
+            logger.warning("KPI summary unavailable for database_id=%s: %s", database_id, exc)
+            return {"kpi_count": 0, "kpis": [], "unavailable": True}
         return {
             "kpi_count": len(rows),
             "kpis": [

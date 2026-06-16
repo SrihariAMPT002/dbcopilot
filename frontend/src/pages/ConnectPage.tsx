@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, ChevronRight, Database, Lock, ServerCog, ShieldCheck } from "lucide-react";
+import { CheckCircle2, ChevronRight, Database, Lock } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,6 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/empty-state";
 import { connectionsApi } from "@/api/connections";
 import type { ConnectionRequest, TestConnectionResponse } from "@/types/backend";
@@ -47,7 +46,6 @@ export function ConnectPage() {
   const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
   const [message, setMessage] = useState<string>("");
   const dbMeta = dbDefaults[dbLabel];
-  const canEditPort = dbMeta.allowPortEdit;
 
   const payload: ConnectionRequest = useMemo(
     () => ({
@@ -60,7 +58,7 @@ export function ConnectPage() {
       password: form.password,
       ssl_enabled: form.ssl_enabled,
     }),
-    [dbMeta.port, dbMeta.type, form],
+    [dbMeta.type, form],
   );
 
   const testMutation = useMutation({
@@ -94,8 +92,12 @@ export function ConnectPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader eyebrow="Sources" title="Connect a database" description="Add a source to begin metadata sync, governance classification, and AI intelligence generation." />
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
+      <PageHeader
+        eyebrow="Sources"
+        title="Connect a database"
+        description="Add a source to begin metadata sync, governance classification, and AI intelligence generation."
+      />
+      <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Choose engine</CardTitle>
@@ -109,9 +111,9 @@ export function ConnectPage() {
                   type="button"
                   onClick={() => {
                     const next = e.id as keyof typeof dbDefaults;
-    setDbLabel(next);
-    setForm((p) => ({ ...p, port: dbDefaults[next].port }));
-  }}
+                    setDbLabel(next);
+                    setForm((p) => ({ ...p, port: dbDefaults[next].port }));
+                  }}
                   className={cn(
                     "relative flex flex-col items-start gap-2 rounded-lg border bg-card p-3 text-left transition hover:border-primary/40",
                     dbLabel === e.id ? "border-primary/60 shadow-[var(--shadow-md)]" : "border-border",
@@ -124,48 +126,43 @@ export function ConnectPage() {
                     <div className="text-sm font-medium text-foreground">{e.id}</div>
                     <div className="text-[11px] text-muted-foreground">{e.desc}</div>
                   </div>
-                  {dbLabel === e.id && <CheckCircle2 className="absolute right-2 top-2 h-3.5 w-3.5 text-primary" />}
+                  {dbLabel === e.id ? <CheckCircle2 className="absolute right-2 top-2 h-3.5 w-3.5 text-primary" /> : null}
                 </button>
               ))}
             </div>
+
             <div className="mt-6 space-y-4">
-              <Tabs defaultValue="connection">
-                <TabsList>
-                  <TabsTrigger value="connection">Connection</TabsTrigger>
-                  <TabsTrigger value="security">Security</TabsTrigger>
-                  <TabsTrigger value="sync">Sync schedule</TabsTrigger>
-                </TabsList>
-                <TabsContent value="connection" className="space-y-4 pt-4">
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <Field label="Connection Name" value={form.name} onChange={(v) => setForm((p) => ({ ...p, name: v }))} placeholder="production-analytics" />
-                    <Field label="Host" value={form.host} onChange={(v) => setForm((p) => ({ ...p, host: v }))} placeholder="localhost or IP" />
-                    <Field label="Database Name" value={form.database_name} onChange={(v) => setForm((p) => ({ ...p, database_name: v }))} placeholder="my_database" />
-                    <Field label="Username" value={form.username} onChange={(v) => setForm((p) => ({ ...p, username: v }))} placeholder="db_user" />
-                    <Field label="Password" value={form.password} onChange={(v) => setForm((p) => ({ ...p, password: v }))} placeholder="••••••••" type="password" />
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-medium text-muted-foreground">Port</Label>
-                      <Input
-                        value={form.port}
-                        onChange={(e) => setForm((p) => ({ ...p, port: Number(e.target.value) || 0 }))}
-                        disabled={!canEditPort}
-                        className="h-9"
-                      />
-                    </div>
+              <section className="space-y-3">
+                <div className="text-sm font-semibold text-foreground">Connection</div>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field label="Connection Name" value={form.name} onChange={(v) => setForm((p) => ({ ...p, name: v }))} placeholder="production-analytics" />
+                  <Field label="Host" value={form.host} onChange={(v) => setForm((p) => ({ ...p, host: v }))} placeholder="localhost or IP" />
+                  <Field label="Database Name" value={form.database_name} onChange={(v) => setForm((p) => ({ ...p, database_name: v }))} placeholder="my_database" />
+                  <Field label="Username" value={form.username} onChange={(v) => setForm((p) => ({ ...p, username: v }))} placeholder="db_user" />
+                  <Field label="Password" value={form.password} onChange={(v) => setForm((p) => ({ ...p, password: v }))} placeholder="••••••••" type="password" />
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium text-muted-foreground">Port</Label>
+                    <Input value={form.port} onChange={(e) => setForm((p) => ({ ...p, port: Number(e.target.value) || 0 }))} disabled={!dbMeta.allowPortEdit} className="h-9" />
                   </div>
-                </TabsContent>
-                <TabsContent value="security" className="space-y-4 pt-4">
-                  <ToggleRow title="Enable SSL/TLS" desc="Use encrypted transport if the database supports it." checked={form.ssl_enabled} onCheckedChange={(checked) => setForm((p) => ({ ...p, ssl_enabled: checked }))} />
-                  <ToggleRow title="Mask sample values" desc="Redact preview rows for PII-classified columns." checked />
-                  <ToggleRow title="Use private connector" desc="Route traffic through your VPC connector." checked={false} />
-                </TabsContent>
-                <TabsContent value="sync" className="space-y-4 pt-4">
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <Field label="Sync cadence" value="" onChange={() => {}} placeholder="every 6 hours" />
-                    <Field label="Concurrency" value="" onChange={() => {}} placeholder="8" />
-                  </div>
-                  <ToggleRow title="Auto-generate AI packages after sync" desc="Run Governance, Semantics, Relationships, KPI, and Embeddings." checked />
-                </TabsContent>
-              </Tabs>
+                </div>
+              </section>
+
+              <section className="space-y-3">
+                <div className="text-sm font-semibold text-foreground">Security</div>
+                <ToggleRow title="Enable SSL/TLS" desc="Use encrypted transport if the database supports it." checked={form.ssl_enabled} onCheckedChange={(checked) => setForm((p) => ({ ...p, ssl_enabled: checked }))} />
+                <ToggleRow title="Mask sample values" desc="Redact preview rows for PII-classified columns." checked />
+                <ToggleRow title="Use private connector" desc="Route traffic through your VPC connector." checked={false} />
+              </section>
+
+              <section className="space-y-3">
+                <div className="text-sm font-semibold text-foreground">Sync schedule</div>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field label="Sync cadence" value="" onChange={() => {}} placeholder="every 6 hours" />
+                  <Field label="Concurrency" value="" onChange={() => {}} placeholder="8" />
+                </div>
+                <ToggleRow title="Auto-generate AI packages after sync" desc="Run Governance, Semantics, Relationships, KPI, and Embeddings." checked />
+              </section>
+
               <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-4">
                 <Button variant="outline" size="sm" onClick={() => testMutation.mutate()} disabled={testMutation.isPending}>
                   Test Connection
@@ -191,37 +188,56 @@ export function ConnectPage() {
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">What gets generated</CardTitle>
-            <CardDescription>After a successful sync, DBCopilot produces:</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            {[
-              "Metadata catalog (schemas, tables, columns, PK/FK, indexes)",
-              "Governance package with PII risk and column semantics",
-              "Semantic package with business domain and glossary",
-              "Relationship clusters and entity graph",
-              "KPI catalog with measures, dimensions, lineage",
-              "Embeddings into Qdrant for retrieval",
-              "Prompt Studio context bundles (RAG, Text-to-SQL, Agent)",
-            ].map((t) => (
-              <div key={t} className="flex items-start gap-2 text-muted-foreground">
-                <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--success)]" />
-                <span>{t}</span>
+
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">What gets generated</CardTitle>
+              <CardDescription>After a successful sync, DBCopilot produces:</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              {[
+                "Metadata catalog (schemas, tables, columns, PK/FK, indexes)",
+                "Governance package with PII risk and column semantics",
+                "Semantic package with business domain and glossary",
+                "Relationship clusters and entity graph",
+                "KPI catalog with measures, dimensions, lineage",
+                "Embeddings into Qdrant for retrieval",
+                "Prompt Studio context bundles (RAG, Text-to-SQL, Agent)",
+              ].map((t) => (
+                <div key={t} className="flex items-start gap-2 text-muted-foreground">
+                  <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--success)]" />
+                  <span>{t}</span>
+                </div>
+              ))}
+              <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+                <div className="mb-1 flex items-center gap-1.5 font-medium text-foreground">
+                  <Badge variant="outline" className="border-[var(--info)]/40 bg-[var(--info)]/10 text-[var(--info)]">
+                    Read-only
+                  </Badge>
+                </div>
+                DBCopilot only requires read access - no DDL or data modification is ever issued against your source.
               </div>
-            ))}
-            <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
-              <div className="mb-1 flex items-center gap-1.5 font-medium text-foreground">
-                <Badge variant="outline" className="border-[var(--info)]/40 bg-[var(--info)]/10 text-[var(--info)]">
-                  Read-only
-                </Badge>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Why it matters</CardTitle>
+              <CardDescription>Set up a source once, then let the package-first pipeline run automatically.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm text-muted-foreground">
+              <div className="rounded-md border border-border bg-card p-3">
+                <div className="text-sm font-medium text-foreground">Schema discovery</div>
+                <div className="mt-1">The explorer, governance, semantics, and downstream intelligence modules all consume the same source.</div>
               </div>
-              DBCopilot only requires read access - no DDL or data modification is ever issued against your source.
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+              <div className="rounded-md border border-border bg-card p-3">
+                <div className="text-sm font-medium text-foreground">AI package generation</div>
+                <div className="mt-1">Governance, semantics, relationships, KPI, prompts, embeddings, and readiness are all triggered from sync.</div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
     </div>
   );
 }

@@ -1,18 +1,16 @@
 import { Fragment, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Filter, Clock, Hash, Cpu, Activity, ChevronRight, ChevronDown } from "lucide-react";
+import { RefreshCw, Filter, Clock, Hash, Cpu, Activity, ChevronRight, ChevronDown, ArrowRight } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { StatusBadge, type StatusKind } from "@/components/status-badge";
+import { StatusBadge } from "@/components/status-badge";
 import { CoverageBar } from "@/components/coverage-bar";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { EmptyState } from "@/components/empty-state";
-import { connectionsApi } from "@/api/connections";
 import { jobsApi } from "@/api/jobs";
 import { metadataApi } from "@/api/metadata";
 import type { PipelineJob } from "@/types/backend";
@@ -20,6 +18,7 @@ import { useDatabaseContext } from "@/context/database-context";
 import { useStageProgress } from "@/hooks/useJobs";
 import { usePipelineExecutions, useStageExecutions } from "@/hooks/usePipelineExecutions";
 import { useBusinessInsights } from "@/hooks/useBusinessInsights";
+import { TraceLink } from "@/components/common/TraceLink";
 
 const normalizeJobStatus = (status?: string | null) => {
   const value = (status ?? "unknown").trim().toLowerCase();
@@ -34,8 +33,7 @@ const normalizeJobStatus = (status?: string | null) => {
 
 export function JobsPage() {
   const queryClient = useQueryClient();
-  const { data: connections = [] } = useQuery({ queryKey: ["connections"], queryFn: connectionsApi.list });
-  const { selectedDatabaseId: selectedDb, setSelectedDatabaseId } = useDatabaseContext();
+  const { selectedDatabaseId: selectedDb } = useDatabaseContext();
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [jobTypeFilter, setJobTypeFilter] = useState("ALL");
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -76,6 +74,19 @@ export function JobsPage() {
   const { data: stageExecutions } = useStageExecutions(selectedDb, pipelineExecutions?.executions?.[0]?.id ?? null, 20);
   const insights = businessInsights?.insights ?? [];
 
+  const stageCards =
+    stageProgress?.stages?.length
+      ? stageProgress.stages
+      : ["SYNC", "GOVERNANCE", "SEMANTIC_ENRICHMENT", "RELATIONSHIP_GRAPH", "KPI", "EMBEDDINGS", "PROMPT_GENERATION"].map((stage) => ({
+          stage,
+          status: "pending",
+          progress_percentage: 0,
+          retries: 0,
+        }));
+
+  const statusFilters = ["ALL", "QUEUED", "RUNNING", "FAILED", "COMPLETED", "CANCELLED"];
+  const typeFilters = ["ALL", "SYNC", "SEMANTIC_ENRICHMENT", "EMBEDDINGS", "RELATIONSHIP_GRAPH", "PROMPT_GENERATION", "READINESS", "ARTIFACT_PACKAGING", "AI_CONTEXT"];
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -84,8 +95,13 @@ export function JobsPage() {
         description="All sync jobs, AI jobs, and pipeline executions with trace IDs, model usage, and error logs."
         actions={
           <>
-            <Button variant="outline" size="sm" className="gap-1.5">
-              <Filter className="h-3.5 w-3.5" /> Filter
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => document.getElementById("job-filters")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            >
+              <Filter className="h-3.5 w-3.5" /> Filters
             </Button>
             <Button variant="outline" size="sm" className="gap-1.5" onClick={() => queryClient.invalidateQueries({ queryKey: ["jobs"] })}>
               <RefreshCw className="h-3.5 w-3.5" /> Refresh
@@ -93,20 +109,23 @@ export function JobsPage() {
           </>
         }
       />
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+
+      <section className="grid gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">Active pipeline</CardTitle>
-            <CardDescription>Current execution across sync, governance, semantics, relationships, KPI, and embeddings.</CardDescription>
+            <CardDescription>Current execution across sync, governance, semantics, relationships, KPI, embeddings, and prompt generation.</CardDescription>
           </CardHeader>
           <CardContent>
             {dbJobs.length ? (
               <ol className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-                {(stageProgress?.stages ?? ["SYNC", "GOVERNANCE", "SEMANTIC_ENRICHMENT", "RELATIONSHIP_GRAPH", "KPI", "EMBEDDINGS", "PROMPT_GENERATION"].map((stage) => ({ stage, status: "pending", progress_percentage: 0, retries: 0 }))).map((item) => (
+                {stageCards.map((item: any) => (
                   <li key={item.stage} className="rounded-md border border-border bg-card p-3">
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <span className="truncate text-xs font-medium text-foreground">{item.stage.replaceAll("_", " ")}</span>
-                      <StatusBadge status={item.status} />
+                      <Badge variant="outline" className="text-[10px] uppercase">
+                        {item.status}
+                      </Badge>
                     </div>
                     <CoverageBar value={item.progress_percentage} />
                   </li>
@@ -117,6 +136,7 @@ export function JobsPage() {
             )}
           </CardContent>
         </Card>
+
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Business insights</CardTitle>
@@ -129,20 +149,14 @@ export function JobsPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-foreground">{insight.insight_text}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        Confidence: {Math.round((insight.confidence_score ?? 0) * 100)}%
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        Trace: {insight.trace_id ?? "n/a"}
-                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">Confidence: {Math.round((insight.confidence_score ?? 0) * 100)}%</div>
+                      <div className="mt-1 text-xs text-muted-foreground">Trace: {insight.trace_id ?? "n/a"}</div>
                     </div>
                     <Badge variant="outline" className="text-[10px] uppercase">
                       {insight.impact_level ?? "unknown"}
                     </Badge>
                   </div>
-                  <pre className="mt-2 max-h-24 overflow-auto rounded bg-muted/40 p-2 text-[10px] text-muted-foreground">
-                    {JSON.stringify(insight.evidence ?? [], null, 2)}
-                  </pre>
+                  <pre className="mt-2 max-h-24 overflow-auto rounded bg-muted/40 p-2 text-[10px] text-muted-foreground">{JSON.stringify(insight.evidence ?? [], null, 2)}</pre>
                 </div>
               ))
             ) : (
@@ -151,7 +165,8 @@ export function JobsPage() {
           </CardContent>
         </Card>
       </section>
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+
+      <section className="grid gap-4 xl:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Pipeline executions</CardTitle>
@@ -163,11 +178,12 @@ export function JobsPage() {
                 <div key={execution.id} className="rounded-md border border-border bg-card p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-sm font-medium text-foreground">Execution #{execution.id}</div>
-                    <StatusBadge status={normalizeJobStatus(execution.status)} />
+                    <Badge variant="outline" className="text-[10px] uppercase">
+                      {normalizeJobStatus(execution.status)}
+                    </Badge>
                   </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    Trace: {execution.trace_id ?? "n/a"} · Model: {execution.model_name ?? "n/a"}
-                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">Trace: {execution.trace_id ?? "n/a"} · Model: {execution.model_name ?? "n/a"}</div>
+                  <TraceLink traceId={execution.trace_id} label="Open trace" className="mt-2 text-[11px]" />
                   <div className="mt-1 text-xs text-muted-foreground">
                     Started: {execution.start_time ?? "n/a"} · Duration: {execution.duration_seconds?.toFixed(2) ?? "n/a"}s
                   </div>
@@ -178,6 +194,7 @@ export function JobsPage() {
             )}
           </CardContent>
         </Card>
+
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Stage executions</CardTitle>
@@ -189,11 +206,14 @@ export function JobsPage() {
                 <div key={stage.id} className="rounded-md border border-border bg-card p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-sm font-medium text-foreground">{stage.stage_name}</div>
-                    <StatusBadge status={normalizeJobStatus(stage.status)} />
+                    <Badge variant="outline" className="text-[10px] uppercase">
+                      {normalizeJobStatus(stage.status)}
+                    </Badge>
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
                     Execution order: {stage.execution_order ?? "n/a"} · Trace: {stage.trace_id ?? "n/a"}
                   </div>
+                  <TraceLink traceId={stage.trace_id} label="Open trace" className="mt-2 text-[11px]" />
                   <div className="mt-1 text-xs text-muted-foreground">Error: {stage.error_message ?? "none"}</div>
                 </div>
               ))
@@ -203,118 +223,138 @@ export function JobsPage() {
           </CardContent>
         </Card>
       </section>
-      <Card>
-        <CardHeader className="flex flex-row items-end justify-between gap-3 space-y-0">
-          <div>
-            <CardTitle className="text-base">Job history</CardTitle>
-            <CardDescription>Click a job to inspect trace, prompt, model, and logs.</CardDescription>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <Input value={String(selectedDb ?? "")} onChange={(e) => setSelectedDatabaseId(Number(e.target.value) || null)} placeholder="Database id" className="h-9 w-32" />
-            <Input value={String(selectedJobId)} onChange={(e) => setSelectedJobId(Number(e.target.value) || 1)} placeholder="Job ID" className="h-9 w-24" />
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="mb-3 flex flex-wrap gap-2">
-            {["ALL", "QUEUED", "RUNNING", "FAILED", "COMPLETED", "CANCELLED"].map((s) => (
-              <Button key={s} variant={statusFilter === s ? "default" : "outline"} size="sm" onClick={() => setStatusFilter(s)}>
-                {s}
-              </Button>
-            ))}
-          </div>
-          <div className="mb-3 flex flex-wrap gap-2">
-            {["ALL", "SYNC", "SEMANTIC_ENRICHMENT", "EMBEDDINGS", "RELATIONSHIP_GRAPH", "PROMPT_GENERATION", "READINESS", "ARTIFACT_PACKAGING", "AI_CONTEXT"].map((s) => (
-              <Button key={s} variant={jobTypeFilter === s ? "default" : "outline"} size="sm" onClick={() => setJobTypeFilter(s)}>
-                {s}
-              </Button>
-            ))}
-          </div>
-          <Tabs defaultValue="all">
-            <TabsList>
-              <TabsTrigger value="all">All</TabsTrigger>
-              <TabsTrigger value="sync">Sync</TabsTrigger>
-              <TabsTrigger value="ai">AI</TabsTrigger>
-              <TabsTrigger value="pipeline">Pipelines</TabsTrigger>
-            </TabsList>
-            <TabsContent value="all" className="pt-4">
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/40 hover:bg-muted/40">
-                      <TableHead className="w-8"></TableHead>
-                      <TableHead>Job</TableHead>
-                      <TableHead>Source</TableHead>
-                      <TableHead className="min-w-[140px]">Progress</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Duration</TableHead>
-                      <TableHead>Retries</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {dbJobs.length ? (
-                      dbJobs.map((j) => {
-                        const isOpen = expanded === j.id;
-                        return (
-                          <Fragment key={j.id}>
-                            <TableRow className="cursor-pointer hover:bg-muted/30" onClick={() => setExpanded(isOpen ? null : j.id)}>
-                              <TableCell className="text-muted-foreground">{isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</TableCell>
-                              <TableCell>
-                                <div className="flex min-w-0 items-center gap-2">
-                                  <Badge variant="outline" className="text-[10px] uppercase tracking-wider">{j.job_type}</Badge>
-                                  <span className="truncate text-sm font-medium text-foreground">Job #{j.id}</span>
-                                </div>
-                                <div className="font-mono text-[11px] text-muted-foreground">{j.id}</div>
+
+      <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
+        <Card>
+          <CardHeader className="flex flex-row items-end justify-between gap-3 space-y-0">
+            <div>
+              <CardTitle className="text-base">Job history</CardTitle>
+              <CardDescription>Click a job to inspect trace, prompt, model, and logs.</CardDescription>
+            </div>
+              <Input value={String(selectedJobId)} onChange={(e) => setSelectedJobId(Number(e.target.value) || 1)} placeholder="Job ID" className="h-9 w-24" />
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="grid gap-3 xl:grid-cols-[1fr_1fr]">
+              <section id="job-filters" className="rounded-xl border border-border bg-muted/20 p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs uppercase tracking-wider text-muted-foreground">Status filters</div>
+                    <div className="text-sm font-medium text-foreground">Use the quick chips to narrow job state.</div>
+                  </div>
+                  <Badge variant="outline" className="text-[10px] uppercase">
+                    {dbJobs.length} shown
+                  </Badge>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {statusFilters.map((s) => (
+                    <Button key={s} variant={statusFilter === s ? "default" : "outline"} size="sm" onClick={() => setStatusFilter(s)}>
+                      {s}
+                    </Button>
+                  ))}
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-border bg-muted/20 p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs uppercase tracking-wider text-muted-foreground">Job types</div>
+                    <div className="text-sm font-medium text-foreground">Separate sync, AI, and readiness jobs.</div>
+                  </div>
+                  <Badge variant="outline" className="text-[10px] uppercase">
+                    {counts.success ?? 0} success
+                  </Badge>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {typeFilters.map((s) => (
+                    <Button key={s} variant={jobTypeFilter === s ? "default" : "outline"} size="sm" onClick={() => setJobTypeFilter(s)}>
+                      {s}
+                    </Button>
+                  ))}
+                </div>
+              </section>
+            </div>
+
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/40 hover:bg-muted/40">
+                    <TableHead className="w-8"></TableHead>
+                    <TableHead>Job</TableHead>
+                    <TableHead>Source</TableHead>
+                    <TableHead className="min-w-[140px]">Progress</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Duration</TableHead>
+                    <TableHead>Retries</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {dbJobs.length ? (
+                    dbJobs.map((j) => {
+                      const isOpen = expanded === j.id;
+                      return (
+                        <Fragment key={j.id}>
+                          <TableRow className="cursor-pointer hover:bg-muted/30" onClick={() => setExpanded(isOpen ? null : j.id)}>
+                            <TableCell className="text-muted-foreground">{isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</TableCell>
+                            <TableCell>
+                              <div className="flex min-w-0 items-center gap-2">
+                                <Badge variant="outline" className="text-[10px] uppercase tracking-wider">
+                                  {j.job_type}
+                                </Badge>
+                                <span className="truncate text-sm font-medium text-foreground">Job #{j.id}</span>
+                              </div>
+                              <div className="font-mono text-[11px] text-muted-foreground">{j.id}</div>
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">{j.database_id}</TableCell>
+                            <TableCell>
+                              <CoverageBar value={j.progress_percentage} tone={j.status === "FAILED" ? "danger" : "primary"} />
+                            </TableCell>
+                            <TableCell>
+                              <StatusBadge status={j.status} />
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{j.started_at ? "running" : "n/a"}</TableCell>
+                            <TableCell className="text-xs tabular-nums text-muted-foreground">0</TableCell>
+                          </TableRow>
+                          {isOpen ? (
+                            <TableRow className="bg-muted/20 hover:bg-muted/20">
+                              <TableCell />
+                              <TableCell colSpan={6}>
+                                <JobDetail job={j} />
                               </TableCell>
-                              <TableCell className="text-sm text-muted-foreground">{j.database_id}</TableCell>
-                              <TableCell><CoverageBar value={j.progress_percentage} tone={j.status === "FAILED" ? "danger" : "primary"} /></TableCell>
-                              <TableCell><StatusBadge status={j.status} /></TableCell>
-                              <TableCell className="text-xs text-muted-foreground">{j.started_at ? "running" : "n/a"}</TableCell>
-                              <TableCell className="text-xs tabular-nums text-muted-foreground">0</TableCell>
                             </TableRow>
-                            {isOpen ? (
-                              <TableRow className="bg-muted/20 hover:bg-muted/20">
-                                <TableCell />
-                                <TableCell colSpan={6}>
-                                  <JobDetail job={j} />
-                                </TableCell>
-                              </TableRow>
-                            ) : null}
-                          </Fragment>
-                        );
-                      })
-                    ) : (
-                      <TableRow>
-                        <TableCell colSpan={7} className="py-10">
-                          <EmptyState icon={Activity} title="No jobs yet" description="Execution history will appear here after sync and AI runs complete." />
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </TabsContent>
-          </Tabs>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => runMutation.mutate()}>
-              Run diagnostics
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setExpanded(selectedJobId)}>
-              Inspect Job
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-      {selectedJob ? (
+                          ) : null}
+                        </Fragment>
+                      );
+                    })
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={7} className="py-10">
+                        <EmptyState icon={Activity} title="No jobs yet" description="Execution history will appear here after sync and AI runs complete." />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={() => runMutation.mutate()}>
+                Run diagnostics
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setExpanded(selectedJobId)}>
+                Inspect Job
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Selected job</CardTitle>
             <CardDescription>Streamlit-style drilldown for trace, prompt, model, and logs.</CardDescription>
           </CardHeader>
-          <CardContent>
-            <JobDetail job={selectedJob} />
-          </CardContent>
+          <CardContent>{selectedJob ? <JobDetail job={selectedJob} /> : <EmptyState icon={Activity} title="No job selected" description="Choose a job to inspect trace and logs." />}</CardContent>
         </Card>
-      ) : null}
+      </section>
     </div>
   );
 }
@@ -331,12 +371,11 @@ function JobDetail({ job }: { job: PipelineJob }) {
       <div className="space-y-2">
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Logs</div>
         <ScrollArea className="max-h-44 rounded-md border border-border bg-[var(--muted)]/40">
-          <pre className="whitespace-pre-wrap p-3 font-mono text-[11px] leading-relaxed text-foreground">
-            {`[job ${job.id}] ${job.job_type} ${job.status}
+          <pre className="whitespace-pre-wrap p-3 font-mono text-[11px] leading-relaxed text-foreground">{`[job ${job.id}] ${job.job_type} ${job.status}
 progress=${job.progress_percentage}%
-failure=${job.failure_reason ?? "n/a"}`}
-          </pre>
+failure=${job.failure_reason ?? "n/a"}`}</pre>
         </ScrollArea>
+        <TraceLink traceId={job.trace_id} label="Open trace" className="text-xs" />
       </div>
     </div>
   );
