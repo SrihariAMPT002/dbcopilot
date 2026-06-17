@@ -616,30 +616,8 @@ class AIObservabilityService:
                 if "max_completion_tokens" not in request_payload and "max_tokens" not in request_payload:
                     request_payload["max_completion_tokens"] = dynamic_capacity
                 request_payload.pop("max_tokens", None)
-                logger.info(
-                    "AI preflight | module=%s artifact_type=%s model=%s prompt_chars=%d prompt_tokens_est=%d dynamic_capacity=%d request_chars=%d",
-                    module,
-                    artifact_type,
-                    model_name,
-                    size_summary["prompt_chars"],
-                    size_summary["prompt_tokens_est"],
-                    dynamic_capacity,
-                    size_summary["request_chars"],
-                )
-                logger.error("AZURE REQUEST=%s", _serialize_for_log(request_payload))
-                logger.error(
-                    "AZURE REQUEST SIZE | module=%s artifact_type=%s prompt_chars=%d prompt_tokens_est=%d dynamic_capacity=%d request_chars=%d",
-                    module,
-                    artifact_type,
-                    size_summary["prompt_chars"],
-                    size_summary["prompt_tokens_est"],
-                    dynamic_capacity,
-                    size_summary["request_chars"],
-                )
                 response = await asyncio.to_thread(_invoke, request_payload)
                 raw_response_dump = _response_dump_json(response)
-                logger.error("AZURE RAW RESPONSE=%s", raw_response_dump)
-                logger.error("AZURE RESPONSE DUMP=%s", _serialize_for_log(response))
                 response_summary = self._response_usage_summary(response)
                 logger.info(
                     "AZURE RESPONSE META | module=%s artifact_type=%s finish_reason=%s prompt_tokens=%d completion_tokens=%d total_tokens=%d reasoning_tokens=%d response_chars=%d",
@@ -843,16 +821,6 @@ class AIObservabilityService:
                 )
                 request_kwargs = dict(request_kwargs)
                 request_kwargs.pop("max_tokens", None)
-                logger.info(
-                    "AI preflight | module=%s artifact_type=%s model=%s prompt_chars=%d prompt_tokens_est=%d dynamic_capacity=%d request_chars=%d",
-                    module,
-                    artifact_type,
-                    model_name,
-                    size_summary["prompt_chars"],
-                    size_summary["prompt_tokens_est"],
-                    dynamic_capacity,
-                    size_summary["request_chars"],
-                )
                 response = await asyncio.to_thread(_invoke)
                 latency_ms = (time.perf_counter() - start) * 1000
                 vectors = self._embeddings_from_response(response)

@@ -320,6 +320,15 @@ export type KpiPackage = {
   evidence?: Array<Record<string, unknown>>;
   trace_id?: string | null;
   created_at?: string | null;
+  catalog?: Array<Record<string, unknown>>;
+  definitions?: Array<Record<string, unknown>>;
+  lineage?: Array<Record<string, unknown>>;
+  clusters?: Array<Record<string, unknown>>;
+  context?: string | null;
+  coverage?: Record<string, unknown> | null;
+  successful_clusters?: number;
+  failed_clusters?: number;
+  coverage_percentage?: number;
 };
 
 export type BusinessEvent = {

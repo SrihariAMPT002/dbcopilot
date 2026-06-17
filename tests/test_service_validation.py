@@ -5,18 +5,22 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.models.artifact_manifest import ArtifactType
 from app.models.metadata import (
+    ConnectedDatabase,
+    ColumnSemantic,
+    DatabaseSemantic,
+    DatabaseTable,
     GovernancePackage,
     RelationshipPackage,
     SchemaRelationshipGraph,
     DatabaseSchema,
-    DatabaseTable,
+    KPIIntelligence,
     DatabaseColumn,
     DatabaseRelationship,
-    KPIIntelligence,
+    SemanticPackage,
 )
 from app.services.kpi_intelligence_service import KPIIntelligenceService
 from app.services.prompt_studio_service import PromptStudioService
@@ -170,6 +174,7 @@ def test_readiness_collect_stats_compiles_successfully() -> None:
 
     async def _scalar_side_effect(stmt, *args, **kwargs):
         scalar_statements.append(stmt)
+        str(stmt.compile(compile_kwargs={"literal_binds": True}))
         return 0
 
     def _empty_rows_result(first_result=None):
@@ -178,6 +183,7 @@ def test_readiness_collect_stats_compiles_successfully() -> None:
 
     async def _execute_side_effect(stmt, *args, **kwargs):
         execute_statements.append(stmt)
+        str(stmt.compile(compile_kwargs={"literal_binds": True}))
         return _empty_rows_result()
 
     db.scalar = AsyncMock(side_effect=_scalar_side_effect)
@@ -216,12 +222,40 @@ def test_readiness_collect_stats_query_shapes_compile_without_execution() -> Non
         select(DatabaseTable.id).select_from(DatabaseTable).join(DatabaseSchema).where(DatabaseSchema.connected_db_id == 1),
         select(DatabaseColumn.id).select_from(DatabaseColumn).join(DatabaseTable).join(DatabaseSchema).where(DatabaseSchema.connected_db_id == 1),
         select(DatabaseRelationship.id).select_from(DatabaseRelationship).join(DatabaseTable, DatabaseRelationship.table_id == DatabaseTable.id).join(DatabaseSchema, DatabaseTable.schema_id == DatabaseSchema.id).where(DatabaseSchema.connected_db_id == 1),
-        select(KPIIntelligence.cluster_id, KPIIntelligence.execution_status).select_from(KPIIntelligence).where(KPIIntelligence.database_id == 1),
+        select(func.avg(KPIIntelligence.confidence)).select_from(KPIIntelligence).where(KPIIntelligence.database_id == 1),
         select(KPIIntelligence.cluster_id, KPIIntelligence.execution_status).select_from(KPIIntelligence).where(KPIIntelligence.database_id == 1),
     ]
 
     for stmt in statements:
-        assert str(stmt.compile()) is not None
+        assert str(stmt.compile(compile_kwargs={"literal_binds": True})) is not None
+
+
+def test_kpi_query_shapes_compile_without_recursion() -> None:
+    statements = [
+        select(KPIIntelligence).where(KPIIntelligence.database_id == 1).order_by(KPIIntelligence.name),
+        select(KPIIntelligence.cluster_id, KPIIntelligence.execution_status).select_from(KPIIntelligence).where(KPIIntelligence.database_id == 1),
+        select(func.count()).select_from(KPIIntelligence).where(KPIIntelligence.database_id == 1),
+        select(func.avg(KPIIntelligence.confidence)).select_from(KPIIntelligence).where(KPIIntelligence.database_id == 1),
+    ]
+
+    for stmt in statements:
+        assert str(stmt.compile(compile_kwargs={"literal_binds": True})) is not None
+
+
+def test_prompt_studio_query_shapes_compile_without_recursion() -> None:
+    statements = [
+        select(ConnectedDatabase),
+        select(DatabaseSemantic).where(DatabaseSemantic.source_id == 1),
+        select(SemanticPackage).where(SemanticPackage.database_id == 1),
+        select(ColumnSemantic).where(ColumnSemantic.database_id == 1),
+        select(DatabaseTable).where(DatabaseTable.schema_id == 1),
+        select(GovernancePackage).where(GovernancePackage.database_id == 1),
+        select(RelationshipPackage).where(RelationshipPackage.database_id == 1),
+        select(KPIIntelligence).where(KPIIntelligence.database_id == 1),
+    ]
+
+    for stmt in statements:
+        assert str(stmt.compile(compile_kwargs={"literal_binds": True})) is not None
 
 
 def test_readiness_normalizer_handles_missing_prompt_metadata() -> None:

@@ -605,6 +605,7 @@ class ReadinessService:
             ai_risks=hydrated_ai["ai_risks"],
             ai_roadmap=hydrated_ai["ai_roadmap"],
             ai_confidence=hydrated_ai["ai_confidence"],
+            ai_narrative_status=hydrated_ai.get("execution_status") or "failed",
             prompt_id=hydrated_ai.get("prompt_id"),
             prompt_version=hydrated_ai.get("prompt_version"),
             model_name=hydrated_ai.get("model_name"),

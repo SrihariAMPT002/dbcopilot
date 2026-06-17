@@ -59,6 +59,9 @@ export function RelationshipsPage() {
                     return (
                       <div key={c.cluster_id} className="rounded-md border border-border bg-card p-3">
                         <div className="text-sm font-medium text-foreground">{c.cluster_summary ?? c.domain_name ?? c.cluster_id ?? "cluster"}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {c.source_table_name ?? "source"} → {c.target_table_name ?? "target"}
+                        </div>
                         <CoverageBar value={Math.round(clusterConfidence * 100)} className="mt-2" />
                       </div>
                     );
@@ -73,10 +76,10 @@ export function RelationshipsPage() {
               {clusters.length ? clusters.flatMap((c) => (c.hidden_relationships ?? []).map((r) => ({ cluster_id: c.cluster_id, relationship: r }))).slice(0, 8).map((item: any, i: number) => (
                 <div key={`${item.cluster_id}-${i}`} className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-card p-3">
                   <Network className="h-4 w-4 text-primary" />
-                  <code className="text-xs text-foreground">{item.relationship.left ?? item.relationship.source ?? "unknown"}</code>
+                  <code className="text-xs text-foreground">{item.relationship.left ?? item.relationship.source ?? item.relationship.from ?? "unknown"}</code>
                   <span className="text-xs text-muted-foreground">-&gt;</span>
-                  <code className="text-xs text-foreground">{item.relationship.right ?? item.relationship.target ?? "unknown"}</code>
-                  <span className="ml-auto text-[11px] text-muted-foreground">{item.relationship.note ?? item.relationship.summary ?? "persisted hidden relationship"}</span>
+                  <code className="text-xs text-foreground">{item.relationship.right ?? item.relationship.target ?? item.relationship.to ?? "unknown"}</code>
+                  <span className="ml-auto text-[11px] text-muted-foreground">{item.relationship.note ?? item.relationship.summary ?? item.relationship.description ?? "persisted hidden relationship"}</span>
                 </div>
               )) : <div className="text-sm text-muted-foreground">No relationship packages found yet.</div>}
             </section>
@@ -90,6 +93,14 @@ export function RelationshipsPage() {
                 )) : <div className="text-sm text-muted-foreground">No lifecycle flows available.</div>}
               </div>
             </section>
+            {evidence?.length ? (
+              <section className="space-y-2">
+                <div className="text-sm font-semibold text-foreground">Evidence summary</div>
+                <div className="text-sm text-muted-foreground">
+                  {evidence.slice(0, 3).map((item: any) => item.summary ?? item.description ?? item.note ?? String(item.source ?? "evidence")).join(" · ")}
+                </div>
+              </section>
+            ) : null}
           </CardContent>
         </Card>
         <Card>
