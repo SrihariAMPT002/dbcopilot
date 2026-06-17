@@ -94,7 +94,13 @@ class SchemaChunkingService:
             description=self._safe_text(getattr(column, "description", None)),
         )
 
-    def _table_summary(self, table: DatabaseTable, *, pii_column_names: set[str] | None = None) -> TableChunkSummary:
+    def _table_summary(
+        self,
+        table: DatabaseTable,
+        *,
+        schema_name: str | None = None,
+        pii_column_names: set[str] | None = None,
+    ) -> TableChunkSummary:
         try:
             columns = sorted(self._safe_list(getattr(table, "columns", None)), key=lambda column: getattr(column, "ordinal_position", 0) or 0)
         except InvalidRequestError:
@@ -102,7 +108,7 @@ class SchemaChunkingService:
         limited_columns = columns[: self.max_columns_per_table]
         pii_names = pii_column_names or set()
         return TableChunkSummary(
-            schema_name=table.schema.name,
+            schema_name=schema_name or getattr(table, "schema_name", None) or "",
             table_name=table.name,
             table_type=self._table_type(table),
             description=self._safe_text(getattr(table, "description", None)),
@@ -128,7 +134,7 @@ class SchemaChunkingService:
                 for column in self._safe_list(getattr(table, "columns", None))
                 if pii_map and getattr(pii_map.get(column.id), "is_pii", False)
             }
-            table_summary = self._table_summary(table, pii_column_names=pii_column_names)
+            table_summary = self._table_summary(table, schema_name=schema.name, pii_column_names=pii_column_names)
             relationship_count += table_summary.relationship_count
             table_summaries.append(table_summary)
         return SchemaChunkSummary(
@@ -211,6 +217,7 @@ class SchemaChunkingService:
             for summary in [
                 self._table_summary(
                     table,
+                    schema_name=schema.name,
                     pii_column_names={
                         column.name
                         for column in self._safe_list(getattr(table, "columns", None))

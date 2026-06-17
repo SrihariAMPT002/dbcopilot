@@ -27,4 +27,3 @@ user_prompt: |
   }
 constraints:
   output_format: json
-  max_tokens: 16000

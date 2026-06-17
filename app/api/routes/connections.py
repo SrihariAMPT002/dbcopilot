@@ -171,10 +171,10 @@ async def delete_connection(
     db_id: int,
     payload: ConnectionLifecycleDeleteRequest = Body(...),
     db: AsyncSession = Depends(get_db),
-) -> ConnectionLifecycleResponse:
+) -> APIResponse:
     svc = ConnectionService(db)
     try:
-        return await svc.delete_connection_hard(
+        lifecycle = await svc.delete_connection_hard(
             db_id,
             delete_metadata=payload.delete_metadata,
             delete_packages=payload.delete_packages,
@@ -182,6 +182,23 @@ async def delete_connection(
             delete_observability=payload.delete_observability,
             confirmation_text=payload.confirmation_text,
         )
+        response = APIResponse.model_validate(
+            {
+                "success": True,
+                "message": lifecycle.message,
+                "status": lifecycle.lifecycle_status,
+                "trace_id": lifecycle.trace_id,
+                "metadata": {
+                    "database_id": lifecycle.database_id,
+                    "database_name": lifecycle.database_name,
+                    "preserved_resources": lifecycle.preserved_resources,
+                    "deleted_resources": lifecycle.deleted_resources,
+                    "lifecycle_status": lifecycle.lifecycle_status,
+                },
+                "data": lifecycle.model_dump(),
+            }
+        )
+        return response
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 

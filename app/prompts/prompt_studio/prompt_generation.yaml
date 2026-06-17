@@ -32,4 +32,3 @@ user_prompt: |
   - Return only the generated prompt text.
 constraints:
   output_format: text
-  max_tokens: 20000

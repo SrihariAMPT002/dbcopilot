@@ -160,6 +160,39 @@ class ReadinessService:
 
         return readiness
 
+    @staticmethod
+    def _normalize_ai_artifact(artifact: Any | None, *, fallback: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = artifact if isinstance(artifact, dict) else {}
+        normalized = {
+            "ai_summary": payload.get("ai_summary") or payload.get("executive_summary") or (fallback or {}).get("ai_summary"),
+            "ai_recommendations": payload.get("ai_recommendations")
+            or payload.get("recommendations")
+            or (fallback or {}).get("ai_recommendations", []),
+            "ai_risks": payload.get("ai_risks") or payload.get("risks") or (fallback or {}).get("ai_risks", []),
+            "ai_roadmap": payload.get("ai_roadmap")
+            or payload.get("readiness_roadmap")
+            or (fallback or {}).get("ai_roadmap", []),
+            "ai_confidence": payload.get("ai_confidence", payload.get("confidence", (fallback or {}).get("ai_confidence", 0.0))),
+            "trace_id": payload.get("trace_id", (fallback or {}).get("trace_id")),
+            "prompt_id": payload.get("prompt_id", (fallback or {}).get("prompt_id")),
+            "prompt_version": payload.get("prompt_version", (fallback or {}).get("prompt_version")),
+            "model_name": payload.get("model_name", (fallback or {}).get("model_name")),
+            "token_metrics": payload.get("token_metrics", (fallback or {}).get("token_metrics", {})) or {},
+            "execution_status": payload.get("execution_status", (fallback or {}).get("execution_status", "partial")),
+            "fallback_used": bool(payload.get("fallback_used", (fallback or {}).get("fallback_used", False))),
+            "retry_count": int(payload.get("retry_count", (fallback or {}).get("retry_count", 0)) or 0),
+        }
+        if not normalized["ai_summary"]:
+            normalized["ai_summary"] = "Readiness assessment generated with partial metadata."
+        normalized["ai_recommendations"] = list(normalized["ai_recommendations"] or [])
+        normalized["ai_risks"] = list(normalized["ai_risks"] or [])
+        normalized["ai_roadmap"] = list(normalized["ai_roadmap"] or [])
+        try:
+            normalized["ai_confidence"] = float(normalized["ai_confidence"] or 0.0)
+        except Exception:
+            normalized["ai_confidence"] = 0.0
+        return normalized
+
     def _readiness_dimensions(self) -> list[str]:
         return self._readiness_packages_from_registry()
 
@@ -412,6 +445,20 @@ class ReadinessService:
         return max(values) if values else None
 
     async def _upsert_snapshot(self, database_id: int, breakdown: ReadinessBreakdown, ai_assessment: dict[str, Any]) -> ReadinessSnapshot:
+        normalized = self._normalize_ai_artifact(ai_assessment, fallback={
+            "ai_summary": self._fallback_ai_summary(breakdown),
+            "ai_recommendations": self._fallback_recommendations(breakdown),
+            "ai_risks": self._fallback_risks(breakdown),
+            "ai_roadmap": self._fallback_roadmap(breakdown),
+            "ai_confidence": round(min(1.0, breakdown.overall_score / 100.0), 3),
+            "trace_id": None,
+            "prompt_id": self._readiness_assessment_prompt().split("/", 1)[1],
+            "prompt_version": "registry",
+            "model_name": settings.azure_openai_deployment,
+            "execution_status": "fallback",
+            "fallback_used": True,
+            "retry_count": 0,
+        })
         snapshot = ReadinessSnapshot(
             database_id=database_id,
             metadata_score=breakdown.metadata_score,
@@ -430,18 +477,18 @@ class ReadinessService:
             successful_cluster_count=breakdown.successful_cluster_count,
             failed_cluster_count=breakdown.failed_cluster_count,
             coverage_percentage=breakdown.coverage_percentage,
-            ai_summary=ai_assessment["ai_summary"],
-            ai_recommendations=json.dumps(ai_assessment["ai_recommendations"], default=str),
-            ai_risks=json.dumps(ai_assessment["ai_risks"], default=str),
-            ai_roadmap=json.dumps(ai_assessment["ai_roadmap"], default=str),
-            ai_confidence=ai_assessment["ai_confidence"],
-            prompt_id=ai_assessment.get("prompt_id"),
-            prompt_version=ai_assessment.get("prompt_version"),
-            model_name=ai_assessment.get("model_name"),
-            execution_status=ai_assessment.get("execution_status"),
-            used_fallback=bool(ai_assessment.get("fallback_used", False)),
-            retry_count=int(ai_assessment.get("retry_count", 0) or 0),
-            trace_id=ai_assessment.get("trace_id"),
+            ai_summary=normalized["ai_summary"],
+            ai_recommendations=json.dumps(normalized["ai_recommendations"], default=str),
+            ai_risks=json.dumps(normalized["ai_risks"], default=str),
+            ai_roadmap=json.dumps(normalized["ai_roadmap"], default=str),
+            ai_confidence=normalized["ai_confidence"],
+            prompt_id=normalized["prompt_id"],
+            prompt_version=normalized["prompt_version"],
+            model_name=normalized["model_name"],
+            execution_status=normalized["execution_status"],
+            used_fallback=bool(normalized["fallback_used"]),
+            retry_count=int(normalized["retry_count"]),
+            trace_id=normalized["trace_id"],
             readiness_status=breakdown.readiness_status,
         )
         self.db.add(snapshot)
@@ -521,6 +568,14 @@ class ReadinessService:
             "ai_risks": [],
             "ai_roadmap": [],
             "ai_confidence": 0.0,
+            "trace_id": None,
+            "prompt_id": self._readiness_assessment_prompt().split("/", 1)[1],
+            "prompt_version": "registry",
+            "model_name": settings.azure_openai_deployment,
+            "token_metrics": {},
+            "execution_status": "partial",
+            "fallback_used": True,
+            "retry_count": 0,
         })
 
         return ReadinessBreakdown(
@@ -550,9 +605,9 @@ class ReadinessService:
             ai_risks=hydrated_ai["ai_risks"],
             ai_roadmap=hydrated_ai["ai_roadmap"],
             ai_confidence=hydrated_ai["ai_confidence"],
-            prompt_id=hydrated_ai["prompt_id"],
-            prompt_version=hydrated_ai["prompt_version"],
-            model_name=hydrated_ai["model_name"],
+            prompt_id=hydrated_ai.get("prompt_id"),
+            prompt_version=hydrated_ai.get("prompt_version"),
+            model_name=hydrated_ai.get("model_name"),
             category_scores=category_scores,
             missing_stages=missing_stages,
             remediation_hints=hints,
@@ -594,16 +649,23 @@ class ReadinessService:
     ) -> dict[str, Any]:
         if snapshot is None:
             return dict(breakdown_fallback)
-        return {
-            "ai_summary": getattr(snapshot, "ai_summary", None) or breakdown_fallback["ai_summary"],
-            "ai_recommendations": cls._parse_snapshot_json(getattr(snapshot, "ai_recommendations", None)) or breakdown_fallback["ai_recommendations"],
-            "ai_risks": cls._parse_snapshot_json(getattr(snapshot, "ai_risks", None)) or breakdown_fallback["ai_risks"],
-            "ai_roadmap": cls._parse_snapshot_json(getattr(snapshot, "ai_roadmap", None)) or breakdown_fallback["ai_roadmap"],
-            "ai_confidence": float(getattr(snapshot, "ai_confidence", None) if getattr(snapshot, "ai_confidence", None) is not None else breakdown_fallback["ai_confidence"]),
-            "prompt_id": getattr(snapshot, "prompt_id", None),
-            "prompt_version": getattr(snapshot, "prompt_version", None),
-            "model_name": getattr(snapshot, "model_name", None),
-        }
+        return cls._normalize_ai_artifact(
+            {
+                "ai_summary": getattr(snapshot, "ai_summary", None),
+                "ai_recommendations": cls._parse_snapshot_json(getattr(snapshot, "ai_recommendations", None)),
+                "ai_risks": cls._parse_snapshot_json(getattr(snapshot, "ai_risks", None)),
+                "ai_roadmap": cls._parse_snapshot_json(getattr(snapshot, "ai_roadmap", None)),
+                "ai_confidence": getattr(snapshot, "ai_confidence", None),
+                "prompt_id": getattr(snapshot, "prompt_id", None),
+                "prompt_version": getattr(snapshot, "prompt_version", None),
+                "model_name": getattr(snapshot, "model_name", None),
+                "trace_id": getattr(snapshot, "trace_id", None),
+                "execution_status": getattr(snapshot, "execution_status", None),
+                "fallback_used": getattr(snapshot, "used_fallback", None),
+                "retry_count": getattr(snapshot, "retry_count", None),
+            },
+            fallback=breakdown_fallback,
+        )
 
     @staticmethod
     def _snapshot_details(snapshot: ReadinessSnapshot | None) -> dict[str, Any]:
@@ -967,7 +1029,9 @@ class ReadinessService:
                     select(
                         KPIIntelligence.cluster_id,
                         KPIIntelligence.execution_status,
-                    ).where(KPIIntelligence.database_id == database_id)
+                    )
+                    .select_from(KPIIntelligence)
+                    .where(KPIIntelligence.database_id == database_id)
                 )
                 rows = kpi_rows.all()
                 kpi_count = len(rows)
@@ -987,7 +1051,9 @@ class ReadinessService:
                 ) if kpi_cluster_count > 0 else 0.0
                 kpi_artifacts = int(
                     await self.db.scalar(
-                        select(func.count(KPIArtifact.id)).where(KPIArtifact.database_id == database_id)
+                        select(func.count())
+                        .select_from(KPIArtifact)
+                        .where(KPIArtifact.database_id == database_id)
                     )
                     or 0
                 )
@@ -1002,14 +1068,12 @@ class ReadinessService:
                     latest_kpi_artifact
                     and (not database.last_sync_at or latest_kpi_artifact.generated_at >= database.last_sync_at)
                 )
-                kpi_confidence = float(
-                    await self.db.scalar(
-                        select(func.coalesce(func.avg(KPIIntelligence.confidence), 0.0)).where(
-                            KPIIntelligence.database_id == database_id
-                        )
-                    )
-                    or 0.0
+                avg_kpi_confidence = await self.db.scalar(
+                    select(func.avg(KPIIntelligence.confidence))
+                    .select_from(KPIIntelligence)
+                    .where(KPIIntelligence.database_id == database_id)
                 )
+                kpi_confidence = float(avg_kpi_confidence or 0.0)
             except Exception:
                 logger.exception(error_message("failed to collect kpi readiness stats", database_id=database_id))
 
@@ -1202,17 +1266,34 @@ class ReadinessService:
             parsed = self._parse_ai_assessment(ai_result.content or "")
             if not parsed:
                 raise ValueError("empty_or_invalid_ai_response")
-            parsed["ai_confidence"] = float(parsed.get("confidence", 0.0))
+            normalized = self._normalize_ai_artifact(
+                {
+                    "ai_summary": parsed.get("executive_summary"),
+                    "ai_recommendations": parsed.get("recommendations"),
+                    "ai_risks": parsed.get("risks"),
+                    "ai_roadmap": parsed.get("readiness_roadmap"),
+                    "ai_confidence": parsed.get("confidence", 0.0),
+                    "trace_id": getattr(ai_result, "trace_id", None),
+                    "prompt_id": rendered.metadata.id,
+                    "prompt_version": rendered.metadata.version,
+                    "model_name": settings.azure_openai_deployment,
+                    "token_metrics": getattr(ai_result, "token_usage", {}) or {},
+                    "execution_status": "success",
+                    "fallback_used": False,
+                    "retry_count": 0,
+                }
+            )
             return {
-                "ai_summary": parsed.get("executive_summary") or "Readiness assessment generated.",
-                "ai_recommendations": parsed.get("recommendations") or [],
-                "ai_risks": parsed.get("risks") or [],
-                "ai_roadmap": parsed.get("readiness_roadmap") or [],
-                "ai_confidence": float(parsed.get("confidence", 0.0) or 0.0),
-                "execution_status": "success",
-                "fallback_used": False,
-                "retry_count": 0,
-                "trace_id": getattr(ai_result, "trace_id", None),
+                "ai_summary": normalized["ai_summary"] or "Readiness assessment generated.",
+                "ai_recommendations": normalized["ai_recommendations"],
+                "ai_risks": normalized["ai_risks"],
+                "ai_roadmap": normalized["ai_roadmap"],
+                "ai_confidence": normalized["ai_confidence"],
+                "token_metrics": normalized["token_metrics"],
+                "execution_status": normalized["execution_status"],
+                "fallback_used": normalized["fallback_used"],
+                "retry_count": normalized["retry_count"],
+                "trace_id": normalized["trace_id"],
             }
         except Exception:
             logger.exception(error_message("ai readiness assessment generation failed", fallback="deterministic summary"))
@@ -1222,6 +1303,7 @@ class ReadinessService:
                 "ai_risks": self._fallback_risks(breakdown),
                 "ai_roadmap": self._fallback_roadmap(breakdown),
                 "ai_confidence": round(min(1.0, breakdown.overall_score / 100.0), 3),
+                "token_metrics": {},
                 "execution_status": "fallback",
                 "fallback_used": True,
                 "retry_count": 0,
@@ -1286,10 +1368,10 @@ class ReadinessService:
         ]
 
     def _metadata_score(self, stats: dict[str, Any]) -> int:
-        metadata = stats["metadata"]
-        schemas = metadata["schemas"]
-        tables = metadata["tables"]
-        columns = metadata["columns"]
+        metadata = stats.get("metadata") or {}
+        schemas = int(metadata.get("schemas", 0) or 0)
+        tables = int(metadata.get("tables", 0) or 0)
+        columns = int(metadata.get("columns", 0) or 0)
 
         if schemas <= 0 or tables <= 0 or columns <= 0:
             return 0
@@ -1297,9 +1379,9 @@ class ReadinessService:
         schema_presence = 100
         table_presence = 100
         column_presence = 100
-        schema_doc_coverage = self._ratio_score(metadata["schemas_with_description"], schemas)
-        table_doc_coverage = self._ratio_score(metadata["tables_with_description"], tables)
-        column_doc_coverage = self._ratio_score(metadata["columns_with_description"], columns)
+        schema_doc_coverage = self._ratio_score(int(metadata.get("schemas_with_description", 0) or 0), schemas)
+        table_doc_coverage = self._ratio_score(int(metadata.get("tables_with_description", 0) or 0), tables)
+        column_doc_coverage = self._ratio_score(int(metadata.get("columns_with_description", 0) or 0), columns)
 
         return max(
             0,
@@ -1319,25 +1401,25 @@ class ReadinessService:
         )
 
     def _semantic_score(self, stats: dict[str, Any]) -> int:
-        semantic = stats["semantic"]
-        profile = semantic["profile"]
-        tables = stats["metadata"]["tables"]
+        semantic = stats.get("semantic") or {}
+        profile = semantic.get("profile") or {}
+        tables = int((stats.get("metadata") or {}).get("tables", 0) or 0)
         if tables <= 0:
             return 0
 
         profile_completeness = self._presence_score(
-            profile["business_domain"],
-            profile["business_summary"],
-            profile["analysis_notes"],
-            profile["key_entities"] > 0,
-            profile["business_glossary"] > 0,
-            profile["suggested_use_cases"] > 0,
+            bool(profile.get("business_domain")),
+            bool(profile.get("business_summary")),
+            bool(profile.get("analysis_notes")),
+            int(profile.get("key_entities", 0) or 0) > 0,
+            int(profile.get("business_glossary", 0) or 0) > 0,
+            int(profile.get("suggested_use_cases", 0) or 0) > 0,
         )
-        semantic_table_coverage = semantic["semantic_table_coverage"]
-        glossary_target = max(1, min(5, profile["key_entities"] or 5))
-        glossary_coverage = self._ratio_score(profile["business_glossary"], glossary_target)
-        use_case_coverage = self._ratio_score(profile["suggested_use_cases"], 4)
-        confidence = int(round(max(0.0, min(1.0, float(profile["confidence_score"]))) * 100))
+        semantic_table_coverage = int(semantic.get("semantic_table_coverage", 0) or 0)
+        glossary_target = max(1, min(5, int(profile.get("key_entities", 0) or 5)))
+        glossary_coverage = self._ratio_score(int(profile.get("business_glossary", 0) or 0), glossary_target)
+        use_case_coverage = self._ratio_score(int(profile.get("suggested_use_cases", 0) or 0), 4)
+        confidence = int(round(max(0.0, min(1.0, float(profile.get("confidence_score", 0.0) or 0.0))) * 100))
         package_coverage = semantic.get("semantic_package_coverage", 0)
 
         return max(
@@ -1358,22 +1440,22 @@ class ReadinessService:
         )
 
     def _relationship_score(self, stats: dict[str, Any]) -> int:
-        metadata = stats["metadata"]
-        raw_relationships = metadata["relationships"]
-        tables = metadata["tables"]
+        metadata = stats.get("metadata") or {}
+        raw_relationships = int(metadata.get("relationships", 0) or 0)
+        tables = int(metadata.get("tables", 0) or 0)
         if tables <= 0:
             return 0
         if tables == 1:
             return 100
 
-        relationship = stats["relationships"]
+        relationship = stats.get("relationships") or {}
         package_coverage = relationship.get("relationship_package_coverage", 0)
-        graph_edges = relationship["graph_edges"]
+        graph_edges = int(relationship.get("graph_edges", 0) or 0)
         relationship_coverage = self._ratio_score(graph_edges, max(1, raw_relationships))
-        graph_table_coverage = relationship["graph_table_coverage"]
-        density = min(100, int(round(relationship["graph_density"] * 100)))
-        cycle_penalty = max(0, 100 - relationship["graph_cycles"] * 15)
-        isolation_penalty = max(0, 100 - relationship["isolated_tables"] * 12)
+        graph_table_coverage = int(relationship.get("graph_table_coverage", 0) or 0)
+        density = min(100, int(round(float(relationship.get("graph_density", 0.0) or 0.0) * 100)))
+        cycle_penalty = max(0, 100 - int(relationship.get("graph_cycles", 0) or 0) * 15)
+        isolation_penalty = max(0, 100 - int(relationship.get("isolated_tables", 0) or 0) * 12)
 
         return max(
             0,
@@ -1393,18 +1475,18 @@ class ReadinessService:
         )
 
     def _ai_context_score(self, stats: dict[str, Any]) -> int:
-        ai_context = stats["ai_context"]
-        metadata = stats["metadata"]
-        tables = metadata["tables"]
+        ai_context = stats.get("ai_context") or {}
+        metadata = stats.get("metadata") or {}
+        tables = int(metadata.get("tables", 0) or 0)
         if tables <= 0:
             return 0
 
         artifact_coverage = self._ratio_score(
-            ai_context["prompt_artifacts_rendered"],
-            ai_context["prompt_artifacts_expected"],
+            int(ai_context.get("prompt_artifacts_rendered", 0) or 0),
+            int(ai_context.get("prompt_artifacts_expected", 0) or 0),
         )
-        embedding_coverage = ai_context["embedding_coverage"]
-        semantic_dependency_coverage = ai_context["semantic_dependency_coverage"]
+        embedding_coverage = int(ai_context.get("embedding_coverage", 0) or 0)
+        semantic_dependency_coverage = int(ai_context.get("semantic_dependency_coverage", 0) or 0)
         package_coverage = ai_context.get("package_coverage", 0)
 
         return max(
@@ -1423,11 +1505,11 @@ class ReadinessService:
         )
 
     def _governance_score(self, stats: dict[str, Any]) -> int:
-        governance = stats["governance"]
-        pii_identified = governance["pii_identified_coverage"]
-        pii_classified = governance["pii_classified_coverage"]
-        prompt_protection = 100 if governance["prompt_protection_enabled"] else 0
-        embedding_protection = 100 if governance["embedding_protection_enabled"] else 0
+        governance = stats.get("governance") or {}
+        pii_identified = int(governance.get("pii_identified_coverage", 0) or 0)
+        pii_classified = int(governance.get("pii_classified_coverage", 0) or 0)
+        prompt_protection = 100 if governance.get("prompt_protection_enabled", False) else 0
+        embedding_protection = 100 if governance.get("embedding_protection_enabled", False) else 0
         package_coverage = governance.get("governance_package_coverage", 0)
 
         return max(

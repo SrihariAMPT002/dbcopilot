@@ -304,9 +304,7 @@ class SchemaEnricher:
                 },
                 {"role": "user", "content": rendered_prompt.user_prompt},
             ],
-            request_kwargs={
-                "max_completion_tokens": 1000,
-            },
+            request_kwargs={},
             completeness_score=self._schema_completeness(table),
             coverage_score=self._schema_coverage(table),
             confidence_score=0.0,

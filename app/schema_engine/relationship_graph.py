@@ -983,7 +983,6 @@ class RelationshipGraphEngine:
         ]
         registry = get_prompt_registry()
         observability = AIObservabilityService()
-        max_completion_tokens = int(get_config_manager().get_model_config("relationship_inference").get("max_completion_tokens", 1500) or 1500)
         batch_outputs: list[dict[str, Any]] = []
         cluster_batches = self._batch_cluster_scope(cluster_table_ids, cluster_edges)
         for batch_index, (batch_table_ids, batch_edges) in enumerate(cluster_batches, start=1):
@@ -1016,7 +1015,6 @@ class RelationshipGraphEngine:
                 ],
                 request_kwargs={
                     "response_format": {"type": "json_object"},
-                    "max_completion_tokens": max_completion_tokens,
                     "reasoning_effort": "low",
                     "_retry_on_length": 1,
                 },

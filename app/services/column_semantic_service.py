@@ -116,6 +116,12 @@ class ColumnSemanticService:
         return digest[:32]
 
     @staticmethod
+    def _schema_name_for_table(table: DatabaseTable, schema_name_by_id: dict[int, str] | None = None) -> str:
+        schema_name_by_id = schema_name_by_id or {}
+        schema_id = getattr(table, "schema_id", None)
+        return schema_name_by_id.get(schema_id, "")
+
+    @staticmethod
     def _stage_metadata_fingerprint(*parts: Any) -> str:
         digest = hashlib.sha256(json.dumps(parts, default=str, sort_keys=True).encode("utf-8")).hexdigest()
         return digest[:32]
@@ -127,7 +133,9 @@ class ColumnSemanticService:
         table: DatabaseTable,
         column: DatabaseColumn,
         neighbors: list[DatabaseColumn] | None = None,
+        schema_name_by_id: dict[int, str] | None = None,
     ) -> list[dict[str, Any]]:
+        schema_name = self._schema_name_for_table(table, schema_name_by_id)
         neighbor_context = ", ".join(
             neighbor.name for neighbor in (neighbors or []) if neighbor.id != column.id
         )
@@ -136,7 +144,7 @@ class ColumnSemanticService:
             for match in self.feature_service.rule_service.match_column(
                 column_name=column.name,
                 data_type=column.data_type,
-                table_context=f"{database.display_name or database.name} {table.schema.name} {table.name}",
+                table_context=f"{database.display_name or database.name} {schema_name} {table.name}",
                 neighbor_context=neighbor_context,
             )
         ]
@@ -199,12 +207,14 @@ class ColumnSemanticService:
         semantic: DatabaseSemantic | None,
         columns: list[DatabaseColumn] | None = None,
         statistics: dict[int, dict[str, Any]] | None = None,
+        schema_name_by_id: dict[int, str] | None = None,
     ) -> dict[str, Any]:
         selected_columns = columns if columns is not None else list(table.columns or [])
         stats_map = statistics or {}
+        schema_name = self._schema_name_for_table(table, schema_name_by_id)
         table_context = {
             "database_name": database.display_name or database.name,
-            "schema_name": table.schema.name,
+            "schema_name": schema_name,
             "table_name": table.name,
             "table_description": table.description or "",
             "column_count": len(selected_columns),
@@ -222,7 +232,7 @@ class ColumnSemanticService:
         }
         payload: dict[str, Any] = {
             "database_name": database.display_name or database.name,
-            "schema_name": table.schema.name,
+            "schema_name": schema_name,
             "table_name": table.name,
             "table_description": table.description or "",
             "table_context": table_context,
@@ -386,6 +396,7 @@ class ColumnSemanticService:
         metadata_fingerprint: str,
         error_message: str,
         ai_result: Any | None,
+        schema_name: str | None = None,
     ) -> ColumnSemantic:
         row = await self.get_by_column_id(column.id)
         if row is None:
@@ -425,6 +436,7 @@ class ColumnSemanticService:
         model_name: str,
         error_message: str,
         ai_result: Any | None,
+        schema_name: str | None = None,
     ) -> list[ColumnSemantic]:
         results: list[ColumnSemantic] = []
         for column in columns:
@@ -438,6 +450,7 @@ class ColumnSemanticService:
                     metadata_fingerprint=self._column_metadata_fingerprint(column, table),
                     error_message=error_message,
                     ai_result=ai_result,
+                    schema_name=schema_name,
                 )
             )
         return results
@@ -486,6 +499,10 @@ class ColumnSemanticService:
     ) -> list[ColumnSemantic]:
         if not package_is_enabled("governance"):
             raise ValueError("Governance package is disabled by registry")
+        schema_rows = await self.db.execute(
+            select(DatabaseSchema.id, DatabaseSchema.name).where(DatabaseSchema.connected_db_id == database.id)
+        )
+        schema_name_by_id = {schema_id: schema_name for schema_id, schema_name in schema_rows.all()}
 
         columns = sorted(table.columns or [], key=lambda item: item.ordinal_position or 0)
         if not columns:
@@ -503,10 +520,16 @@ class ColumnSemanticService:
 
         results: list[ColumnSemantic] = []
         model_name = settings.azure_openai_deployment or "azure_openai"
-        max_completion_tokens = int(get_config_manager().get_model_config("schema_enrichment").get("max_completion_tokens", 1000) or 1000)
         observability = AIObservabilityService()
         for batch_index, batch in enumerate(self._column_batches(columns, self.MAX_COLUMNS_PER_BATCH), start=1):
-            prompt_context = self._metadata_package(table, database, semantic, columns=batch, statistics=stats_map)
+            prompt_context = self._metadata_package(
+                table,
+                database,
+                semantic,
+                columns=batch,
+                statistics=stats_map,
+                schema_name_by_id=schema_name_by_id,
+            )
             error_message: str | None = None
             for column in batch:
                 feature = self.feature_service.build_feature(
@@ -552,7 +575,6 @@ class ColumnSemanticService:
                     ],
                     request_kwargs={
                         "response_format": {"type": "json_object"},
-                        "max_completion_tokens": max_completion_tokens,
                         "reasoning_effort": "low",
                         "_retry_on_length": 1,
                     },

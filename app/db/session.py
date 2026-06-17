@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 engine: AsyncEngine = create_async_engine(
     settings.database_url,
-    echo=settings.sql_debug_enabled,
+    echo=False,
     pool_pre_ping=True,
     pool_size=settings.max_pool_size,
     max_overflow=5,

@@ -43,7 +43,6 @@ user_prompt: |
   - quality_notes
 
 constraints:
-  max_completion_tokens: 16000
 
 metadata:
   category: "enrichment"

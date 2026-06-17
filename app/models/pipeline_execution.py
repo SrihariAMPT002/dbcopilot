@@ -81,6 +81,7 @@ class StageExecution(Base):
     prompt_size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     completion_truncated: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    blocked_by_stage: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     execution_order: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

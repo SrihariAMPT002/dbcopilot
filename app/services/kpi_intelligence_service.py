@@ -70,6 +70,7 @@ class KPIIntelligenceService:
             raise ValueError("KPI package is disabled by registry")
 
         database = await self._fetch_database(database_id)
+        schema_name_by_id = {schema.id: schema.name for schema in getattr(database, "schemas", []) or []}
         used_context = bool(context and (context.governance or context.semantics or context.relationships or context.kpis))
         fallback_reason = None
         governance_packages = list(context.governance.packages) if context and context.governance and context.governance.packages else await self._fetch_governance_packages(database_id)
@@ -93,7 +94,7 @@ class KPIIntelligenceService:
         db_semantic = semantics[0] if semantics and semantics[0] else None
         schema_semantics = [
             {
-                "schema": table.schema.name,
+                "schema": schema_name_by_id.get(getattr(table, "schema_id", None), ""),
                 "table": table.name,
                 "semantic_summary": semantic.semantic_summary,
             }
@@ -277,6 +278,7 @@ class KPIIntelligenceService:
         candidates: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         db_semantic, table_semantics = semantics
+        schema_name_by_id = {schema.id: schema.name for schema in getattr(database, "schemas", []) or []}
         governance_packages = governance_packages or []
         relationship_packages = relationship_packages or []
         return {
@@ -295,7 +297,7 @@ class KPIIntelligenceService:
             "relationship_packages": [self._relationship_package_to_dict(row) for row in relationship_packages],
             "schema_semantics": [
                 {
-                    "schema": table.schema.name,
+                    "schema": schema_name_by_id.get(getattr(table, "schema_id", None), ""),
                     "table": table.name,
                     "semantic_summary": semantic.semantic_summary,
                     "business_entity": semantic.business_entity,
@@ -431,17 +433,30 @@ class KPIIntelligenceService:
         text = (response_text or "").strip()
         if not text:
             raise ValueError("empty_ai_response")
+        if text.startswith("```"):
+            lines = text.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip().startswith("```"):
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+        if not text.startswith("{") or not text.endswith("}"):
+            start = text.find("{")
+            end = text.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                text = text[start : end + 1]
         try:
             payload = json.loads(text)
         except Exception as exc:
             raise ValueError("invalid_json") from exc
         if not isinstance(payload, dict):
             raise ValueError("invalid_json")
-        required = ["kpi_catalog", "kpi_definitions", "kpi_lineage", "kpi_context"]
-        missing = [field for field in required if field not in payload or payload[field] in (None, "", [], {})]
-        if missing:
-            raise ValueError(f"missing_required_sections:{','.join(missing)}")
-        return payload
+        return {
+            "kpi_catalog": payload.get("kpi_catalog") or [],
+            "kpi_definitions": payload.get("kpi_definitions") or [],
+            "kpi_lineage": payload.get("kpi_lineage") or [],
+            "kpi_context": payload.get("kpi_context") or "",
+        }
 
     def _cluster_prompt_context(
         self,
@@ -455,8 +470,10 @@ class KPIIntelligenceService:
         governance_packages: list[GovernancePackage] | None = None,
         semantic_package: SemanticPackage | None = None,
         relationship_packages: list[Any] | None = None,
+        candidates: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         db_semantic, table_semantics = semantics
+        schema_name_by_id = {schema.id: schema.name for schema in getattr(database, "schemas", []) or []}
         table_lookup = {table.id: (semantic, table) for semantic, table in table_semantics}
         cluster_tables = [table_lookup[table_id][1] for table_id in table_ids if table_id in table_lookup]
         if relationship_packages:
@@ -478,7 +495,7 @@ class KPIIntelligenceService:
             "cluster_table_count": len(cluster_tables),
             "cluster_tables": [
                 {
-                    "schema": table.schema.name,
+                    "schema": schema_name_by_id.get(getattr(table, "schema_id", None), ""),
                     "table": table.name,
                     "description": table.description,
                     "semantic_summary": table_lookup[table.id][0].semantic_summary if table.id in table_lookup else None,
@@ -511,6 +528,7 @@ class KPIIntelligenceService:
                 }
                 for sem in cluster_columns
             ],
+            "kpi_candidates": candidates or [],
         }
 
     async def _discover_for_cluster(
@@ -557,7 +575,21 @@ class KPIIntelligenceService:
         prompt_context, telemetry = self._apply_cluster_budget(prompt_context, cluster_relationships)
         rendered = self.registry.render_prompt("kpi_discovery", prompt_context, category="kpi")
         ai_result = await self._call_azure_openai(database, rendered, job_id=job_id, cluster_id=cluster_id, cluster_size=telemetry["cluster_size"], domain=prompt_context["semantic_domain"])
-        parsed_payload = self._parse_required_json(ai_result.content or "")
+        parse_warning: str | None = None
+        try:
+            parsed_payload = self._parse_required_json(ai_result.content or "")
+        except ValueError as exc:
+            parsed_payload = {
+                "kpi_catalog": [],
+                "kpi_definitions": [],
+                "kpi_lineage": [],
+                "kpi_context": "",
+            }
+            parse_warning = str(exc)
+        kpi_catalog = parsed_payload["kpi_catalog"]
+        kpi_definitions = parsed_payload["kpi_definitions"] or self._build_definitions(kpi_catalog)
+        kpi_lineage = parsed_payload["kpi_lineage"] or self._build_lineage(kpi_catalog, cluster_relationships)
+        kpi_context = parsed_payload["kpi_context"] or self._build_context_markdown(database, kpi_catalog, kpi_definitions, kpi_lineage)
         return {
             "cluster_id": cluster_id,
             "cluster_name": prompt_context["cluster_name"],
@@ -566,14 +598,15 @@ class KPIIntelligenceService:
             "actual_input_tokens": int(ai_result.token_usage.get("prompt_tokens", 0) or 0),
             "actual_output_tokens": int(ai_result.token_usage.get("completion_tokens", 0) or 0),
             "execution_status": "success",
-            "fallback_used": False,
+            "fallback_used": bool(parse_warning or not parsed_payload["kpi_catalog"] or not parsed_payload["kpi_definitions"] or not parsed_payload["kpi_lineage"] or not parsed_payload["kpi_context"]),
             "retry_count": 0,
             "trace_id": getattr(ai_result, "trace_id", None),
             "domain": prompt_context["semantic_domain"],
-            "catalog": parsed_payload["kpi_catalog"],
-            "definitions": parsed_payload["kpi_definitions"],
-            "lineage": parsed_payload["kpi_lineage"],
-            "context": parsed_payload["kpi_context"],
+            "catalog": kpi_catalog,
+            "definitions": kpi_definitions,
+            "lineage": kpi_lineage,
+            "context": kpi_context,
+            "parse_warning": parse_warning,
             "prompt_id": rendered.metadata.id,
             "prompt_version": rendered.metadata.version,
             "model_name": ai_result.model_name,
@@ -676,16 +709,16 @@ class KPIIntelligenceService:
             kpis.append(
                 {
                     "name": base_name,
-                    "description": f"Core KPI family inferred from {table.schema.name}.{table.name}.",
+                    "description": f"Core KPI family inferred from {schema_name_by_id.get(getattr(table, 'schema_id', None), '')}.{table.name}.",
                     "business_meaning": semantic.semantic_summary if semantic else "",
                     "formula": f"SUM({measurable_cols[0].name})",
-                    "source_tables": [f"{table.schema.name}.{table.name}"],
+                    "source_tables": [f"{schema_name_by_id.get(getattr(table, 'schema_id', None), '')}.{table.name}"],
                     "source_columns": [col.name for col in measurable_cols[:5]],
                     "dimensions": [c.name for c in table_columns[:5] if c.name not in {col.name for col in measurable_cols}],
                     "filters": [],
                     "confidence": round(min(0.95, confidence), 2),
                     "owner": db_semantic.business_domain if db_semantic and db_semantic.business_domain else None,
-                    "lineage_summary": f"Derived from {table.schema.name}.{table.name} with related semantic summary.",
+                    "lineage_summary": f"Derived from {schema_name_by_id.get(getattr(table, 'schema_id', None), '')}.{table.name} with related semantic summary.",
                     "discovery_source": "deterministic_batch",
                     "package_version": "1.0",
                     "status": "discovered",
@@ -697,12 +730,12 @@ class KPIIntelligenceService:
             kpis.append(
                 {
                     "name": f"{table.name} activity",
-                    "description": f"Fallback KPI inferred from {table.schema.name}.{table.name}.",
+                    "description": f"Fallback KPI inferred from {schema_name_by_id.get(getattr(table, 'schema_id', None), '')}.{table.name}.",
                     "business_meaning": table.description or "",
                     "formula": "COUNT(*)",
-                    "source_tables": [f"{table.schema.name}.{table.name}"],
+                    "source_tables": [f"{schema_name_by_id.get(getattr(table, 'schema_id', None), '')}.{table.name}"],
                     "source_columns": ["*"],
-                    "dimensions": [table.schema.name],
+                    "dimensions": [schema_name_by_id.get(getattr(table, "schema_id", None), "")],
                     "filters": [],
                     "confidence": 0.35,
                     "owner": db_semantic.business_domain if db_semantic and db_semantic.business_domain else None,

@@ -10,12 +10,13 @@ Flow:
   6. Update ConnectedDatabase.status and last_sync_at
 """
 
+import json
 import logging
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.connectors import get_connector
@@ -113,6 +114,30 @@ class SyncService:
         await safe_flush(self.db)
         return success, stage_output
 
+    async def _block_remaining_stages(
+        self,
+        *,
+        pipeline_execution_id: int,
+        db_id: int,
+        blocked_by_stage: str,
+        remaining_stages: list[tuple[int, str]],
+        reason: str,
+    ) -> None:
+        for execution_order, stage_name in remaining_stages:
+            stage_execution = StageExecution(
+                pipeline_execution_id=pipeline_execution_id,
+                database_id=db_id,
+                stage_name=stage_name,
+                status="blocked",
+                start_time=datetime.now(timezone.utc),
+                end_time=datetime.now(timezone.utc),
+                execution_order=execution_order,
+                blocked_by_stage=blocked_by_stage,
+                error_message=reason,
+            )
+            self.db.add(stage_execution)
+        await safe_flush(self.db)
+
     async def _run_governance_stage(self, db_id: int) -> None:
         from app.services.column_semantic_service import ColumnSemanticService
 
@@ -177,6 +202,8 @@ class SyncService:
             await safe_flush(self.db)
             await self.db.refresh(sync_log)
             sync_log_id = sync_log.id
+            sync_log_started_at = sync_log.started_at
+            sync_log_connected_db_id = db_id
 
             conn.status = ConnectionStatus.active
             await safe_flush(self.db)
@@ -192,6 +219,9 @@ class SyncService:
             pipeline_execution_id = pipeline_execution.id
 
             pipeline_context: dict[str, Any] = {"database_id": db_id, "stages": {}}
+            pipeline_context_source: str | None = None
+            pipeline_used_context: bool | None = None
+            pipeline_fallback_reason: str | None = None
 
             def _stage_provenance(value: Any) -> tuple[Any, Any, Any]:
                 if isinstance(value, dict):
@@ -237,7 +267,8 @@ class SyncService:
                 await self.db.commit()
 
                 stage_successes: list[bool] = []
-                for execution_order, stage_name, stage_label, runner in [
+                failed_stage_name: str | None = None
+                stages = [
                     (1, "governance", "pii classification", self._run_governance_stage),
                     (2, "semantics", "database semantic generation", self._run_semantics_stage),
                     (3, "relationships", "relationship graph build", self._run_relationships_stage),
@@ -245,7 +276,8 @@ class SyncService:
                     (5, "prompt", "prompt studio artifact generation", self._run_prompt_stage),
                     (6, "embeddings", "embedding generation", self._run_embeddings_stage),
                     (7, "readiness", "readiness recompute", self._run_readiness_stage),
-                ]:
+                ]
+                for index, (execution_order, stage_name, stage_label, runner) in enumerate(stages):
                     success, stage_output = await self._run_tracked_stage(
                         pipeline_execution_id,
                         stage_name=stage_name,
@@ -257,11 +289,23 @@ class SyncService:
                     stage_successes.append(success)
                     pipeline_context["stages"][stage_name] = self._json_safe(stage_output)
                     context_source, used_context, fallback_reason = _stage_provenance(stage_output)
-                    if pipeline_execution.context_source is None:
-                        pipeline_execution.context_source = context_source
-                        pipeline_execution.used_context = used_context
-                        pipeline_execution.fallback_reason = fallback_reason
+                    if pipeline_context_source is None:
+                        pipeline_context_source = context_source
+                        pipeline_used_context = used_context
+                        pipeline_fallback_reason = fallback_reason
                     await self.db.commit()
+                    if not success:
+                        failed_stage_name = stage_name
+                        remaining = [(order, name) for order, name, _, _ in stages[index + 1 :]]
+                        if remaining:
+                            await self._block_remaining_stages(
+                                pipeline_execution_id=pipeline_execution_id,
+                                db_id=db_id,
+                                blocked_by_stage=stage_name,
+                                remaining_stages=remaining,
+                                reason=f"Blocked by failed stage: {stage_name}",
+                            )
+                        break
 
                 try:
                     from app.services.opportunity_service import OpportunityService
@@ -302,10 +346,14 @@ class SyncService:
                 pipeline_execution.status = "completed" if all(stage_successes) else "failed"
                 pipeline_execution.end_time = datetime.now(timezone.utc)
                 pipeline_execution.duration_seconds = elapsed
+                pipeline_execution.context_source = pipeline_context_source
+                pipeline_execution.used_context = pipeline_used_context
+                pipeline_execution.fallback_reason = pipeline_fallback_reason
                 pipeline_execution.model_name = None
                 pipeline_execution.token_usage_json = None
                 pipeline_execution.pipeline_context_json = json.dumps(pipeline_context, default=str)
                 pipeline_execution.error_message = None if all(stage_successes) else "One or more stages failed"
+                pipeline_execution.blocked_by_stage = None if all(stage_successes) else failed_stage_name
                 conn.status = ConnectionStatus.active
                 conn.last_sync_at = datetime.now(timezone.utc)
                 conn.last_error = None
@@ -338,35 +386,46 @@ class SyncService:
                 error_msg = str(exc)
                 logger.error(error_message("sync failed", db_id=db_id, reason=error_msg), exc_info=True)
                 await self.db.rollback()
-                sync_log.status = SyncStatus.failed
-                sync_log.completed_at = datetime.now(timezone.utc)
-                sync_log.duration_seconds = round(elapsed, 3)
-                sync_log.error_message = error_msg[:1000]
                 failure_log = SyncLogResponse(
                     id=sync_log_id,
-                    connected_db_id=sync_log.connected_db_id,
-                    status=sync_log.status.value,
-                    started_at=sync_log.started_at,
-                    completed_at=sync_log.completed_at,
-                    duration_seconds=sync_log.duration_seconds,
-                    schemas_synced=sync_log.schemas_synced,
-                    tables_synced=sync_log.tables_synced,
-                    columns_synced=sync_log.columns_synced,
-                    relationships_synced=sync_log.relationships_synced,
-                    error_message=sync_log.error_message,
+                    connected_db_id=sync_log_connected_db_id,
+                    status=SyncStatus.failed.value,
+                    started_at=sync_log_started_at,
+                    completed_at=datetime.now(timezone.utc),
+                    duration_seconds=round(elapsed, 3),
+                    schemas_synced=counts["schemas"],
+                    tables_synced=counts["tables"],
+                    columns_synced=counts["columns"],
+                    relationships_synced=counts["relationships"],
+                    error_message=error_msg[:1000],
                 )
                 try:
+                    await self.db.execute(
+                        update(SyncLog)
+                        .where(SyncLog.id == sync_log_id)
+                        .values(
+                            status=SyncStatus.failed,
+                            completed_at=failure_log.completed_at,
+                            duration_seconds=failure_log.duration_seconds,
+                            schemas_synced=failure_log.schemas_synced,
+                            tables_synced=failure_log.tables_synced,
+                            columns_synced=failure_log.columns_synced,
+                            relationships_synced=failure_log.relationships_synced,
+                            error_message=failure_log.error_message,
+                        )
+                    )
                     await safe_flush(self.db)
                 except Exception:
                     logger.exception(error_message("failed to flush sync failure state", db_id=db_id))
-                conn = await self.db.get(ConnectedDatabase, db_id)
-                if conn:
-                    conn.status = ConnectionStatus.error
-                    conn.last_error = error_msg[:500]
-                    try:
-                        await safe_flush(self.db)
-                    except Exception:
-                        logger.exception(error_message("failed to persist sync failure state after rollback", db_id=db_id))
+                try:
+                    await self.db.execute(
+                        update(ConnectedDatabase)
+                        .where(ConnectedDatabase.id == db_id)
+                        .values(status=ConnectionStatus.error, last_error=error_msg[:500])
+                    )
+                    await safe_flush(self.db)
+                except Exception:
+                    logger.exception(error_message("failed to persist sync failure state after rollback", db_id=db_id))
                 return SyncResponse(success=False, message=f"Sync failed: {error_msg}", sync_log=failure_log)
 
     # ── Introspection ─────────────────────────────────────────────────────

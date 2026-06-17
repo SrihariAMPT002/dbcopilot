@@ -55,9 +55,6 @@ class PromptStudioArtifact:
 @dataclass
 class ContextPackageResult:
     artifact_type: ArtifactType
-    prompt_id: str
-    prompt_version: str
-    model_name: str
     content: str
     mime: str
     filename: str
@@ -65,6 +62,14 @@ class ContextPackageResult:
     governance_coverage: float
     pii_coverage: float
     generated_at: datetime
+    prompt_id: str | None = None
+    prompt_version: str | None = None
+    model_name: str | None = None
+    trace_id: str | None = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    reasoning_tokens: int = 0
+    latency_ms: float = 0.0
     manifest: Optional[dict[str, Any]] = None
 
 
@@ -90,6 +95,23 @@ class PromptStudioService:
         self.registry: PromptRegistry = get_prompt_registry()
         self.artifact_service = ArtifactService(db)
         self.chunker = SchemaChunkingService(max_schemas=8, max_tables_per_schema=8, max_columns_per_table=12)
+
+    @staticmethod
+    def _normalize_ai_artifact(artifact: Any | None, *, fallback: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = artifact if isinstance(artifact, dict) else {}
+        fallback = fallback or {}
+        return {
+            "prompt_id": payload.get("prompt_id") or payload.get("template_id") or fallback.get("prompt_id"),
+            "prompt_version": payload.get("prompt_version") or fallback.get("prompt_version") or "1.0",
+            "model_name": payload.get("model_name") or fallback.get("model_name") or settings.azure_openai_deployment,
+            "trace_id": payload.get("trace_id") or fallback.get("trace_id"),
+            "confidence_score": float(payload.get("confidence_score", fallback.get("confidence_score", 0.0)) or 0.0),
+            "prompt_tokens": int(payload.get("prompt_tokens", fallback.get("prompt_tokens", 0)) or 0),
+            "completion_tokens": int(payload.get("completion_tokens", fallback.get("completion_tokens", 0)) or 0),
+            "reasoning_tokens": int(payload.get("reasoning_tokens", fallback.get("reasoning_tokens", 0)) or 0),
+            "latency_ms": float(payload.get("latency_ms", fallback.get("latency_ms", 0.0)) or 0.0),
+            "execution_status": payload.get("execution_status") or fallback.get("execution_status") or "partial",
+        }
 
     @staticmethod
     def _is_sensitive_field(
@@ -308,11 +330,20 @@ class PromptStudioService:
             raise ValueError("Prompt Studio package is disabled by registry")
         context = await self._build_context(database_id, context=None)
         package = await self._generate_context_package(artifact_type, context)
+        normalized = self._normalize_ai_artifact(
+            {
+                "prompt_id": package.prompt_id,
+                "prompt_version": package.prompt_version,
+                "model_name": package.model_name,
+                "trace_id": getattr(package, "trace_id", None),
+                "confidence_score": getattr(package, "confidence_score", 0.0),
+            }
+        )
         return PromptStudioArtifact(
             artifact_type=package.artifact_type,
-            template_id=package.prompt_id,
-            prompt_version=package.prompt_version,
-            model_name=package.model_name,
+            template_id=normalized["prompt_id"],
+            prompt_version=normalized["prompt_version"],
+            model_name=normalized["model_name"],
             filename=package.filename,
             mime=package.mime,
             content=package.content,
@@ -328,20 +359,29 @@ class PromptStudioService:
 
         for artifact_type in self._artifact_order():
             package = await self._generate_context_package(artifact_type.value, context)
+            normalized = self._normalize_ai_artifact(
+                {
+                    "prompt_id": getattr(package, "prompt_id", None),
+                    "prompt_version": getattr(package, "prompt_version", None),
+                    "model_name": getattr(package, "model_name", None),
+                    "trace_id": getattr(package, "trace_id", None),
+                    "confidence_score": getattr(package, "confidence_score", 0.0),
+                }
+            )
             generated.append(
                 {
                     "artifact_type": package.artifact_type.value,
-                    "template_id": package.prompt_id,
-                    "prompt_id": package.prompt_id,
-                    "prompt_version": package.prompt_version,
-                    "model_name": package.model_name,
+                    "template_id": normalized["prompt_id"],
+                    "prompt_id": normalized["prompt_id"],
+                    "prompt_version": normalized["prompt_version"],
+                    "model_name": normalized["model_name"],
                     "filename": package.manifest.get("filename", package.filename) if package.manifest else package.filename,
                     "mime": package.mime,
                     "content": package.content,
                     "generated_at": package.generated_at,
-                    "context_quality_score": package.context_quality_score,
-                    "governance_coverage": package.governance_coverage,
-                    "pii_coverage": package.pii_coverage,
+                    "context_quality_score": getattr(package, "context_quality_score", 0.0),
+                    "governance_coverage": getattr(package, "governance_coverage", 0.0),
+                    "pii_coverage": getattr(package, "pii_coverage", 0.0),
                     "manifest": package.manifest,
                 }
             )
@@ -423,23 +463,32 @@ class PromptStudioService:
                 "database_id": database_id,
                 "prompt_id": prompt_id,
                 "prompt_version": "1.0",
-                "model_name": result.model_name,
+                "model_name": getattr(result, "model_name", settings.azure_openai_deployment),
             },
             prompt_id=prompt_id,
             prompt_version="1.0",
-            model_name=result.model_name,
+            model_name=getattr(result, "model_name", settings.azure_openai_deployment),
         )
 
+        normalized = self._normalize_ai_artifact(
+            {
+                "prompt_id": prompt_id,
+                "prompt_version": "1.0",
+                "model_name": getattr(result, "model_name", settings.azure_openai_deployment),
+                "trace_id": getattr(result, "trace_id", None),
+                "confidence_score": self._compute_quality(generation_context)["confidence_score"],
+            }
+        )
         return GeneratedPromptResult(
             artifact_type=artifact,
-            prompt_id=prompt_id,
-            prompt_version="1.0",
-            model_name=result.model_name,
+            prompt_id=normalized["prompt_id"],
+            prompt_version=normalized["prompt_version"],
+            model_name=normalized["model_name"],
             content=content,
             filename=filename,
             generated_at=result.generated_at,
-            trace_id=result.trace_id,
-            confidence_score=self._compute_quality(generation_context)["confidence_score"],
+            trace_id=normalized["trace_id"],
+            confidence_score=normalized["confidence_score"],
             manifest=saved,
         )
 
@@ -515,6 +564,7 @@ class PromptStudioService:
 
     async def _build_context(self, database_id: int, context: IntelligenceContext | None = None) -> dict[str, Any]:
         database = await self._fetch_database(database_id)
+        schema_name_by_id = {schema.id: schema.name for schema in getattr(database, "schemas", []) or []}
         semantic = await self._fetch_semantic(database_id) if not (context and context.semantics and context.semantics.package) else None
         semantic_package = context.semantics.package if context and context.semantics and context.semantics.package else await self._fetch_semantic_package(database_id)
         tables = await self._fetch_tables(database_id)
@@ -576,7 +626,7 @@ class PromptStudioService:
                     (
                         tbl
                         for tbl in table_lookup.values()
-                        if tbl.schema.name == table_summary["schema_name"] and tbl.name == table_summary["table_name"]
+                        if schema_name_by_id.get(getattr(tbl, "schema_id", None), "") == table_summary["schema_name"] and tbl.name == table_summary["table_name"]
                     ),
                     None,
                 )
@@ -848,16 +898,21 @@ class PromptStudioService:
         )
         return ContextPackageResult(
             artifact_type=artifact,
-            prompt_id=prompt_id,
-            prompt_version=prompt_version,
-            model_name=result.model_name,
+            prompt_id=getattr(result, "prompt_id", prompt_id),
+            prompt_version=getattr(result, "prompt_version", prompt_version),
+            model_name=getattr(result, "model_name", settings.azure_openai_deployment),
             content=content,
             mime=mime,
             filename=filename,
             context_quality_score=quality["context_quality_score"],
             governance_coverage=quality["governance_coverage"],
             pii_coverage=quality["pii_coverage"],
-            generated_at=result.generated_at,
+            generated_at=getattr(result, "generated_at", now_utc()),
+            trace_id=getattr(result, "trace_id", None),
+            prompt_tokens=int(getattr(result, "prompt_tokens", 0) or 0),
+            completion_tokens=int(getattr(result, "completion_tokens", 0) or 0),
+            reasoning_tokens=int(getattr(result, "reasoning_tokens", 0) or 0),
+            latency_ms=float(getattr(result, "latency_ms", 0.0) or 0.0),
             manifest=saved,
         )
 

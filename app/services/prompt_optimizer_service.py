@@ -47,7 +47,7 @@ class PromptOptimizerService:
             messages=[
                 {
                     "role": "system",
-                    "content": "You optimize prompts for safety, grounding, and token efficiency. Return only the improved prompt text.",
+                    "content": "You optimize prompts for safety, grounding, completeness, and clarity. Return only the improved prompt text.",
                 },
                 {
                     "role": "user",

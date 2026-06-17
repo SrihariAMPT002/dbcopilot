@@ -27,55 +27,58 @@ logger = logging.getLogger(__name__)
 
 
 def _to_readiness_response(data: ReadinessBreakdown) -> ReadinessResponse:
-    return ReadinessResponse(
-        database_id=data.database_id,
-        database_name=data.database_name,
-        readiness_status=data.readiness_status.value,
-        generated_at=data.generated_at,
-        scores=ReadinessCapabilityScore(
-            metadata_score=data.metadata_score,
-            semantic_score=data.semantic_score,
-            embeddings_score=data.embeddings_score,
-            relationship_score=data.relationship_score,
-            prompt_score=data.prompt_score,
-            kpi_score=data.kpi_readiness_score,
-            overall_score=data.overall_score,
-        ),
-        category_scores=ReadinessCategoryScore(
-            metadata_readiness_score=data.metadata_readiness_score,
-            semantic_readiness_score=data.semantic_readiness_score,
-            relationship_readiness_score=data.relationship_readiness_score,
-            ai_context_readiness_score=data.ai_context_readiness_score,
-            governance_readiness_score=data.governance_readiness_score,
-            kpi_readiness_score=data.kpi_readiness_score,
-            overall_score=data.overall_score,
-            kpi_cluster_count=data.kpi_cluster_count,
-            successful_cluster_count=data.successful_cluster_count,
-            failed_cluster_count=data.failed_cluster_count,
-            coverage_percentage=data.coverage_percentage,
-        ),
-        missing_stages=data.missing_stages,
-        remediation_hints=data.remediation_hints,
-        prompt_id=data.prompt_id,
-        prompt_version=data.prompt_version,
-        model_name=data.model_name,
-        kpi_cluster_count=data.kpi_cluster_count,
-        successful_cluster_count=data.successful_cluster_count,
-        failed_cluster_count=data.failed_cluster_count,
-        coverage_percentage=data.coverage_percentage,
-    )
+    payload = {
+        "database_id": getattr(data, "database_id", 0),
+        "database_name": getattr(data, "database_name", "unknown"),
+        "readiness_status": getattr(getattr(data, "readiness_status", None), "value", getattr(data, "readiness_status", "unknown")),
+        "generated_at": getattr(data, "generated_at", None),
+        "scores": {
+            "metadata_score": getattr(data, "metadata_score", 0),
+            "semantic_score": getattr(data, "semantic_score", 0),
+            "embeddings_score": getattr(data, "embeddings_score", 0),
+            "relationship_score": getattr(data, "relationship_score", 0),
+            "prompt_score": getattr(data, "prompt_score", 0),
+            "kpi_score": getattr(data, "kpi_readiness_score", 0),
+            "overall_score": getattr(data, "overall_score", 0),
+        },
+        "category_scores": {
+            "metadata_readiness_score": getattr(data, "metadata_readiness_score", 0),
+            "semantic_readiness_score": getattr(data, "semantic_readiness_score", 0),
+            "relationship_readiness_score": getattr(data, "relationship_readiness_score", 0),
+            "ai_context_readiness_score": getattr(data, "ai_context_readiness_score", 0),
+            "governance_readiness_score": getattr(data, "governance_readiness_score", 0),
+            "kpi_readiness_score": getattr(data, "kpi_readiness_score", 0),
+            "overall_score": getattr(data, "overall_score", 0),
+            "kpi_cluster_count": getattr(data, "kpi_cluster_count", 0),
+            "successful_cluster_count": getattr(data, "successful_cluster_count", 0),
+            "failed_cluster_count": getattr(data, "failed_cluster_count", 0),
+            "coverage_percentage": getattr(data, "coverage_percentage", 0.0),
+        },
+        "missing_stages": getattr(data, "missing_stages", []),
+        "remediation_hints": getattr(data, "remediation_hints", []),
+        "prompt_id": getattr(data, "prompt_id", None),
+        "prompt_version": getattr(data, "prompt_version", None),
+        "model_name": getattr(data, "model_name", None),
+        "kpi_cluster_count": getattr(data, "kpi_cluster_count", 0),
+        "successful_cluster_count": getattr(data, "successful_cluster_count", 0),
+        "failed_cluster_count": getattr(data, "failed_cluster_count", 0),
+        "coverage_percentage": getattr(data, "coverage_percentage", 0.0),
+    }
+    return ReadinessResponse.model_validate(payload)
 
 
 def _to_breakdown_response(data: ReadinessBreakdown) -> ReadinessBreakdownResponse:
     response = _to_readiness_response(data)
-    return ReadinessBreakdownResponse(
-        **response.model_dump(),
-        details=data.details,
-        ai_summary=data.ai_summary,
-        ai_recommendations=data.ai_recommendations,
-        ai_risks=data.ai_risks,
-        ai_roadmap=data.ai_roadmap,
-        ai_confidence=data.ai_confidence,
+    return ReadinessBreakdownResponse.model_validate(
+        {
+            **response.model_dump(),
+            "details": getattr(data, "details", {}),
+            "ai_summary": getattr(data, "ai_summary", None),
+            "ai_recommendations": getattr(data, "ai_recommendations", []),
+            "ai_risks": getattr(data, "ai_risks", []),
+            "ai_roadmap": getattr(data, "ai_roadmap", []),
+            "ai_confidence": getattr(data, "ai_confidence", 0.0),
+        }
     )
 
 

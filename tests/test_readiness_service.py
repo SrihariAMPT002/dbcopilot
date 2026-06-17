@@ -272,6 +272,49 @@ async def test_get_or_compute_hydrates_snapshot_ai_fields():
     assert service._collect_stats.await_count == 1
 
 
+def test_readiness_normalizes_partial_ai_artifacts():
+    session = AsyncMock()
+    service = ReadinessService(session)
+
+    normalized = service._normalize_ai_artifact(
+        {
+            "executive_summary": "Partial readiness summary",
+            "recommendations": ["Refresh prompts"],
+            "confidence": "0.64",
+        },
+        fallback={
+            "ai_summary": "Fallback summary",
+            "ai_recommendations": [],
+            "ai_risks": [],
+            "ai_roadmap": [],
+            "ai_confidence": 0.0,
+            "prompt_id": None,
+            "prompt_version": None,
+            "model_name": None,
+        },
+    )
+
+    assert normalized["ai_summary"] == "Partial readiness summary"
+    assert normalized["ai_recommendations"] == ["Refresh prompts"]
+    assert normalized["ai_risks"] == []
+    assert normalized["ai_roadmap"] == []
+    assert normalized["ai_confidence"] == 0.64
+    assert normalized["prompt_id"] is None
+    assert normalized["prompt_version"] is None
+    assert normalized["model_name"] is None
+    assert normalized["execution_status"] == "partial"
+
+
+def test_readiness_scoring_tolerates_partial_stats_payload():
+    service = ReadinessService(AsyncMock())
+
+    assert service._metadata_score({"metadata": {"schemas": 1}}) == 0
+    assert service._semantic_score({"metadata": {"tables": 1}, "semantic": {}}) == 0
+    assert service._relationship_score({"metadata": {"tables": 1}, "relationships": {}}) == 100
+    assert service._ai_context_score({"metadata": {"tables": 1}, "ai_context": {}}) == 0
+    assert service._governance_score({"governance": {}}) == 0
+
+
 @pytest.mark.asyncio
 async def test_collect_stats_empty_database_has_zero_snapshot_count():
     session = AsyncMock()

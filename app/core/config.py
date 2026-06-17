@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     sync_request_timeout_seconds: int = Field(default=180)
     embeddings_request_timeout_seconds: int = Field(default=180)
     prompt_studio_request_timeout_seconds: int = Field(default=180)
+    max_prompt_tokens: int = Field(default=20000)
 
     # ── Streamlit ──────────────────────────────────────────────
     api_base_url: str = Field(default="http://fastapi:8000/api/v1")
@@ -101,6 +102,8 @@ class Settings(BaseSettings):
     langsmith_endpoint: Optional[str] = Field(default=None)
     enable_sql_debug: bool = Field(default=False)
     sql_echo: bool = Field(default=False)
+    sql_logging: bool = Field(default=False)
+    api_log_only: bool = Field(default=True)
 
     # Intelligence Package Registry
     intelligence_packages_enabled: bool = Field(default=True)
@@ -145,7 +148,7 @@ class Settings(BaseSettings):
 
     @property
     def sql_debug_enabled(self) -> bool:
-        return bool(self.enable_sql_debug or self.sql_echo or self.debug)
+        return bool(self.enable_sql_debug or self.sql_echo or self.sql_logging or self.debug)
     
 @lru_cache()
 def get_settings() -> Settings:

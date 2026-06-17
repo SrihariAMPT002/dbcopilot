@@ -318,46 +318,29 @@ class AIObservabilityService:
         return len(content or "")
 
     @staticmethod
-    def _request_budget_summary(request_payload: dict[str, Any], *, operation: OperationType) -> dict[str, Any]:
+    def _request_size_summary(request_payload: dict[str, Any], *, operation: OperationType) -> dict[str, Any]:
         if operation == "embeddings":
             texts = request_payload.get("input", []) or []
             prompt_text = json.dumps(texts, default=str)
-            completion_budget = 0
         else:
             messages = request_payload.get("messages", []) or []
             prompt_text = json.dumps(messages, default=str)
-            completion_budget = int(request_payload.get("max_completion_tokens") or request_payload.get("max_tokens") or 0)
         return {
             "prompt_chars": len(prompt_text),
             "prompt_tokens_est": AIObservabilityService._estimate_text_tokens(prompt_text),
-            "completion_budget": completion_budget,
             "request_chars": len(_serialize_for_log(request_payload)),
         }
 
     @staticmethod
-    def _resolve_completion_budget(prompt_tokens_est: int, requested_completion_budget: int) -> tuple[int, int]:
-        estimated_tokens = prompt_tokens_est + max(requested_completion_budget, 4000)
-        dynamic_budget = int(min(max(4000, estimated_tokens * 0.35), 16000))
-        return estimated_tokens, max(requested_completion_budget, dynamic_budget)
-
-    def _prompt_completion_budget(self, prompt_id: Optional[str]) -> int | None:
-        if not prompt_id:
-            return None
-        if self._prompt_registry is None:
-            self._prompt_registry = get_prompt_registry()
-        try:
-            for prompt_path in self._prompt_registry.list_prompts():
-                category, current_id = prompt_path.split("/", 1) if "/" in prompt_path else ("", prompt_path)
-                if current_id != prompt_id:
-                    continue
-                prompt = self._prompt_registry.load_prompt(current_id, category=category or None)
-                constraints = prompt.get("constraints", {}) if isinstance(prompt, dict) else {}
-                budget = constraints.get("max_completion_tokens") or constraints.get("max_tokens")
-                if budget is not None:
-                    return int(budget)
-        except Exception:
-            logger.debug("Unable to resolve prompt budget for %s", prompt_id, exc_info=True)
-        return None
+    def _resolve_dynamic_capacity(prompt_tokens_est: int, context_size: int = 0) -> tuple[int, int]:
+        estimated_tokens = prompt_tokens_est + context_size
+        if estimated_tokens < 2_000:
+            capacity = 8_000
+        elif estimated_tokens < 10_000:
+            capacity = 32_000
+        else:
+            capacity = min(max(int(estimated_tokens * 2), 32_000), 128_000)
+        return estimated_tokens, capacity
 
     @staticmethod
     def _embeddings_from_response(response: Any) -> list[list[float]]:
@@ -483,12 +466,6 @@ class AIObservabilityService:
         """Execute an Azure OpenAI call under an optional LangSmith trace."""
         request_kwargs = dict(request_kwargs or {})
         retry_on_length = int(request_kwargs.pop("_retry_on_length", 0) or 0)
-        prompt_budget = self._prompt_completion_budget(prompt_id)
-        if prompt_budget is not None:
-            current_budget = int(request_kwargs.get("max_completion_tokens") or request_kwargs.get("max_tokens") or 0)
-            if current_budget < prompt_budget:
-                request_kwargs["max_completion_tokens"] = prompt_budget
-                request_kwargs.pop("max_tokens", None)
         model = model_name or (
             settings.azure_openai_embedding_deployment if operation == "embeddings" else settings.azure_openai_deployment
         )
@@ -631,32 +608,33 @@ class AIObservabilityService:
 
         with observation as generation:
             try:
-                budget_summary = self._request_budget_summary(request_payload, operation="chat")
-                _estimated_tokens, dynamic_completion_budget = self._resolve_completion_budget(
-                    budget_summary["prompt_tokens_est"],
-                    int(budget_summary["completion_budget"] or 0),
+                size_summary = self._request_size_summary(request_payload, operation="chat")
+                _estimated_tokens, dynamic_capacity = self._resolve_dynamic_capacity(
+                    size_summary["prompt_tokens_est"],
+                    size_summary["prompt_chars"],
                 )
-                request_payload["max_completion_tokens"] = dynamic_completion_budget
+                if "max_completion_tokens" not in request_payload and "max_tokens" not in request_payload:
+                    request_payload["max_completion_tokens"] = dynamic_capacity
                 request_payload.pop("max_tokens", None)
                 logger.info(
-                    "AI preflight | module=%s artifact_type=%s model=%s prompt_chars=%d prompt_tokens_est=%d completion_budget=%d request_chars=%d",
+                    "AI preflight | module=%s artifact_type=%s model=%s prompt_chars=%d prompt_tokens_est=%d dynamic_capacity=%d request_chars=%d",
                     module,
                     artifact_type,
                     model_name,
-                    budget_summary["prompt_chars"],
-                    budget_summary["prompt_tokens_est"],
-                    dynamic_completion_budget,
-                    budget_summary["request_chars"],
+                    size_summary["prompt_chars"],
+                    size_summary["prompt_tokens_est"],
+                    dynamic_capacity,
+                    size_summary["request_chars"],
                 )
                 logger.error("AZURE REQUEST=%s", _serialize_for_log(request_payload))
                 logger.error(
-                    "AZURE REQUEST SIZE | module=%s artifact_type=%s prompt_chars=%d prompt_tokens_est=%d completion_budget=%d request_chars=%d",
+                    "AZURE REQUEST SIZE | module=%s artifact_type=%s prompt_chars=%d prompt_tokens_est=%d dynamic_capacity=%d request_chars=%d",
                     module,
                     artifact_type,
-                    budget_summary["prompt_chars"],
-                    budget_summary["prompt_tokens_est"],
-                    budget_summary["completion_budget"],
-                    budget_summary["request_chars"],
+                    size_summary["prompt_chars"],
+                    size_summary["prompt_tokens_est"],
+                    dynamic_capacity,
+                    size_summary["request_chars"],
                 )
                 response = await asyncio.to_thread(_invoke, request_payload)
                 raw_response_dump = _response_dump_json(response)
@@ -680,14 +658,14 @@ class AIObservabilityService:
                     finish_reason = _resolve_finish_reason(response)
                     if retry_on_length > 0 and finish_reason == "length":
                         retry_on_length -= 1
-                        retry_budget = int(min(max(dynamic_completion_budget + 1000, dynamic_completion_budget * 1.5), 16000))
-                        request_payload["max_completion_tokens"] = retry_budget
+                        retry_capacity = int(min(max(dynamic_capacity + 1000, dynamic_capacity * 1.5), 128000))
+                        request_payload["max_completion_tokens"] = retry_capacity
                         logger.warning(
-                            "Azure OpenAI truncation retry | module=%s artifact_type=%s model=%s retry_budget=%d remaining_retries=%d",
+                            "Azure OpenAI truncation retry | module=%s artifact_type=%s model=%s retry_capacity=%d remaining_retries=%d",
                             module,
                             artifact_type,
                             model_name,
-                            retry_budget,
+                            retry_capacity,
                             retry_on_length,
                         )
                         response = await asyncio.to_thread(_invoke, request_payload)
@@ -725,9 +703,17 @@ class AIObservabilityService:
                 actual_input_tokens = int(usage.get("prompt_tokens", 0) or 0)
                 actual_output_tokens = int(usage.get("completion_tokens", 0) or 0)
                 completion_truncated = summary["finish_reason"] == "length" or (
-                    dynamic_completion_budget > 0
-                    and actual_output_tokens >= int(dynamic_completion_budget * 0.9)
+                    dynamic_capacity > 0
+                    and actual_output_tokens >= int(dynamic_capacity * 0.9)
                 )
+                if summary["finish_reason"] and summary["finish_reason"] != "stop":
+                    logger.warning(
+                        "AI generation finished non-stop | module=%s artifact_type=%s model=%s finish_reason=%s",
+                        module,
+                        artifact_type,
+                        model_name,
+                        summary["finish_reason"],
+                    )
                 logger.info(
                     "AI request usage | module=%s artifact_type=%s model=%s deployment=%s finish_reason=%s prompt_tokens=%d completion_tokens=%d total_tokens=%d reasoning_tokens=%d",
                     module,
@@ -782,7 +768,7 @@ class AIObservabilityService:
                     latency_ms=latency_ms,
                     estimated_input_tokens=estimated_input_tokens,
                     actual_input_tokens=actual_input_tokens,
-                    estimated_output_tokens=dynamic_completion_budget,
+                    estimated_output_tokens=dynamic_capacity,
                     actual_output_tokens=actual_output_tokens,
                     prompt_size_bytes=len(_serialize_for_log(request_payload)),
                     completion_truncated=completion_truncated,
@@ -795,7 +781,7 @@ class AIObservabilityService:
                         **metadata,
                         "estimated_input_tokens": estimated_input_tokens,
                         "actual_input_tokens": actual_input_tokens,
-                        "estimated_output_tokens": dynamic_completion_budget,
+                        "estimated_output_tokens": dynamic_capacity,
                         "actual_output_tokens": actual_output_tokens,
                         "prompt_size_bytes": len(_serialize_for_log(request_payload)),
                         "completion_truncated": completion_truncated,
@@ -850,22 +836,22 @@ class AIObservabilityService:
 
         with observation as embedding_obs:
             try:
-                budget_summary = self._request_budget_summary({"input": input_texts, **request_kwargs}, operation="embeddings")
-                _estimated_tokens, dynamic_completion_budget = self._resolve_completion_budget(
-                    budget_summary["prompt_tokens_est"],
-                    int(budget_summary["completion_budget"] or 0),
+                size_summary = self._request_size_summary({"input": input_texts, **request_kwargs}, operation="embeddings")
+                _estimated_tokens, dynamic_capacity = self._resolve_dynamic_capacity(
+                    size_summary["prompt_tokens_est"],
+                    size_summary["prompt_chars"],
                 )
                 request_kwargs = dict(request_kwargs)
                 request_kwargs.pop("max_tokens", None)
                 logger.info(
-                    "AI preflight | module=%s artifact_type=%s model=%s prompt_chars=%d prompt_tokens_est=%d completion_budget=%d request_chars=%d",
+                    "AI preflight | module=%s artifact_type=%s model=%s prompt_chars=%d prompt_tokens_est=%d dynamic_capacity=%d request_chars=%d",
                     module,
                     artifact_type,
                     model_name,
-                    budget_summary["prompt_chars"],
-                    budget_summary["prompt_tokens_est"],
-                    dynamic_completion_budget,
-                    budget_summary["request_chars"],
+                    size_summary["prompt_chars"],
+                    size_summary["prompt_tokens_est"],
+                    dynamic_capacity,
+                    size_summary["request_chars"],
                 )
                 response = await asyncio.to_thread(_invoke)
                 latency_ms = (time.perf_counter() - start) * 1000
@@ -903,7 +889,7 @@ class AIObservabilityService:
                     latency_ms=latency_ms,
                     estimated_input_tokens=estimated_input_tokens,
                     actual_input_tokens=actual_input_tokens,
-                    estimated_output_tokens=dynamic_completion_budget,
+                    estimated_output_tokens=dynamic_capacity,
                     actual_output_tokens=int(usage.get("completion_tokens", 0) or 0),
                     prompt_size_bytes=len(_serialize_for_log({"input": input_texts, **request_kwargs})),
                     completion_truncated=False,
@@ -916,7 +902,7 @@ class AIObservabilityService:
                         **metadata,
                         "estimated_input_tokens": estimated_input_tokens,
                         "actual_input_tokens": actual_input_tokens,
-                        "estimated_output_tokens": dynamic_completion_budget,
+                        "estimated_output_tokens": dynamic_capacity,
                         "actual_output_tokens": int(usage.get("completion_tokens", 0) or 0),
                         "prompt_size_bytes": len(_serialize_for_log({"input": input_texts, **request_kwargs})),
                         "completion_truncated": False,

@@ -75,4 +75,3 @@ metadata:
   category: system
   audience: prompt_studio
 constraints:
-  max_completion_tokens: 0

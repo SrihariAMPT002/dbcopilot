@@ -15,11 +15,31 @@ logger = logging.getLogger(__name__)
 COLLECTION_SCHEMA_TABLES = "schema_tables"
 COLLECTION_SCHEMA_RELATIONSHIPS = "schema_relationships"
 COLLECTION_SCHEMA_PROMPTS = "schema_prompts"
+COLLECTION_METADATA_VECTORS = "metadata_vectors"
+COLLECTION_GOVERNANCE_VECTORS = "governance_vectors"
+COLLECTION_SEMANTIC_VECTORS = "semantic_vectors"
+COLLECTION_RELATIONSHIP_VECTORS = "relationship_vectors"
+COLLECTION_KPI_VECTORS = "kpi_vectors"
+COLLECTION_PROMPT_VECTORS = "prompt_vectors"
+COLLECTION_MEMORY_VECTORS = "memory_vectors"
 
 ALL_COLLECTIONS = (
     COLLECTION_SCHEMA_TABLES,
     COLLECTION_SCHEMA_RELATIONSHIPS,
     COLLECTION_SCHEMA_PROMPTS,
+)
+
+REQUIRED_COLLECTIONS = (
+    COLLECTION_SCHEMA_TABLES,
+    COLLECTION_SCHEMA_RELATIONSHIPS,
+    COLLECTION_SCHEMA_PROMPTS,
+    COLLECTION_METADATA_VECTORS,
+    COLLECTION_GOVERNANCE_VECTORS,
+    COLLECTION_SEMANTIC_VECTORS,
+    COLLECTION_RELATIONSHIP_VECTORS,
+    COLLECTION_KPI_VECTORS,
+    COLLECTION_PROMPT_VECTORS,
+    COLLECTION_MEMORY_VECTORS,
 )
 
 _qdrant_svc: Optional["QdrantService"] = None
@@ -37,10 +57,26 @@ class QdrantService:
 
     def __init__(self, url: str) -> None:
         from qdrant_client import QdrantClient
+        from qdrant_client.http import models as qmodels
 
         self.client = QdrantClient(url=url, timeout=10)
+        self._qmodels = qmodels
         self._url = url
         logger.info("QdrantService connected to %s", url)
+
+    def ensure_required_collections(self, vector_size: int) -> None:
+        for name in REQUIRED_COLLECTIONS:
+            try:
+                self.client.get_collection(name)
+            except Exception:
+                self.client.create_collection(
+                    collection_name=name,
+                    vectors_config=self._qmodels.VectorParams(
+                        size=vector_size,
+                        distance=self._qmodels.Distance.COSINE,
+                    ),
+                )
+                logger.info("Created required Qdrant collection %s", name)
 
     # ── Health ────────────────────────────────────────────────────────────
 
@@ -247,3 +283,9 @@ def reset_qdrant_service() -> None:
     """Force re-initialisation — used in tests."""
     global _qdrant_svc
     _qdrant_svc = None
+
+
+def ensure_required_qdrant_collections(vector_size: int) -> None:
+    """Ensure all required vector collections exist."""
+    service = get_qdrant_service()
+    service.ensure_required_collections(vector_size)

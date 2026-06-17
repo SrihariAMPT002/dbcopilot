@@ -634,7 +634,6 @@ class DatabaseSemanticService:
         rendered_prompt = get_semantic_prompt(prompt_variables)
 
         observability = AIObservabilityService()
-        max_completion_tokens = int(get_config_manager().get_model_config("semantic_generation").get("max_completion_tokens", 2000) or 2000)
         system_prompt = get_prompt_registry().render_prompt(
             "system_prompt",
             self._build_system_prompt_variables(database, semantic_input),
@@ -657,7 +656,6 @@ class DatabaseSemanticService:
                 {"role": "user", "content": rendered_prompt.user_prompt},
             ],
             request_kwargs={
-                "max_completion_tokens": max_completion_tokens,
                 "response_format": {"type": "json_object"},
                 "reasoning_effort": "low",
             },

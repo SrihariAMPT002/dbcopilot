@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.schemas.api_schemas import (
     GovernanceEvidenceResponse,
+    GovernancePackageListResponse,
     GovernancePackageResponse,
     GovernancePiiSummaryResponse,
 )
@@ -18,16 +19,16 @@ router = APIRouter(prefix="/governance", tags=["Governance"])
 
 @router.get(
     "/packages/{database_id}",
-    response_model=dict,
+    response_model=GovernancePackageListResponse,
     summary="Get canonical governance packages for a database",
 )
-async def get_governance_packages(database_id: int, db: AsyncSession = Depends(get_db)) -> dict:
+async def get_governance_packages(database_id: int, db: AsyncSession = Depends(get_db)) -> GovernancePackageListResponse:
     service = ColumnSemanticService(db)
     try:
         await service._fetch_database(database_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return await service.build_governance_package(database_id)
+    return GovernancePackageListResponse.model_validate(await service.build_governance_package(database_id))
 
 
 @router.get(

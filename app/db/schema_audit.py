@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from sqlalchemy import inspect
+from sqlalchemy import UniqueConstraint, inspect
 from sqlalchemy.sql.sqltypes import Boolean, DateTime, Enum, Float, Integer, String, Text
 
 import app.models  # noqa: F401  # ensure ORM models are registered on Base.metadata
@@ -132,7 +132,7 @@ class SchemaAuditReport:
     def format_message(self) -> str:
         lines: list[str] = []
         for table in self.table_reports:
-            if not table.has_critical_errors():
+            if not table.has_critical_errors() and not table.has_warnings():
                 continue
             parts: list[str] = []
             if table.missing_columns:
@@ -141,6 +141,12 @@ class SchemaAuditReport:
                 parts.append(f"type mismatches {', '.join(table.type_mismatches)}")
             if table.missing_foreign_keys:
                 parts.append(f"missing foreign keys {', '.join(table.missing_foreign_keys)}")
+            if table.missing_indexes:
+                parts.append(f"missing indexes {', '.join(table.missing_indexes)}")
+            if table.duplicate_indexes:
+                parts.append(f"duplicate indexes {', '.join(table.duplicate_indexes)}")
+            if table.missing_unique_constraints:
+                parts.append(f"missing unique constraints {', '.join(table.missing_unique_constraints)}")
             lines.append(f"{table.table_name}: " + "; ".join(parts))
         return "Schema drift detected: " + " | ".join(lines) if lines else "Schema audit passed."
 
@@ -226,7 +232,7 @@ def audit_schema(sync_conn) -> SchemaAuditReport:
 
         model_unique_constraints = set()
         for constraint in table.constraints:
-            if getattr(constraint, "unique", False):
+            if isinstance(constraint, UniqueConstraint):
                 model_unique_constraints.add(tuple(sorted(normalize_constraint(constraint)[1])))
         for index in table.indexes:
             if getattr(index, "unique", False):

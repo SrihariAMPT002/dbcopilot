@@ -23,7 +23,6 @@ from app.api.routes import (
     readiness,
     readiness_history,
     readiness_remediation,
-    prompt_budgets,
     pipeline,
     artifacts,
     mongodb,
@@ -59,7 +58,6 @@ api_router.include_router(exports.router)
 api_router.include_router(readiness.router)
 api_router.include_router(readiness_history.router)
 api_router.include_router(readiness_remediation.router)
-api_router.include_router(prompt_budgets.router)
 api_router.include_router(pipeline.router)
 api_router.include_router(artifacts.router)
 api_router.include_router(mongodb.router)

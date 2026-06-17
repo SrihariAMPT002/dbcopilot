@@ -15,6 +15,7 @@ from app.main import app
 from app.db.session import get_db
 from app.services.prompt_studio_service import PromptStudioService
 from app.schema_engine.embeddings import EmbeddingEngine
+from app.schemas.api_schemas import ConnectionLifecycleResponse
 
 
 # ── Override the DB dependency ────────────────────────────────────────────────
@@ -32,8 +33,9 @@ app.dependency_overrides[get_db] = mock_get_db
 
 @pytest.fixture(scope="module")
 def client():
-    with TestClient(app, raise_server_exceptions=False) as c:
-        yield c
+    with patch("app.main.init_db", new_callable=AsyncMock, return_value=None):
+        with TestClient(app, raise_server_exceptions=False) as c:
+            yield c
 
 
 # ── Health check ──────────────────────────────────────────────────────────────
@@ -163,23 +165,40 @@ def test_get_connection_not_found(client):
 
 def test_delete_connection_not_found(client):
     with patch(
-        "app.services.connection_service.ConnectionService.delete_connection",
+        "app.services.connection_service.ConnectionService.delete_connection_hard",
         new_callable=AsyncMock,
-        return_value=False,
+        side_effect=ValueError("Connection id=9999 not found"),
     ):
-        r = client.delete("/api/v1/connections/9999")
+        r = client.request("DELETE", "/api/v1/connections/9999", json={"confirmation_text": "DELETE missing"})
     assert r.status_code == 404
 
 
 def test_delete_connection_success(client):
+    lifecycle = ConnectionLifecycleResponse(
+        database_id=1,
+        database_name="demo-db",
+        lifecycle_status="deleted",
+        message="Connection and requested resources deleted.",
+        preserved_resources={"schemas": 2, "tables": 4, "columns": 12, "relationships": 1},
+        deleted_resources={"delete_metadata": True, "delete_packages": True, "delete_embeddings": True, "delete_observability": True},
+        trace_id="trace-123",
+    )
+
     with patch(
-        "app.services.connection_service.ConnectionService.delete_connection",
+        "app.services.connection_service.ConnectionService.delete_connection_hard",
         new_callable=AsyncMock,
-        return_value=True,
+        return_value=lifecycle,
     ):
-        r = client.delete("/api/v1/connections/1")
+        r = client.request(
+            "DELETE",
+            "/api/v1/connections/1",
+            json={"confirmation_text": "DELETE demo-db"},
+        )
     assert r.status_code == 200
     assert r.json()["success"] is True
+    assert r.json()["status"] == "deleted"
+    assert r.json()["trace_id"] == "trace-123"
+    assert r.json()["metadata"]["database_name"] == "demo-db"
 
 
 # ── AI placeholders ───────────────────────────────────────────────────────────
@@ -221,6 +240,10 @@ def test_readiness_endpoint_includes_category_scores(client):
         governance_readiness_score=85,
         kpi_score=80,
         kpi_readiness_score=80,
+        kpi_cluster_count=0,
+        successful_cluster_count=0,
+        failed_cluster_count=0,
+        coverage_percentage=0.0,
         ai_summary="Persisted AI summary",
         ai_recommendations=["Improve semantic coverage"],
         ai_risks=["KPI freshness is stale"],
@@ -259,6 +282,83 @@ def test_readiness_endpoint_includes_category_scores(client):
     assert body["model_name"] == "gpt-5-nano"
 
 
+def test_governance_packages_endpoint_serializes(client):
+    fake_package = {
+        "database_id": 1,
+        "table_count": 1,
+        "packages": [
+            {
+                "id": 10,
+                "database_id": 1,
+                "table_id": 20,
+                "table_name": "orders",
+                "schema_name": "public",
+            }
+        ],
+    }
+
+    with patch(
+        "app.services.column_semantic_service.ColumnSemanticService._fetch_database",
+        new_callable=AsyncMock,
+        return_value=SimpleNamespace(id=1),
+    ), patch(
+        "app.services.column_semantic_service.ColumnSemanticService.build_governance_package",
+        new_callable=AsyncMock,
+        return_value=fake_package,
+    ):
+        r = client.get("/api/v1/governance/packages/1")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["database_id"] == 1
+    assert body["table_count"] == 1
+    assert body["packages"][0]["table_name"] == "orders"
+
+
+def test_relationship_package_endpoint_serializes(client):
+    fake_package = {
+        "database_id": 1,
+        "packages": [
+            SimpleNamespace(
+                cluster_id="cluster-1",
+                cluster_summary="Test cluster",
+                cluster_confidence=0.8,
+                entity_graph=[],
+                hidden_relationships=[],
+                business_process_flows=[],
+                upstream_dependencies=[],
+                downstream_dependencies=[],
+                lifecycle_flows=[],
+                evidence=[],
+                graph_metrics={},
+                confidence_details={},
+                analysis_status="completed",
+            )
+        ],
+        "cache_status": "live",
+    }
+
+    with patch(
+        "app.schema_engine.relationship_graph.RelationshipGraphEngine.get_relationship_package",
+        new_callable=AsyncMock,
+        return_value=fake_package,
+    ), patch(
+        "app.services.cache_service.cache_service.get",
+        new_callable=AsyncMock,
+        return_value=None,
+    ), patch(
+        "app.services.cache_service.cache_service.set",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        r = client.get("/api/v1/relationships/1")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["database_id"] == 1
+    assert body["packages"][0]["cluster_id"] == "cluster-1"
+
+
 def test_prompt_inventory_report(client):
     with patch(
         "app.services.prompt_studio_service.PromptStudioService.prompt_inventory_report",
@@ -291,7 +391,7 @@ def test_prompt_redaction_for_sensitive_columns():
     redacted = service._redact_context(context)
     assert redacted["columns"][0]["name"] == "[PII REDACTED]"
     assert redacted["columns"][0]["description"] == "[PII REDACTED]"
-    assert redacted["semantic"]["business_summary"] == "Customer data"
+    assert redacted["semantic"]["business_summary"] == "[REDACTED]"
 
 
 def test_embedding_masking_respects_flag(monkeypatch):
@@ -309,7 +409,7 @@ def test_openapi_schema_accessible(client):
     r = client.get("/openapi.json")
     assert r.status_code == 200
     schema = r.json()
-    assert schema["info"]["title"] == "DB Copilot"
+    assert schema["info"]["title"] == "AI Schema Intelligence Platform"
 
 
 def test_docs_accessible(client):

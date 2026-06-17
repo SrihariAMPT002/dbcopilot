@@ -51,6 +51,11 @@ services:
     env_file: .env
     environment:
       - POSTGRES_HOST=postgres
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - SQL_ECHO=${SQL_ECHO:-false}
+      - ENABLE_SQL_DEBUG=${ENABLE_SQL_DEBUG:-false}
+      - SQL_LOGGING=${SQL_LOGGING:-false}
+      - API_LOG_ONLY=${API_LOG_ONLY:-true}
     ports:
       - "${API_PORT:-8000}:8000"
     networks:

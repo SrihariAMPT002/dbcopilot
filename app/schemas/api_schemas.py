@@ -19,8 +19,11 @@ from app.models.metadata import ConnectionStatus, DatabaseType, SyncStatus, Tabl
 
 class APIResponse(BaseModel):
     """Generic wrapper for all API responses."""
-    success: bool
-    message: str
+    success: bool = True
+    message: str = ""
+    status: Optional[str] = None
+    trace_id: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
     data: Optional[Any] = None
 
 
@@ -253,6 +256,12 @@ class GovernancePackageResponse(BaseModel):
     raw_failure_reason: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+
+class GovernancePackageListResponse(BaseModel):
+    database_id: int
+    table_count: int = 0
+    packages: List[GovernancePackageResponse] = Field(default_factory=list)
 
 
 class GovernancePiiSummaryResponse(BaseModel):
@@ -1007,6 +1016,7 @@ class StageExecutionResponse(BaseModel):
     prompt_size_bytes: Optional[int] = None
     completion_truncated: Optional[bool] = None
     error_message: Optional[str] = None
+    blocked_by_stage: Optional[str] = None
     execution_order: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

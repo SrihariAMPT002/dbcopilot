@@ -157,16 +157,18 @@ async def generate_database_embeddings(
                     await job_service.update_status(job_id, JobStatus.failed, progress_percentage=0, failure_reason=str(exc))
 
         background_tasks.add_task(_runner, job.id)
-        return EmbeddingGenerateResponse(
-            database_id=db_id,
-            database_name="queued",
-            embedding_model=settings.azure_openai_embedding_deployment,
-            tables_indexed=0,
-            vectors_indexed=0,
-            token_usage={},
-            latency_ms=0.0,
-            success=True,
-            message=f"Embedding generation queued as job {job.id}. Poll /pipeline/jobs/{job.id} for progress.",
+        return EmbeddingGenerateResponse.model_validate(
+            {
+                "database_id": db_id,
+                "database_name": "queued",
+                "embedding_model": settings.azure_openai_embedding_deployment,
+                "tables_indexed": 0,
+                "vectors_indexed": 0,
+                "token_usage": {},
+                "latency_ms": 0.0,
+                "success": True,
+                "message": f"Embedding generation queued as job {job.id}. Poll /pipeline/jobs/{job.id} for progress.",
+            }
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
@@ -193,16 +195,18 @@ async def generate_table_embeddings(
     _guard_embedding_config(engine)
     try:
         result = await engine.generate_table_embeddings(db_id, table_id)
-        return EmbeddingGenerateResponse(
-            database_id=result.database_id,
-            database_name=result.database_name,
-            embedding_model=result.embedding_model,
-            tables_indexed=result.tables_indexed,
-            vectors_indexed=result.vectors_indexed,
-            token_usage=result.token_usage,
-            latency_ms=round(result.latency_ms, 2),
-            success=result.success,
-            message=result.message,
+        return EmbeddingGenerateResponse.model_validate(
+            {
+                "database_id": result.database_id,
+                "database_name": result.database_name,
+                "embedding_model": result.embedding_model,
+                "tables_indexed": result.tables_indexed,
+                "vectors_indexed": result.vectors_indexed,
+                "token_usage": result.token_usage,
+                "latency_ms": round(result.latency_ms, 2),
+                "success": result.success,
+                "message": result.message,
+            }
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
@@ -251,16 +255,18 @@ async def refresh_database_embeddings(
                     await job_service.update_status(job_id, JobStatus.failed, progress_percentage=0, failure_reason=str(exc))
 
         background_tasks.add_task(_runner, job.id)
-        return EmbeddingGenerateResponse(
-            database_id=db_id,
-            database_name="queued",
-            embedding_model=settings.azure_openai_embedding_deployment,
-            tables_indexed=0,
-            vectors_indexed=0,
-            token_usage={},
-            latency_ms=0.0,
-            success=True,
-            message=f"Embedding refresh queued as job {job.id}.",
+        return EmbeddingGenerateResponse.model_validate(
+            {
+                "database_id": db_id,
+                "database_name": "queued",
+                "embedding_model": settings.azure_openai_embedding_deployment,
+                "tables_indexed": 0,
+                "vectors_indexed": 0,
+                "token_usage": {},
+                "latency_ms": 0.0,
+                "success": True,
+                "message": f"Embedding refresh queued as job {job.id}.",
+            }
         )
     except Exception as exc:
         logger.error(error_message("embedding refresh failed", db_id=db_id, reason=exc), exc_info=True)
@@ -289,7 +295,7 @@ async def get_embedding_status(
             return EmbeddingStatusResponse.model_validate_json(cached)
         data = await engine.get_embedding_status(db_id)
         collections = [CollectionStatus(**c) for c in data.pop("collections", [])]
-        payload = EmbeddingStatusResponse(**data, collections=collections, cache_status="live")
+        payload = EmbeddingStatusResponse.model_validate({**data, "collections": collections, "cache_status": "live"})
         await cache_service.set(cache_key, payload.model_dump_json(), ttl_seconds=600)
         logger.info(api_message("embeddings status", db_id=db_id, duration_ms=f"{(time.perf_counter() - start) * 1000:.2f}"))
         return payload
