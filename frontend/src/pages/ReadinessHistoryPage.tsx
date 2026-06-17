@@ -13,8 +13,8 @@ import { useReadinessHistory } from "@/hooks/useReadinessHistory";
 import { ReadinessSparkline } from "@/components/readiness/ReadinessSparkline";
 
 export function ReadinessHistoryPage() {
-  const { selectedDatabaseId } = useDatabaseContext();
-  const dbId = selectedDatabaseId ?? 1;
+  const { selectedDatabase } = useDatabaseContext();
+  const dbId = selectedDatabase?.database_id ?? null;
   const [maturityLevel, setMaturityLevel] = useState<string>("all");
   const [minScore, setMinScore] = useState<string>("");
   const [maxScore, setMaxScore] = useState<string>("");

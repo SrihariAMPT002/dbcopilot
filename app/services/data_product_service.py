@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.models.data_product import DataProduct
 from app.models.metadata import RelationshipPackage, SemanticPackage
 from app.services.ai_observability_service import AIObservabilityService
+from app.services.relationship_package_mapper import relationship_package_to_dto
 
 
 class DataProductService:
@@ -23,7 +24,10 @@ class DataProductService:
     async def generate_for_database(self, database_id: int) -> list[dict[str, Any]]:
         semantic = await self.db.execute(select(SemanticPackage).where(SemanticPackage.database_id == database_id))
         relationship = await self.db.execute(select(RelationshipPackage).where(RelationshipPackage.database_id == database_id))
-        payload = {"semantic": self._semantic_row(semantic.scalars().first()), "relationships": [self._relationship_row(pkg) for pkg in relationship.scalars().all()]}
+        payload = {
+            "semantic": self._semantic_row(semantic.scalars().first()),
+            "relationships": [self._relationship_row(relationship_package_to_dto(pkg)) for pkg in relationship.scalars().all()],
+        }
         deterministic = self._deterministic(payload)
         rows = await self._ai_enrich(database_id, payload, deterministic)
         await self._persist(database_id, rows)
@@ -74,11 +78,11 @@ class DataProductService:
         return {"business_domain": pkg.business_domain, "business_entities": pkg.business_entities, "business_processes": pkg.business_processes, "confidence_score": pkg.confidence_score}
 
     @staticmethod
-    def _relationship_row(pkg: RelationshipPackage) -> dict[str, Any]:
+    def _relationship_row(pkg: Any) -> dict[str, Any]:
         return {
             "cluster_id": pkg.cluster_id,
             "domain_name": pkg.domain_name,
-            "confidence_score": float(getattr(pkg, "confidence_score", getattr(pkg, "cluster_confidence", 0.0)) or 0.0),
-            "cluster_confidence": float(getattr(pkg, "confidence_score", getattr(pkg, "cluster_confidence", 0.0)) or 0.0),
-            "entity_graph": pkg.entity_graph,
+            "confidence_score": float(getattr(pkg, "confidence_score", 0.0) or 0.0),
+            "entity_graph": list(getattr(pkg, "entity_graph", []) or []),
+            "cluster_summary": getattr(pkg, "cluster_summary", None),
         }

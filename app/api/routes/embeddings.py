@@ -10,6 +10,7 @@ POST /embeddings/search                       — semantic search over stored ve
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -18,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Response
 
 from app.core.config import settings
+from app.core.structured_logging import api_message, error_message
 from app.db import get_db
 from app.db.session import db_session
 from app.models.metadata import (
@@ -43,6 +45,7 @@ from app.schemas.embedding_schemas import (
     SemanticSearchRequest,
     SemanticSearchResponse,
 )
+from app.services.cache_service import cache_service
 from app.services.qdrant_service import get_qdrant_service
 from app.services.pipeline_service import PipelineService
 from app.schemas.embedding_document import EmbeddingDocumentItem, EmbeddingDocumentListResponse
@@ -150,7 +153,7 @@ async def generate_database_embeddings(
                     else:
                         await job_service.update_status(job_id, JobStatus.failed, progress_percentage=0, failure_reason=result.message)
                 except Exception as exc:
-                    logger.exception("Background embedding job failed for db_id=%s job_id=%s", db_id, job_id)
+                    logger.exception(error_message("background embedding job failed", db_id=db_id, job_id=job_id, reason=exc))
                     await job_service.update_status(job_id, JobStatus.failed, progress_percentage=0, failure_reason=str(exc))
 
         background_tasks.add_task(_runner, job.id)
@@ -168,7 +171,7 @@ async def generate_database_embeddings(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except Exception as exc:
-        logger.error("Embedding queue failed for db_id=%s: %s", db_id, exc, exc_info=True)
+        logger.error(error_message("embedding queue failed", db_id=db_id, reason=exc), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Embedding generation failed: {exc}",
@@ -204,10 +207,7 @@ async def generate_table_embeddings(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except Exception as exc:
-        logger.error(
-            "Table embedding failed for table_id=%s db_id=%s: %s",
-            table_id, db_id, exc, exc_info=True,
-        )
+        logger.error(error_message("table embedding failed", table_id=table_id, db_id=db_id, reason=exc), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Table embedding failed: {exc}",
@@ -247,7 +247,7 @@ async def refresh_database_embeddings(
                     else:
                         await job_service.update_status(job_id, JobStatus.failed, progress_percentage=0, failure_reason=result.message)
                 except Exception as exc:
-                    logger.exception("Embedding refresh job failed for db_id=%s job_id=%s", db_id, job_id)
+                    logger.exception(error_message("embedding refresh job failed", db_id=db_id, job_id=job_id, reason=exc))
                     await job_service.update_status(job_id, JobStatus.failed, progress_percentage=0, failure_reason=str(exc))
 
         background_tasks.add_task(_runner, job.id)
@@ -263,7 +263,7 @@ async def refresh_database_embeddings(
             message=f"Embedding refresh queued as job {job.id}.",
         )
     except Exception as exc:
-        logger.error("Embedding refresh failed for db_id=%s: %s", db_id, exc, exc_info=True)
+        logger.error(error_message("embedding refresh failed", db_id=db_id, reason=exc), exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
@@ -280,14 +280,23 @@ async def get_embedding_status(
     db: AsyncSession = Depends(get_db),
 ) -> EmbeddingStatusResponse:
     engine = EmbeddingEngine(db)
+    start = time.perf_counter()
     try:
+        cache_key = f"embeddings:{db_id}:status"
+        cached = await cache_service.get(cache_key)
+        if cached:
+            logger.info(api_message("embeddings status", db_id=db_id, duration_ms=f"{(time.perf_counter() - start) * 1000:.2f}", cache_hit=True))
+            return EmbeddingStatusResponse.model_validate_json(cached)
         data = await engine.get_embedding_status(db_id)
         collections = [CollectionStatus(**c) for c in data.pop("collections", [])]
-        return EmbeddingStatusResponse(**data, collections=collections)
+        payload = EmbeddingStatusResponse(**data, collections=collections, cache_status="live")
+        await cache_service.set(cache_key, payload.model_dump_json(), ttl_seconds=600)
+        logger.info(api_message("embeddings status", db_id=db_id, duration_ms=f"{(time.perf_counter() - start) * 1000:.2f}"))
+        return payload
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except Exception as exc:
-        logger.error("Status check failed for db_id=%s: %s", db_id, exc, exc_info=True)
+        logger.error(error_message("embedding status check failed", db_id=db_id, reason=exc), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve embedding status",
@@ -342,12 +351,7 @@ async def delete_database_embeddings(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     except Exception as exc:
-        logger.error(
-            "Delete embeddings failed for db_id=%s: %s",
-            db_id,
-            exc,
-            exc_info=True,
-        )
+        logger.error(error_message("delete embeddings failed", db_id=db_id, reason=exc), exc_info=True)
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -383,15 +387,10 @@ async def semantic_search(
     _guard_qdrant(engine)
 
     try:
-        logger.info(
-            "Semantic search started for db_id=%s collection=%s top_k=%s",
-            request.db_id,
-            request.collection,
-            request.top_k,
-        )
+        logger.info(api_message("semantic search started", db_id=request.db_id, collection=request.collection, top_k=request.top_k))
         query_vector, _ = await engine._embed_text(request.query)
     except Exception as exc:
-        logger.error("Query embedding failed: %s", exc, exc_info=True)
+        logger.error(error_message("query embedding failed", reason=exc), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Azure OpenAI embedding call failed: {exc}",
@@ -416,7 +415,7 @@ async def semantic_search(
             )
             result_collection_label = request.collection
     except Exception as exc:
-        logger.error("Qdrant search failed: %s", exc, exc_info=True)
+        logger.error(error_message("qdrant search failed", reason=exc), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Vector search failed: {exc}",

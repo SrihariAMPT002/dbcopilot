@@ -18,8 +18,8 @@ import { TraceLink } from "@/components/common/TraceLink";
 
 export function ReadinessPage() {
   const queryClient = useQueryClient();
-  const { selectedDatabaseId } = useDatabaseContext();
-  const dbId = selectedDatabaseId ?? 1;
+  const { selectedDatabase } = useDatabaseContext();
+  const dbId = selectedDatabase?.database_id ?? null;
   const { data } = useReadiness(dbId);
   const { data: history } = useReadinessHistory(dbId);
   const { data: remediation } = useRemediation(dbId);

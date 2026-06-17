@@ -15,6 +15,7 @@ from app.core.config import settings
 from app.models.agent_memory import AgentMemory
 from app.models.metadata import ConnectedDatabase
 from app.services.database_guard import ensure_connected
+from app.core.structured_logging import error_message
 from app.schema_engine.embeddings import get_qdrant_client, qmodels
 from app.services.ai_observability_service import AIObservabilityService
 from app.services.vector_store_service import VectorStoreService
@@ -138,7 +139,7 @@ class AgentMemoryService:
                 with_payload=True,
             )
         except Exception as exc:
-            logger.warning("Agent memory vector search failed for db_id=%s: %s", database_id, exc)
+            logger.warning(error_message("agent memory vector search failed", db_id=database_id, reason=exc))
             hits = []
 
         results = []

@@ -11,8 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 export function SemanticsPage() {
-  const { selectedDatabaseId } = useDatabaseContext();
-  const dbId = selectedDatabaseId ?? 1;
+  const { selectedDatabase } = useDatabaseContext();
+  const dbId = selectedDatabase?.database_id ?? null;
   const { data } = useSemantics(dbId);
   const { data: evidence } = useSemanticEvidence(dbId);
   const [search, setSearch] = useState("");

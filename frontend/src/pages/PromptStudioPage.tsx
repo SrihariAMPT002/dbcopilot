@@ -72,8 +72,8 @@ export function PromptStudioPage() {
     reasoning_summary?: string | null;
     trace_id?: string | null;
   } | null>(null);
-  const { selectedDatabaseId } = useDatabaseContext();
-  const dbId = selectedDatabaseId ?? 1;
+  const { selectedDatabase } = useDatabaseContext();
+  const dbId = selectedDatabase?.database_id ?? null;
   const queryClient = useQueryClient();
   const { data: templates } = usePromptTemplates();
   const { data: inventory } = usePromptInventory();

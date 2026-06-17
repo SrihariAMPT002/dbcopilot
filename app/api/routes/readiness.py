@@ -5,6 +5,7 @@ AI readiness APIs.
 from __future__ import annotations
 
 import logging
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,8 @@ from app.schemas.api_schemas import (
 )
 from app.services.readiness_service import ReadinessBreakdown, ReadinessService
 from app.services.remediation_service import RemediationService
+from app.services.cache_service import cache_service
+from app.core.structured_logging import api_message, error_message
 
 router = APIRouter(prefix="/readiness", tags=["AI Readiness"])
 logger = logging.getLogger(__name__)
@@ -83,13 +86,23 @@ def _to_breakdown_response(data: ReadinessBreakdown) -> ReadinessBreakdownRespon
 )
 async def get_readiness(db_id: int, db: AsyncSession = Depends(get_db)) -> ReadinessResponse:
     service = ReadinessService(db)
+    start = time.perf_counter()
     try:
+        cache_key = f"readiness:{db_id}:snapshot"
+        cached = await cache_service.get(cache_key)
+        if cached:
+            payload = ReadinessResponse.model_validate_json(cached)
+            logger.info(api_message("readiness get", db_id=db_id, duration_ms=f"{(time.perf_counter() - start) * 1000:.2f}", cache_hit=True))
+            return payload
         result = await service.get_or_compute(db_id)
-        return _to_readiness_response(result)
+        payload = _to_readiness_response(result)
+        await cache_service.set(cache_key, payload.model_dump_json(), ttl_seconds=600)
+        logger.info(api_message("readiness get", db_id=db_id, duration_ms=f"{(time.perf_counter() - start) * 1000:.2f}"))
+        return payload
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except Exception as exc:
-        logger.error("Readiness lookup failed for db_id=%s: %s", db_id, exc, exc_info=True)
+        logger.error(error_message("readiness lookup failed", db_id=db_id, reason=exc), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve readiness status",
@@ -106,13 +119,23 @@ async def get_readiness_breakdown(
     db: AsyncSession = Depends(get_db),
 ) -> ReadinessBreakdownResponse:
     service = ReadinessService(db)
+    start = time.perf_counter()
     try:
+        cache_key = f"readiness:{db_id}:breakdown"
+        cached = await cache_service.get(cache_key)
+        if cached:
+            payload = ReadinessBreakdownResponse.model_validate_json(cached)
+            logger.info(api_message("readiness breakdown", db_id=db_id, duration_ms=f"{(time.perf_counter() - start) * 1000:.2f}", cache_hit=True))
+            return payload
         result = await service.get_or_compute(db_id)
-        return _to_breakdown_response(result)
+        payload = _to_breakdown_response(result)
+        await cache_service.set(cache_key, payload.model_dump_json(), ttl_seconds=600)
+        logger.info(api_message("readiness breakdown", db_id=db_id, duration_ms=f"{(time.perf_counter() - start) * 1000:.2f}"))
+        return payload
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except Exception as exc:
-        logger.error("Readiness breakdown failed for db_id=%s: %s", db_id, exc, exc_info=True)
+        logger.error(error_message("readiness breakdown failed", db_id=db_id, reason=exc), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve readiness breakdown",
@@ -129,13 +152,17 @@ async def recompute_readiness(
     db: AsyncSession = Depends(get_db),
 ) -> ReadinessBreakdownResponse:
     service = ReadinessService(db)
+    start = time.perf_counter()
     try:
         result = await service.recompute(db_id)
+        await cache_service.delete(f"readiness:{db_id}:snapshot")
+        await cache_service.delete(f"readiness:{db_id}:breakdown")
+        logger.info(api_message("readiness recompute", db_id=db_id, duration_ms=f"{(time.perf_counter() - start) * 1000:.2f}"))
         return _to_breakdown_response(result)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except Exception as exc:
-        logger.error("Readiness recompute failed for db_id=%s: %s", db_id, exc, exc_info=True)
+        logger.error(error_message("readiness recompute failed", db_id=db_id, reason=exc), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to recompute readiness",
@@ -152,11 +179,15 @@ async def recalculate_readiness(
     db: AsyncSession = Depends(get_db),
 ) -> ReadinessBreakdownResponse:
     service = ReadinessService(db)
+    start = time.perf_counter()
     try:
         result = await service.recompute(db_id)
+        await cache_service.delete(f"readiness:{db_id}:snapshot")
+        await cache_service.delete(f"readiness:{db_id}:breakdown")
+        logger.info(api_message("readiness recalculate", db_id=db_id, duration_ms=f"{(time.perf_counter() - start) * 1000:.2f}"))
         return _to_breakdown_response(result)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except Exception as exc:
-        logger.error("Readiness recalculation failed for db_id=%s: %s", db_id, exc, exc_info=True)
+        logger.error(error_message("readiness recalculation failed", db_id=db_id, reason=exc), exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to recalculate readiness")

@@ -26,10 +26,10 @@ def configure_logging(level: Optional[str] = None) -> None:
         handlers=[logging.StreamHandler(sys.stdout)],
     )
 
-    # Silence noisy third-party loggers
-    for noisy in ("asyncio", "sqlalchemy.engine", "urllib3", "httpx"):
+    # Silence noisy third-party loggers by default.
+    for noisy in ("asyncio", "sqlalchemy.engine", "sqlalchemy.pool", "asyncpg", "urllib3", "httpx"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
-    logging.getLogger("sqlalchemy.engine").setLevel(
-        logging.INFO if settings.debug else logging.WARNING
-    )
+    if settings.sql_debug_enabled:
+        logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
+        logging.getLogger("sqlalchemy.pool").setLevel(logging.INFO)

@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.models.metadata import RelationshipPackage, SemanticPackage
 from app.models.warehouse_design import WarehouseDesign
 from app.services.ai_observability_service import AIObservabilityService
+from app.services.relationship_package_mapper import relationship_package_to_dto
 
 
 class WarehouseDesignService:
@@ -74,4 +75,5 @@ class WarehouseDesignService:
 
     @staticmethod
     def _relationship_row(pkg: RelationshipPackage) -> dict[str, Any]:
-        return {"cluster_id": pkg.cluster_id, "entity_graph": pkg.entity_graph, "lifecycle_flows": pkg.lifecycle_flows}
+        dto = relationship_package_to_dto(pkg)
+        return {"cluster_id": dto.cluster_id, "entity_graph": dto.entity_graph, "lifecycle_flows": dto.lifecycle_flows}

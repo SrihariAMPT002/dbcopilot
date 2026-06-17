@@ -16,20 +16,20 @@ import { AgentMemoryService } from "@/services/agentMemoryService";
 import { TraceLink } from "@/components/common/TraceLink";
 
 export function AgentsPage() {
-  const { selectedDatabaseId } = useDatabaseContext();
+  const { selectedDatabase } = useDatabaseContext();
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [selectedHitId, setSelectedHitId] = useState<number | null>(null);
   const [memoryQuery, setMemoryQuery] = useState("");
   const [memoryResponse, setMemoryResponse] = useState("");
-  const dbId = selectedDatabaseId ?? 0;
-  const { data: history } = useAgentMemoryHistory(dbId || null, 10);
-  const { data: search } = useAgentMemorySearch(dbId || null, query, 5);
+  const dbId = selectedDatabase?.database_id ?? null;
+  const { data: history } = useAgentMemoryHistory(dbId, 10);
+  const { data: search } = useAgentMemorySearch(dbId, query, 5);
 
   const createMemory = useMutation({
     mutationFn: () =>
       AgentMemoryService.create({
-        database_id: dbId,
+        database_id: dbId ?? 0,
         query_text: memoryQuery,
         response_text: memoryResponse,
         memory_type: "query_history",
@@ -38,7 +38,7 @@ export function AgentsPage() {
     onSuccess: async () => {
       setMemoryQuery("");
       setMemoryResponse("");
-      await queryClient.invalidateQueries({ queryKey: ["agent-memory-history", dbId || "default", 10] });
+      await queryClient.invalidateQueries({ queryKey: ["agent-memory-history", dbId ?? "default", 10] });
     },
   });
 
@@ -68,7 +68,7 @@ export function AgentsPage() {
               placeholder="Stored answer or assistant response"
               className="min-h-28"
             />
-            <Button onClick={() => createMemory.mutate()} disabled={!memoryQuery.trim() || createMemory.isPending} className="gap-1.5">
+            <Button onClick={() => createMemory.mutate()} disabled={!dbId || !memoryQuery.trim() || createMemory.isPending} className="gap-1.5">
               {createMemory.isPending ? <History className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
               Save memory
             </Button>

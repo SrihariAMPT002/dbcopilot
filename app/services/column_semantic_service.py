@@ -30,6 +30,7 @@ from app.models.metadata import (
     SemanticGenerationStatus,
 )
 from app.services.database_guard import ensure_connected
+from app.core.structured_logging import error_message
 from app.config.package_registry import package_is_enabled
 from app.services.ai_observability_service import AIObservabilityService
 from app.config.prompts import get_prompt_registry
@@ -802,7 +803,91 @@ class ColumnSemanticService:
         row.updated_at = datetime.now(timezone.utc)
         if row.id is None:
             row.created_at = datetime.now(timezone.utc)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            result = await self.db.execute(
+                select(GovernancePackage).where(GovernancePackage.table_id == table.id)
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                row = GovernancePackage(table_id=table.id, database_id=database.id)
+                self.db.add(row)
+            row.table_name = table.name
+            row.schema_name = table.schema.name
+            row.table_summary = payload.get("table_summary") or ""
+            row.business_purpose = payload.get("business_purpose") or ""
+            row.pii_columns = pii_columns
+            row.risk_columns = risk_columns
+            row.sensitive_columns = sensitive_columns
+            row.overall_risk = self._overall_risk_from_columns(resolved)
+            row.confidence_score = max(
+                0.0,
+                min(1.0, float(sum(float(item.get("confidence_score", 0.0) or 0.0) for item in resolved) / max(1, len(resolved)) if resolved else 0.0)),
+            )
+            row.evidence = json.dumps(
+                [
+                    {
+                        "column_name": item.get("column_name"),
+                        "business_meaning": item.get("business_meaning"),
+                        "governance_reasoning": item.get("governance_reasoning"),
+                        "risk_level": item.get("risk_level"),
+                        "is_pii": bool(item.get("is_pii")),
+                    }
+                    for item in resolved
+                    if isinstance(item, dict)
+                ]
+            )
+            row.rule_matches = json.dumps(
+                [
+                    {
+                        "column_name": column.name,
+                        "data_type": column.data_type,
+                        "rule_matches": self._rule_matches_for_column(
+                            database=database,
+                            table=table,
+                            column=column,
+                            neighbors=batch_columns or list(table.columns or []),
+                        ),
+                    }
+                    for column in (batch_columns or list(table.columns or []))
+                ]
+            )
+            row.sample_patterns = json.dumps(
+                [
+                    {
+                        "column_name": column.name,
+                        "patterns": [
+                            match.get("matched_value")
+                            for match in self._rule_matches_for_column(
+                                database=database,
+                                table=table,
+                                column=column,
+                                neighbors=batch_columns or list(table.columns or []),
+                            )
+                            if match.get("matched_value")
+                        ],
+                    }
+                    for column in (batch_columns or list(table.columns or []))
+                ]
+            )
+            row.prompt_tokens = int(usage.get("prompt_tokens", 0) or 0) if usage else None
+            row.completion_tokens = int(usage.get("completion_tokens", 0) or 0) if usage else None
+            row.reasoning_tokens = int(usage.get("reasoning_tokens", 0) or 0) if usage else None
+            row.finish_reason = str(getattr(raw_response.choices[0], "finish_reason", None)) if raw_response and getattr(raw_response, "choices", None) else None
+            row.latency_ms = float(getattr(ai_result, "latency_ms", 0.0) or 0.0) if ai_result is not None else None
+            row.prompt_id = prompt_id
+            row.prompt_version = prompt_version
+            row.model_name = model_name
+            row.trace_id = str(getattr(ai_result, "trace_id", None)) if ai_result is not None else None
+            if hasattr(type(row), "failure_reason"):
+                row.failure_reason = error_message
+            else:
+                row.raw_failure_reason = error_message
+            row.updated_at = datetime.now(timezone.utc)
+            row.created_at = row.created_at or datetime.now(timezone.utc)
+            await self.db.flush()
         return row
 
     async def _persist_governance_package_failure(
@@ -974,7 +1059,7 @@ class ColumnSemanticService:
                     table_results = await self._classify_table(table, database, force=force)
                     results.extend(table_results)
                 except Exception as exc:
-                    logger.exception("Governance classification failed for table_id=%s: %s", table_id, exc)
+                    logger.exception(error_message("governance classification failed", table_id=table_id, reason=exc))
             _log_stage_duration("governance classification / batch", stage_start, database_id=database_id, columns=column_count)
             return results
 

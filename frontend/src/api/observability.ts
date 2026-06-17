@@ -30,6 +30,9 @@ export type ObservabilityTraceDetailResponse = {
   prompt_id?: string | null;
   prompt_version?: string | null;
   model_name?: string | null;
+  context_source?: string | null;
+  used_context?: boolean | null;
+  fallback_reason?: string | null;
   deployment?: string | null;
   module?: string | null;
   artifact_type?: string | null;

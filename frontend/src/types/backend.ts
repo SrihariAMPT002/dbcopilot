@@ -23,6 +23,7 @@ export type Connection = {
 export type DashboardSummary = {
   database_id?: number | null;
   database_name?: string | null;
+  cache_status?: string | null;
   total_databases: number;
   schemas: number;
   tables: number;
@@ -908,6 +909,7 @@ export type PipelineJob = {
   completed_at?: string | null;
   failure_reason?: string | null;
   triggered_by?: string | null;
+  trace_id?: string | null;
 };
 
 export type PipelineExecution = {
@@ -920,6 +922,10 @@ export type PipelineExecution = {
   trace_id?: string | null;
   model_name?: string | null;
   token_usage_json?: string | null;
+  pipeline_context_json?: string | null;
+  context_source?: string | null;
+  used_context?: boolean | null;
+  fallback_reason?: string | null;
   estimated_input_tokens?: number | null;
   actual_input_tokens?: number | null;
   estimated_output_tokens?: number | null;
@@ -944,6 +950,10 @@ export type StageExecution = {
   trace_id?: string | null;
   model_name?: string | null;
   token_usage_json?: string | null;
+  pipeline_context_json?: string | null;
+  context_source?: string | null;
+  used_context?: boolean | null;
+  fallback_reason?: string | null;
   estimated_input_tokens?: number | null;
   actual_input_tokens?: number | null;
   estimated_output_tokens?: number | null;
@@ -982,6 +992,7 @@ export type StageProgressItem = {
 export type StageProgressResponse = {
   database_id: number;
   parent_job_id?: number | null;
+  cache_status?: string | null;
   overall_status: string;
   overall_progress_percentage: number;
   current_stage?: string | null;
@@ -1030,6 +1041,9 @@ export type ObservabilityTraceDetailResponse = {
   prompt_id?: string | null;
   prompt_version?: string | null;
   model_name?: string | null;
+  context_source?: string | null;
+  used_context?: boolean | null;
+  fallback_reason?: string | null;
   latency_ms: number;
   finish_reason?: string | null;
   execution_status?: string | null;

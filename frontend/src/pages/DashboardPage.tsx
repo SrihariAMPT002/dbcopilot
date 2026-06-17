@@ -27,19 +27,20 @@ import { useReadinessHistory } from "@/hooks/useReadinessHistory";
 import { ReadinessTrendCard } from "@/components/readiness/ReadinessTrendCard";
 
 export function DashboardPage() {
-  const { selectedDatabaseId } = useDatabaseContext();
-  const { data } = useDashboard(selectedDatabaseId);
-  const { data: readiness } = useReadiness(selectedDatabaseId ?? 0);
-  const { data: remediation } = useRemediation(selectedDatabaseId);
+  const { selectedDatabase } = useDatabaseContext();
+  const databaseId = selectedDatabase?.database_id ?? null;
+  const { data } = useDashboard(databaseId);
+  const { data: readiness } = useReadiness(databaseId);
+  const { data: remediation } = useRemediation(databaseId);
   const { data: jobs = [] } = useJobs(20);
-  const { data: stageProgress } = useStageProgress(selectedDatabaseId);
-  const { data: businessEvents } = useBusinessEvents(selectedDatabaseId);
-  const { data: businessInsights } = useBusinessInsights(selectedDatabaseId);
-  const { data: agentMemory } = useAgentMemoryHistory(selectedDatabaseId, 5);
-  const { data: semanticCache } = useSemanticCache(selectedDatabaseId);
-  const { data: retrievalEvaluation } = useRetrievalEvaluation(selectedDatabaseId);
-  const { data: readinessHistory } = useReadinessHistory(selectedDatabaseId);
-  const [opportunitiesQuery, dataProductsQuery, warehouseDesignsQuery, recommendationsQuery, predictiveReadinessQuery] = useBusinessIntelligence(selectedDatabaseId);
+  const { data: stageProgress } = useStageProgress(databaseId);
+  const { data: businessEvents } = useBusinessEvents(databaseId);
+  const { data: businessInsights } = useBusinessInsights(databaseId);
+  const { data: agentMemory } = useAgentMemoryHistory(databaseId, 5);
+  const { data: semanticCache } = useSemanticCache(databaseId);
+  const { data: retrievalEvaluation } = useRetrievalEvaluation(databaseId);
+  const { data: readinessHistory } = useReadinessHistory(databaseId);
+  const [opportunitiesQuery, dataProductsQuery, warehouseDesignsQuery, recommendationsQuery, predictiveReadinessQuery] = useBusinessIntelligence(databaseId);
   const insights = businessInsights?.insights ?? [];
   const opportunities = opportunitiesQuery.data?.opportunities ?? [];
   const dataProducts = dataProductsQuery.data?.data_products ?? [];
@@ -86,12 +87,15 @@ export function DashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="DBCopilot"
-        title="Platform dashboard"
+        eyebrow="Platform"
+        title="Dashboard"
         description="Real-time health of metadata sync, AI intelligence generation, and downstream agent readiness."
         actions={
           <>
             <ActiveDatabaseBadge />
+            <Badge variant="outline" className="gap-1.5 text-[11px]">
+              Cache {data?.cache_status ?? "live"}
+            </Badge>
             <Button variant="outline" size="sm" className="gap-1.5" onClick={() => window.location.reload()}>
               <RefreshCw className="h-3.5 w-3.5" /> Refresh
             </Button>
@@ -104,7 +108,15 @@ export function DashboardPage() {
         }
       />
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <MetricCard
+          label="Current database"
+          value={selectedDatabase?.database_name ?? "n/a"}
+          hint={selectedDatabase ? `#${selectedDatabase.database_id} · ${selectedDatabase.db_type}` : "No database selected"}
+          icon={Database}
+          tone="default"
+        />
         <MetricCard label="Total databases" value={String(data?.total_databases ?? 0)} hint="Connected sources" icon={Database} tone="info" />
+        <MetricCard label="Tables in current DB" value={String(data?.tables ?? 0)} hint="Selected database only" icon={Boxes} tone="success" />
         <MetricCard label="Active jobs" value={String(data?.active_jobs ?? 0)} hint="Running or queued" icon={Activity} tone="default" />
         <MetricCard label="Completed (24h)" value={String(data?.completed_jobs_24h ?? 0)} hint="Pipeline completions" icon={CheckCircle2} tone="success" />
         <MetricCard label="Failed (24h)" value={String(data?.failed_jobs_24h ?? 0)} hint="Pipeline failures" icon={XCircle} tone="danger" />

@@ -4,8 +4,8 @@ import { useDatabaseContext } from "@/context/database-context";
 import { RetrievalPlayground } from "@/components/embeddings/RetrievalPlayground";
 
 export function RetrievalPlaygroundPage() {
-  const { selectedDatabaseId } = useDatabaseContext();
-  const dbId = selectedDatabaseId ?? 1;
+  const { selectedDatabase } = useDatabaseContext();
+  const dbId = selectedDatabase?.database_id ?? null;
 
   return (
     <div className="space-y-6">

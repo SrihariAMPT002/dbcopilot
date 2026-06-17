@@ -10,8 +10,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { CoverageBar } from "@/components/coverage-bar";
 
 export function KPIPage() {
-  const { selectedDatabaseId } = useDatabaseContext();
-  const dbId = selectedDatabaseId ?? 1;
+  const { selectedDatabase } = useDatabaseContext();
+  const dbId = selectedDatabase?.database_id ?? null;
   const { data } = useKPIs(dbId);
   const { data: businessInsights } = useBusinessInsights(dbId);
   const candidates = (data?.evidence ?? []).filter((item) => item.candidate_type || item.metric);

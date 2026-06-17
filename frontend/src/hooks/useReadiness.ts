@@ -6,5 +6,7 @@ export function useReadiness(databaseId?: number | null) {
     queryKey: ["readiness", databaseId ?? "default"],
     queryFn: () => ReadinessService.getSnapshot(Number(databaseId)),
     enabled: typeof databaseId === "number" && Number.isFinite(databaseId) && databaseId > 0,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 }

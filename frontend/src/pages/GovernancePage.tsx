@@ -14,8 +14,8 @@ import { useGovernance, useGovernanceEvidence, useGovernanceSummary } from "@/ho
 import { mapGovernanceDetail, mapGovernancePackages, type GovernanceFindingViewModel } from "@/mappers/governanceMapper";
 
 export function GovernancePage() {
-  const { selectedDatabaseId } = useDatabaseContext();
-  const dbId = selectedDatabaseId ?? 1;
+  const { selectedDatabase } = useDatabaseContext();
+  const dbId = selectedDatabase?.database_id ?? null;
   const { data: summary } = useGovernanceSummary(dbId);
   const { data } = useGovernance(dbId);
   const packages = data?.packages ?? [];

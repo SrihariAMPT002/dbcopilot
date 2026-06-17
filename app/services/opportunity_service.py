@@ -15,6 +15,7 @@ from app.models.metadata import GovernancePackage, KPIIntelligence, Relationship
 from app.models.opportunity_recommendation import OpportunityRecommendation
 from app.models.readiness_snapshot import ReadinessSnapshot
 from app.services.ai_observability_service import AIObservabilityService
+from app.services.relationship_package_mapper import relationship_package_to_dto
 
 
 class OpportunityService:
@@ -40,12 +41,13 @@ class OpportunityService:
         governance = await self.db.execute(select(GovernancePackage).where(GovernancePackage.database_id == database_id))
         semantic = await self.db.execute(select(SemanticPackage).where(SemanticPackage.database_id == database_id))
         relationship = await self.db.execute(select(RelationshipPackage).where(RelationshipPackage.database_id == database_id))
+        relationship_rows = [relationship_package_to_dto(pkg) for pkg in relationship.scalars().all()]
         kpis = await self.db.execute(select(KPIIntelligence).where(KPIIntelligence.database_id == database_id))
         readiness = await self.db.execute(select(ReadinessSnapshot).where(ReadinessSnapshot.database_id == database_id))
         return {
             "governance": [self._governance_row(pkg) for pkg in governance.scalars().all()],
             "semantic": self._semantic_row(semantic.scalars().first()),
-            "relationships": [self._relationship_row(pkg) for pkg in relationship.scalars().all()],
+            "relationships": [self._relationship_row(pkg) for pkg in relationship_rows],
             "kpis": [self._kpi_row(row) for row in kpis.scalars().all()],
             "readiness": self._readiness_row(readiness.scalars().first()),
         }
@@ -124,12 +126,19 @@ class OpportunityService:
         return {"business_domain": pkg.business_domain, "business_entities": pkg.business_entities, "business_processes": pkg.business_processes, "confidence_score": pkg.confidence_score}
 
     @staticmethod
-    def _relationship_row(pkg: RelationshipPackage) -> dict[str, Any]:
+    def _relationship_row(pkg: Any) -> dict[str, Any]:
+        dto = relationship_package_to_dto(pkg)
+        entity_graph = getattr(dto, "entity_graph", None) or []
+        lifecycle_flows = getattr(dto, "lifecycle_flows", None) or []
         return {
-            "cluster_id": pkg.cluster_id,
-            "domain_name": pkg.domain_name,
-            "cluster_confidence": getattr(pkg, "cluster_confidence", pkg.confidence_score),
-            "entity_graph": pkg.entity_graph,
+            "cluster_id": getattr(dto, "cluster_id", None),
+            "domain_name": getattr(dto, "domain_name", None),
+            "confidence_score": float(getattr(dto, "confidence_score", 0.0) or 0.0),
+            "entity_graph": entity_graph,
+            "lifecycle_flows": lifecycle_flows,
+            "cluster_summary": getattr(dto, "cluster_summary", None),
+            "source_table_name": getattr(dto, "source_table_name", None),
+            "target_table_name": getattr(dto, "target_table_name", None),
         }
 
     @staticmethod

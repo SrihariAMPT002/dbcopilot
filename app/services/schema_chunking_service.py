@@ -69,6 +69,19 @@ class SchemaChunkingService:
         stripped = text.strip()
         return stripped or None
 
+    @staticmethod
+    def _safe_list(value: Any) -> list[Any]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        if isinstance(value, tuple):
+            return list(value)
+        try:
+            return list(value)
+        except TypeError:
+            return []
+
     def _column_summary(self, column: DatabaseColumn) -> ColumnChunkSummary:
         return ColumnChunkSummary(
             column_name=column.name,
@@ -83,7 +96,7 @@ class SchemaChunkingService:
 
     def _table_summary(self, table: DatabaseTable, *, pii_column_names: set[str] | None = None) -> TableChunkSummary:
         try:
-            columns = sorted(table.columns or [], key=lambda column: getattr(column, "ordinal_position", 0) or 0)
+            columns = sorted(self._safe_list(getattr(table, "columns", None)), key=lambda column: getattr(column, "ordinal_position", 0) or 0)
         except InvalidRequestError:
             columns = []
         limited_columns = columns[: self.max_columns_per_table]
@@ -94,7 +107,7 @@ class SchemaChunkingService:
             table_type=self._table_type(table),
             description=self._safe_text(getattr(table, "description", None)),
             column_count=len(columns),
-            relationship_count=len(table.relationships_from or []),
+            relationship_count=len(self._safe_list(getattr(table, "relationships_from", None))),
             pii_column_count=sum(1 for column in columns if column.name in pii_names),
             has_primary_key=any(bool(getattr(column, "is_primary_key", None)) for column in columns),
             has_foreign_keys=any(bool(getattr(column, "is_foreign_key", None)) for column in columns),
@@ -103,7 +116,7 @@ class SchemaChunkingService:
 
     def _schema_summary(self, schema: DatabaseSchema, *, pii_map: dict[int, Any] | None = None) -> SchemaChunkSummary:
         try:
-            tables = sorted(schema.tables or [], key=lambda table: table.name)
+            tables = sorted(self._safe_list(getattr(schema, "tables", None)), key=lambda table: table.name)
         except InvalidRequestError:
             tables = []
         limited_tables = tables[: self.max_tables_per_schema]
@@ -112,7 +125,7 @@ class SchemaChunkingService:
         for table in limited_tables:
             pii_column_names = {
                 column.name
-                for column in (table.columns or [])
+                for column in self._safe_list(getattr(table, "columns", None))
                 if pii_map and getattr(pii_map.get(column.id), "is_pii", False)
             }
             table_summary = self._table_summary(table, pii_column_names=pii_column_names)
@@ -125,15 +138,14 @@ class SchemaChunkingService:
             tables=table_summaries,
         )
 
-    @staticmethod
-    def _database_totals(database: ConnectedDatabase) -> dict[str, int]:
+    def _database_totals(self, database: ConnectedDatabase) -> dict[str, int]:
         try:
-            schemas = database.schemas or []
+            schemas = self._safe_list(getattr(database, "schemas", None))
         except InvalidRequestError:
             schemas = []
-        tables = [table for schema in schemas for table in (schema.tables or [])]
-        columns = [column for table in tables for column in (table.columns or [])]
-        relationships = [rel for table in tables for rel in (table.relationships_from or [])]
+        tables = [table for schema in schemas for table in self._safe_list(getattr(schema, "tables", None))]
+        columns = [column for table in tables for column in self._safe_list(getattr(table, "columns", None))]
+        relationships = [rel for table in tables for rel in self._safe_list(getattr(table, "relationships_from", None))]
         return {
             "schema_count": len(schemas),
             "table_count": len(tables),
@@ -144,7 +156,7 @@ class SchemaChunkingService:
     def build(self, database: ConnectedDatabase, *, pii_map: dict[int, Any] | None = None) -> dict[str, Any]:
         """Return a hierarchical, token-bounded summary of the database."""
         try:
-            schemas = sorted(database.schemas or [], key=lambda schema: schema.name)
+            schemas = sorted(self._safe_list(getattr(database, "schemas", None)), key=lambda schema: schema.name)
         except InvalidRequestError:
             schemas = []
         limited_schemas = schemas[: self.max_schemas]
@@ -196,9 +208,19 @@ class SchemaChunkingService:
                 "has_foreign_keys": summary.has_foreign_keys,
                 "columns": [column.__dict__ for column in summary.columns],
             }
-            for summary in [self._table_summary(table, pii_column_names={
-                column.name
-                for column in (table.columns or [])
-                if pii_map and getattr(pii_map.get(column.id), "is_pii", False)
-            }) for table in sorted(schema.tables or [], key=lambda table: table.name)[: self.max_tables_per_schema]]
+            for summary in [
+                self._table_summary(
+                    table,
+                    pii_column_names={
+                        column.name
+                        for column in self._safe_list(getattr(table, "columns", None))
+                        if pii_map and getattr(pii_map.get(column.id), "is_pii", False)
+                    },
+                )
+                for table in sorted(self._safe_list(getattr(schema, "tables", None)), key=lambda table: table.name)[: self.max_tables_per_schema]
+            ]
         ]
+
+    @classmethod
+    def safe_summary_list(cls, items: Iterable[Any]) -> list[Any]:
+        return cls._safe_list(items)  # type: ignore[misc]

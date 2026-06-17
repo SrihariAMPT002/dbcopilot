@@ -5,6 +5,7 @@ Pipeline operations APIs.
 from __future__ import annotations
 
 import logging
+import json
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -20,6 +21,7 @@ from app.schemas.stage_contracts import StageGraphResponse, StageProgressRespons
 from app.db.session import db_session
 from app.services.pipeline_service import PipelineService
 from app.services.database_pipeline_orchestrator import DatabasePipelineOrchestrator
+from app.services.cache_service import cache_service
 
 router = APIRouter(prefix="/pipeline", tags=["Operations"])
 logger = logging.getLogger(__name__)
@@ -37,7 +39,7 @@ def _to_job_response(job: PipelineJob) -> PipelineJobResponse:
         progress_percentage=job.progress_percentage,
         started_at=job.started_at,
         completed_at=job.completed_at,
-        failure_reason=job.failure_reason,
+        failure_reason=getattr(job, "failure_reason", None),
         triggered_by=job.triggered_by,
     )
 
@@ -225,7 +227,16 @@ async def stage_progress(
 ) -> StageProgressResponse:
     orchestrator = DatabasePipelineOrchestrator(db)
     try:
-        return await orchestrator.get_stage_progress(db_id, parent_job_id=parent_job_id)
+        cache_key = f"pipeline:{db_id}:stage-progress:{parent_job_id or 'root'}"
+        cached = await cache_service.get(cache_key)
+        if cached:
+            payload = StageProgressResponse.model_validate(json.loads(cached))
+            payload.cache_status = "cache"
+            return payload
+        payload = await orchestrator.get_stage_progress(db_id, parent_job_id=parent_job_id)
+        payload.cache_status = "live"
+        await cache_service.set(cache_key, payload.model_dump_json())
+        return payload
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except Exception as exc:
@@ -245,6 +256,10 @@ async def list_pipeline_executions(
     limit: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    cache_key = f"pipeline:{db_id}:executions:{limit}"
+    cached = await cache_service.get(cache_key)
+    if cached:
+        return json.loads(cached)
     result = await db.execute(
         select(PipelineExecution)
         .where(PipelineExecution.database_id == db_id)
@@ -252,7 +267,7 @@ async def list_pipeline_executions(
         .limit(limit)
     )
     rows = result.scalars().all()
-    return {
+    payload = {
         "database_id": db_id,
         "executions": [
             {
@@ -265,6 +280,10 @@ async def list_pipeline_executions(
                 "trace_id": row.trace_id,
                 "model_name": row.model_name,
                 "token_usage_json": row.token_usage_json,
+                "pipeline_context_json": getattr(row, "pipeline_context_json", None),
+                "context_source": getattr(row, "context_source", None),
+                "used_context": getattr(row, "used_context", None),
+                "fallback_reason": getattr(row, "fallback_reason", None),
                 "estimated_input_tokens": row.estimated_input_tokens,
                 "actual_input_tokens": row.actual_input_tokens,
                 "estimated_output_tokens": row.estimated_output_tokens,
@@ -279,6 +298,8 @@ async def list_pipeline_executions(
             for row in rows
         ],
     }
+    await cache_service.set(cache_key, json.dumps(payload, default=str))
+    return payload
 
 
 @router.get(
@@ -291,12 +312,16 @@ async def list_stage_executions(
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    cache_key = f"pipeline:{db_id}:stages:{pipeline_execution_id or 'all'}:{limit}"
+    cached = await cache_service.get(cache_key)
+    if cached:
+        return json.loads(cached)
     stmt = select(StageExecution).where(StageExecution.database_id == db_id).order_by(StageExecution.start_time.desc()).limit(limit)
     if pipeline_execution_id is not None:
         stmt = stmt.where(StageExecution.pipeline_execution_id == pipeline_execution_id)
     result = await db.execute(stmt)
     rows = result.scalars().all()
-    return {
+    payload = {
         "database_id": db_id,
         "pipeline_execution_id": pipeline_execution_id,
         "stage_executions": [
@@ -312,6 +337,10 @@ async def list_stage_executions(
                 "trace_id": row.trace_id,
                 "model_name": row.model_name,
                 "token_usage_json": row.token_usage_json,
+                "pipeline_context_json": getattr(row, "pipeline_context_json", None),
+                "context_source": getattr(row, "context_source", None),
+                "used_context": getattr(row, "used_context", None),
+                "fallback_reason": getattr(row, "fallback_reason", None),
                 "estimated_input_tokens": row.estimated_input_tokens,
                 "actual_input_tokens": row.actual_input_tokens,
                 "estimated_output_tokens": row.estimated_output_tokens,
@@ -326,3 +355,5 @@ async def list_stage_executions(
             for row in rows
         ],
     }
+    await cache_service.set(cache_key, json.dumps(payload, default=str))
+    return payload

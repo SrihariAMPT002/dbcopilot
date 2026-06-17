@@ -16,7 +16,7 @@ import { healthApi } from "@/api/health";
 export function SettingsPage() {
   const { data: connections = [] } = useConnections();
   const active = connections.find((c) => c.status === "active") ?? connections[0] ?? null;
-  const { data: embeddingStatus } = useEmbeddings(active?.id ?? 1);
+  const { data: embeddingStatus } = useEmbeddings(active?.id ?? null);
   const { data: health } = useQuery({ queryKey: ["health"], queryFn: healthApi.health });
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
   const runtimeMode = import.meta.env.MODE;

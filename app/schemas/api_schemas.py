@@ -549,6 +549,30 @@ class GraphExportResponse(BaseModel):
     content: str
 
 
+class RelationshipNormalizedItem(BaseModel):
+    """Normalized relationship payload emitted by the relationship package API.
+
+    The backend may source these entries from ORM rows, generated AI payloads, or
+    legacy persisted JSON. This schema documents the canonical object shape the UI
+    should expect after sanitization.
+    """
+
+    source: Optional[str] = None
+    target: Optional[str] = None
+    stage: Optional[str] = None
+    summary: Optional[str] = None
+    description: Optional[str] = None
+    note: Optional[str] = None
+    table_name: Optional[str] = None
+    source_table_name: Optional[str] = None
+    target_table_name: Optional[str] = None
+    source_table_id: Optional[int] = None
+    target_table_id: Optional[int] = None
+    relationship_type: Optional[str] = None
+    join_columns: List[Dict[str, Any]] = Field(default_factory=list)
+    confidence_score: Optional[float] = None
+
+
 class RelationshipPackageClusterResponse(BaseModel):
     cluster_id: str
     parent_cluster_id: Optional[str] = None
@@ -556,13 +580,13 @@ class RelationshipPackageClusterResponse(BaseModel):
     cluster_label: Optional[str] = None
     cluster_summary: Optional[str] = None
     cluster_confidence: float = 0.0
-    entity_graph: List[Dict[str, Any]] = Field(default_factory=list)
-    hidden_relationships: List[Dict[str, Any]] = Field(default_factory=list)
-    business_process_flows: List[Dict[str, Any]] = Field(default_factory=list)
-    upstream_dependencies: List[Dict[str, Any]] = Field(default_factory=list)
-    downstream_dependencies: List[Dict[str, Any]] = Field(default_factory=list)
-    lifecycle_flows: List[Dict[str, Any]] = Field(default_factory=list)
-    evidence: List[Dict[str, Any]] = Field(default_factory=list)
+    entity_graph: List[RelationshipNormalizedItem] = Field(default_factory=list, description="Normalized entity-graph relationships")
+    hidden_relationships: List[RelationshipNormalizedItem] = Field(default_factory=list, description="Normalized hidden relationship records")
+    business_process_flows: List[RelationshipNormalizedItem] = Field(default_factory=list, description="Normalized business process flow records")
+    upstream_dependencies: List[RelationshipNormalizedItem] = Field(default_factory=list, description="Normalized upstream dependency records")
+    downstream_dependencies: List[RelationshipNormalizedItem] = Field(default_factory=list, description="Normalized downstream dependency records")
+    lifecycle_flows: List[RelationshipNormalizedItem] = Field(default_factory=list, description="Normalized lifecycle flow records")
+    evidence: List[RelationshipNormalizedItem] = Field(default_factory=list, description="Normalized evidence entries")
     graph_metrics: Dict[str, Any] = Field(default_factory=dict)
     confidence_details: Dict[str, Any] = Field(default_factory=dict)
     estimated_tokens: Optional[int] = None
@@ -575,11 +599,12 @@ class RelationshipPackageClusterResponse(BaseModel):
 class RelationshipPackageResponse(BaseModel):
     database_id: int
     packages: List[RelationshipPackageClusterResponse] = Field(default_factory=list)
+    cache_status: Optional[str] = None
 
 
 class RelationshipLineageResponse(BaseModel):
     database_id: int
-    lineage: List[Dict[str, Any]] = Field(default_factory=list)
+    lineage: List[RelationshipNormalizedItem] = Field(default_factory=list)
 
 
 # ── AI Readiness ───────────────────────────────────────────────────────────────
@@ -628,6 +653,7 @@ class ReadinessResponse(BaseModel):
     successful_cluster_count: int = 0
     failed_cluster_count: int = 0
     coverage_percentage: float = 0.0
+    cache_status: Optional[str] = None
 
 
 class ReadinessBreakdownResponse(ReadinessResponse):
@@ -942,6 +968,10 @@ class PipelineExecutionResponse(BaseModel):
     trace_id: Optional[str] = None
     model_name: Optional[str] = None
     token_usage_json: Optional[str] = None
+    pipeline_context_json: Optional[str] = None
+    context_source: Optional[str] = None
+    used_context: Optional[bool] = None
+    fallback_reason: Optional[str] = None
     estimated_input_tokens: Optional[int] = None
     actual_input_tokens: Optional[int] = None
     estimated_output_tokens: Optional[int] = None
@@ -966,6 +996,10 @@ class StageExecutionResponse(BaseModel):
     trace_id: Optional[str] = None
     model_name: Optional[str] = None
     token_usage_json: Optional[str] = None
+    pipeline_context_json: Optional[str] = None
+    context_source: Optional[str] = None
+    used_context: Optional[bool] = None
+    fallback_reason: Optional[str] = None
     estimated_input_tokens: Optional[int] = None
     actual_input_tokens: Optional[int] = None
     estimated_output_tokens: Optional[int] = None

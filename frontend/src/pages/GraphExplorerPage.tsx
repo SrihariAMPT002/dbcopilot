@@ -4,8 +4,8 @@ import { useDatabaseContext } from "@/context/database-context";
 import { GraphExplorer } from "@/components/embeddings/GraphExplorer";
 
 export function GraphExplorerPage() {
-  const { selectedDatabaseId } = useDatabaseContext();
-  const dbId = selectedDatabaseId ?? 1;
+  const { selectedDatabase } = useDatabaseContext();
+  const dbId = selectedDatabase?.database_id ?? null;
 
   return (
     <div className="space-y-6">

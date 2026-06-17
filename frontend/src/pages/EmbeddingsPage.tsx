@@ -22,8 +22,8 @@ import { RerankingPanel } from "@/components/embeddings/RerankingPanel";
 import { GraphExplorer } from "@/components/embeddings/GraphExplorer";
 
 export function EmbeddingsPage() {
-  const { selectedDatabaseId } = useDatabaseContext();
-  const dbId = selectedDatabaseId ?? 1;
+  const { selectedDatabase } = useDatabaseContext();
+  const dbId = selectedDatabase?.database_id ?? null;
   const { data } = useEmbeddings(dbId);
   const { data: memory } = useAgentMemoryHistory(dbId, 5);
   const { data: metrics } = useRetrievalMetrics(dbId);

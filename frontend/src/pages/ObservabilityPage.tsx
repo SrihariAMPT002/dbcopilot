@@ -16,7 +16,7 @@ import { usePromptPackages } from "@/hooks/usePromptStudio";
 import { useConnections } from "@/hooks/useConnections";
 
 export function ObservabilityPage() {
-  const { selectedDatabaseId } = useDatabaseContext();
+  const { selectedDatabase } = useDatabaseContext();
   const { data: connections = [] } = useConnections();
   const [module, setModule] = useState("all");
   const [model, setModel] = useState("all");
@@ -27,8 +27,8 @@ export function ObservabilityPage() {
     if (typeof window === "undefined") return null;
     return new URLSearchParams(window.location.search).get("trace_id");
   });
-  const dbId = selectedDatabaseId ?? 1;
-  const selectedDatabase = connections.find((db) => db.id === dbId);
+  const dbId = selectedDatabase?.database_id ?? null;
+  const selectedConnection = connections.find((db) => db.id === dbId);
   const { data } = useObservabilityTraces(dbId, {
     module: module === "all" ? undefined : module,
     model_name: model === "all" ? undefined : model,
@@ -325,6 +325,9 @@ export function ObservabilityPage() {
             <Detail label="Artifact type" value={traceDetail?.artifact_type ?? "n/a"} />
             <Detail label="Module" value={traceDetail?.module ?? "n/a"} />
             <Detail label="Database" value={String(traceDetail?.database_id ?? dbId)} />
+            <Detail label="Context source" value={(traceDetail as any)?.context_source ?? "persisted"} />
+            <Detail label="Used context" value={(traceDetail as any)?.used_context ? "yes" : "no"} />
+            <Detail label="Fallback reason" value={(traceDetail as any)?.fallback_reason ?? "none"} />
             <Detail label="Finish reason" value={traceDetail?.finish_reason ?? "n/a"} />
             <Detail label="Validation result" value={traceDetail?.execution_status ?? "n/a"} />
             <Detail label="Prompt tokens" value={String(traceDetail?.prompt_tokens ?? 0)} />
@@ -371,6 +374,11 @@ export function ObservabilityPage() {
                   </div>
                 )) : <div className="text-xs text-muted-foreground">No prompt observability records yet.</div>}
               </div>
+            </div>
+            <div className="rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+              {traceDetail?.pipeline_executions?.length
+                ? "This trace has a persisted pipeline context snapshot and execution history."
+                : "No persisted pipeline context snapshot is attached to this trace."}
             </div>
           </CardContent>
         </Card>

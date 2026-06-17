@@ -4,7 +4,7 @@ Deterministic AI readiness scoring service.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 from datetime import datetime, timezone
 import json
@@ -48,6 +48,8 @@ from app.models.retrieval_log import RetrievalLog
 from app.models.semantic_cache import SemanticCache
 from app.models.agent_memory import AgentMemory
 from app.models.prompt_evaluation import PromptEvaluation
+from app.services.pipeline_context import IntelligenceContext
+from app.core.structured_logging import error_message
 
 logger = logging.getLogger(__name__)
 
@@ -84,10 +86,13 @@ class ReadinessBreakdown:
     prompt_id: str | None
     prompt_version: str | None
     model_name: str | None
-    category_scores: dict[str, int]
-    missing_stages: list[str]
-    remediation_hints: list[str]
-    details: dict[str, Any]
+    context_source: str | None = None
+    used_context: bool = False
+    fallback_reason: str | None = None
+    category_scores: dict[str, int] = field(default_factory=dict)
+    missing_stages: list[str] = field(default_factory=list)
+    remediation_hints: list[str] = field(default_factory=list)
+    details: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -280,16 +285,30 @@ class ReadinessService:
             snapshot=snapshot,
         )
 
-    async def recompute(self, database_id: int) -> ReadinessBreakdown:
+    async def recompute(self, database_id: int, context: IntelligenceContext | None = None) -> ReadinessBreakdown:
         if not self._package_enabled("governance"):
             raise ValueError("Governance package is disabled by registry")
         database = await self._fetch_database(database_id)
-        breakdown = await self._build_breakdown(database_id)
+        used_context = bool(context and (context.governance or context.semantics or context.relationships or context.kpis or context.prompts or context.embeddings))
+        fallback_reason = None
+        if used_context and not (context and context.governance):
+            fallback_reason = fallback_reason or "governance"
+        if used_context and not (context and context.semantics):
+            fallback_reason = fallback_reason or "semantics"
+        if used_context and not (context and context.relationships):
+            fallback_reason = fallback_reason or "relationships"
+        if used_context and not (context and context.kpis):
+            fallback_reason = fallback_reason or "kpi"
+        if used_context and not (context and context.prompts):
+            fallback_reason = fallback_reason or "prompt"
+        if used_context and not (context and context.embeddings):
+            fallback_reason = fallback_reason or "embeddings"
+        breakdown = await self._build_breakdown(database_id, context=context)
         ai_assessment = self._fallback_ai_assessment(breakdown)
         try:
             ai_assessment = await self._generate_ai_assessment(database, breakdown)
         except Exception:
-            logger.exception("AI readiness assessment generation failed; falling back to deterministic summary")
+            logger.exception(error_message("ai readiness assessment generation failed", fallback="deterministic summary"))
 
         snapshot = await self._upsert_snapshot(database.id, breakdown, ai_assessment)
         await self._persist_remediation_actions(snapshot, database.id, breakdown, ai_assessment)
@@ -303,6 +322,9 @@ class ReadinessService:
         breakdown.prompt_id = snapshot.prompt_id
         breakdown.prompt_version = snapshot.prompt_version
         breakdown.model_name = snapshot.model_name
+        breakdown.context_source = "runtime" if used_context else "persisted"
+        breakdown.used_context = used_context
+        breakdown.fallback_reason = fallback_reason
         breakdown.kpi_cluster_count = int(snapshot.kpi_cluster_count)
         breakdown.successful_cluster_count = int(snapshot.successful_cluster_count)
         breakdown.failed_cluster_count = int(snapshot.failed_cluster_count)
@@ -447,9 +469,10 @@ class ReadinessService:
         database_id: int,
         status_override: ReadinessStatus | None = None,
         snapshot: ReadinessSnapshot | None = None,
+        context: IntelligenceContext | None = None,
     ) -> ReadinessBreakdown:
         database = await self._fetch_database(database_id)
-        stats = await self._collect_stats(database_id)
+        stats = await self._collect_stats(database_id, context=context)
 
         metadata_score = self._metadata_score(stats)
         semantic_score = self._semantic_score(stats)
@@ -572,14 +595,14 @@ class ReadinessService:
         if snapshot is None:
             return dict(breakdown_fallback)
         return {
-            "ai_summary": snapshot.ai_summary or breakdown_fallback["ai_summary"],
-            "ai_recommendations": cls._parse_snapshot_json(snapshot.ai_recommendations) or breakdown_fallback["ai_recommendations"],
-            "ai_risks": cls._parse_snapshot_json(snapshot.ai_risks) or breakdown_fallback["ai_risks"],
-            "ai_roadmap": cls._parse_snapshot_json(snapshot.ai_roadmap) or breakdown_fallback["ai_roadmap"],
-            "ai_confidence": float(snapshot.ai_confidence if snapshot.ai_confidence is not None else breakdown_fallback["ai_confidence"]),
-            "prompt_id": snapshot.prompt_id,
-            "prompt_version": snapshot.prompt_version,
-            "model_name": snapshot.model_name,
+            "ai_summary": getattr(snapshot, "ai_summary", None) or breakdown_fallback["ai_summary"],
+            "ai_recommendations": cls._parse_snapshot_json(getattr(snapshot, "ai_recommendations", None)) or breakdown_fallback["ai_recommendations"],
+            "ai_risks": cls._parse_snapshot_json(getattr(snapshot, "ai_risks", None)) or breakdown_fallback["ai_risks"],
+            "ai_roadmap": cls._parse_snapshot_json(getattr(snapshot, "ai_roadmap", None)) or breakdown_fallback["ai_roadmap"],
+            "ai_confidence": float(getattr(snapshot, "ai_confidence", None) if getattr(snapshot, "ai_confidence", None) is not None else breakdown_fallback["ai_confidence"]),
+            "prompt_id": getattr(snapshot, "prompt_id", None),
+            "prompt_version": getattr(snapshot, "prompt_version", None),
+            "model_name": getattr(snapshot, "model_name", None),
         }
 
     @staticmethod
@@ -587,15 +610,15 @@ class ReadinessService:
         if snapshot is None:
             return {}
         return {
-            "prompt_id": snapshot.prompt_id,
-            "prompt_version": snapshot.prompt_version,
-            "model_name": snapshot.model_name,
-            "ai_summary": snapshot.ai_summary,
-            "ai_confidence": snapshot.ai_confidence,
-            "kpi_cluster_count": snapshot.kpi_cluster_count,
-            "successful_cluster_count": snapshot.successful_cluster_count,
-            "failed_cluster_count": snapshot.failed_cluster_count,
-            "coverage_percentage": snapshot.coverage_percentage,
+            "prompt_id": getattr(snapshot, "prompt_id", None),
+            "prompt_version": getattr(snapshot, "prompt_version", None),
+            "model_name": getattr(snapshot, "model_name", None),
+            "ai_summary": getattr(snapshot, "ai_summary", None),
+            "ai_confidence": getattr(snapshot, "ai_confidence", None),
+            "kpi_cluster_count": getattr(snapshot, "kpi_cluster_count", None),
+            "successful_cluster_count": getattr(snapshot, "successful_cluster_count", None),
+            "failed_cluster_count": getattr(snapshot, "failed_cluster_count", None),
+            "coverage_percentage": getattr(snapshot, "coverage_percentage", None),
         }
 
     async def _fetch_database_semantic(self, database_id: int) -> DatabaseSemantic | None:
@@ -634,11 +657,12 @@ class ReadinessService:
             return 0
         return int(round(sum(1 for value in values if value) / len(values) * 100))
 
-    async def _collect_stats(self, database_id: int) -> dict[str, Any]:
+    async def _collect_stats(self, database_id: int, context: IntelligenceContext | None = None) -> dict[str, Any]:
         snapshot = None
-        governance_packages = await self._fetch_governance_packages(database_id)
-        semantic_package = await self._fetch_semantic_package(database_id)
-        relationship_packages = await self._fetch_relationship_packages(database_id)
+        database = await self._fetch_database(database_id)
+        governance_packages = list(context.governance.packages) if context and context.governance and context.governance.packages else await self._fetch_governance_packages(database_id)
+        semantic_package = context.semantics.package if context and context.semantics and context.semantics.package else await self._fetch_semantic_package(database_id)
+        relationship_packages = list(context.relationships.packages) if context and context.relationships and context.relationships.packages else await self._fetch_relationship_packages(database_id)
         schemas = await self.db.scalar(
             select(func.count(DatabaseSchema.id)).where(DatabaseSchema.connected_db_id == database_id)
         ) or 0
@@ -844,7 +868,7 @@ class ReadinessService:
         ]
         if tables > 0:
             try:
-                prompt_context = await PromptStudioService(self.db)._build_context(database_id)
+                prompt_context = context.prompts.package if context and context.prompts and context.prompts.package else await PromptStudioService(self.db)._build_context(database_id, context=context)
                 for template_id in prompt_studio_templates:
                     try:
                         rendered = self.registry.render_prompt(template_id, prompt_context, category="system")
@@ -987,7 +1011,7 @@ class ReadinessService:
                     or 0.0
                 )
             except Exception:
-                logger.exception("Failed to collect KPI readiness stats for database_id=%s", database_id)
+                logger.exception(error_message("failed to collect kpi readiness stats", database_id=database_id))
 
         kpi_stats = {
             "enabled": package_is_enabled("kpi"),
@@ -1037,7 +1061,7 @@ class ReadinessService:
                 "kpi_cluster_count": kpi_cluster_count,
                 "prompt_artifacts_rendered": prompt_artifacts_rendered,
                 "embeddings": embedding_status,
-                "readiness_snapshots": 0,
+                "readiness_snapshots": 1 if snapshot is not None else 0,
             }
         )
 
@@ -1191,7 +1215,7 @@ class ReadinessService:
                 "trace_id": getattr(ai_result, "trace_id", None),
             }
         except Exception:
-            logger.exception("AI readiness assessment generation failed; falling back to deterministic summary")
+            logger.exception(error_message("ai readiness assessment generation failed", fallback="deterministic summary"))
             return {
                 "ai_summary": self._fallback_ai_summary(breakdown),
                 "ai_recommendations": self._fallback_recommendations(breakdown),

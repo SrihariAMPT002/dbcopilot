@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal, Optional, Sequence
 
 from app.core.config import settings
+from app.core.structured_logging import error_message
 from app.config.prompts import get_prompt_registry
 
 logger = logging.getLogger(__name__)
@@ -567,13 +568,8 @@ class AIObservabilityService:
                     start=start,
                     trace_input=trace_input,
                     )
-        except Exception:
-            logger.exception(
-                "AI observability wrapper failed | module=%s artifact_type=%s operation=%s",
-                module,
-                artifact_type,
-                operation,
-            )
+        except Exception as exc:
+            logger.exception(error_message("ai observability wrapper failed", module=module, artifact_type=artifact_type, operation=operation, reason=exc))
             raise
 
     async def _generate_chat(
@@ -810,12 +806,7 @@ class AIObservabilityService:
                 if generation is not None:
                     self._safe_trace_call(generation, "add_metadata", {**metadata, "error": str(exc)})
                     self._safe_trace_call(generation, "end", error=str(exc))
-                logger.exception(
-                    "Azure OpenAI chat generation failed | module=%s artifact_type=%s model=%s",
-                    module,
-                    artifact_type,
-                    model_name,
-                )
+                logger.exception(error_message("azure openai chat generation failed", module=module, artifact_type=artifact_type, model=model_name, reason=exc))
                 raise
 
     async def _generate_embeddings(
@@ -936,12 +927,7 @@ class AIObservabilityService:
                 if embedding_obs is not None:
                     self._safe_trace_call(embedding_obs, "add_metadata", {**metadata, "error": str(exc)})
                     self._safe_trace_call(embedding_obs, "end", error=str(exc))
-                logger.exception(
-                    "Azure OpenAI embeddings failed | module=%s artifact_type=%s model=%s",
-                    module,
-                    artifact_type,
-                    model_name,
-                )
+                logger.exception(error_message("azure openai embeddings failed", module=module, artifact_type=artifact_type, model=model_name, reason=exc))
                 raise
 
     def observe(

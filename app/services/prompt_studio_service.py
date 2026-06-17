@@ -28,9 +28,12 @@ from app.models.metadata import KPIIntelligence, GovernancePackage, Relationship
 from app.services.database_guard import ensure_connected
 from app.services.schema_chunking_service import SchemaChunkingService
 from app.services.ai_observability_service import AIObservabilityService
+from app.services.relationship_package_mapper import relationship_package_to_dto
+from app.services.pipeline_context import IntelligenceContext
 from app.schema_engine.embeddings import EmbeddingEngine
 from app.services.artifact_service import ArtifactService
 from app.services.column_semantic_service import ColumnSemanticService
+from app.core.structured_logging import error_message
 from app.utils import now_utc
 
 logger = logging.getLogger(__name__)
@@ -303,7 +306,7 @@ class PromptStudioService:
     async def preview_artifact(self, database_id: int, artifact_type: str) -> PromptStudioArtifact:
         if not package_is_enabled("agent"):
             raise ValueError("Prompt Studio package is disabled by registry")
-        context = await self._build_context(database_id)
+        context = await self._build_context(database_id, context=None)
         package = await self._generate_context_package(artifact_type, context)
         return PromptStudioArtifact(
             artifact_type=package.artifact_type,
@@ -317,10 +320,10 @@ class PromptStudioService:
             manifest=package.manifest,
         )
 
-    async def generate_artifacts(self, database_id: int) -> list[dict[str, Any]]:
+    async def generate_artifacts(self, database_id: int, context: IntelligenceContext | None = None) -> list[dict[str, Any]]:
         if not package_is_enabled("agent"):
             raise ValueError("Prompt Studio package is disabled by registry")
-        context = await self._build_context(database_id)
+        context = await self._build_context(database_id, context=context)
         generated: list[dict[str, Any]] = []
 
         for artifact_type in self._artifact_order():
@@ -354,7 +357,7 @@ class PromptStudioService:
         if not package_is_enabled("agent"):
             raise ValueError("Prompt Studio package is disabled by registry")
 
-        context = await self._build_context(database_id)
+        context = await self._build_context(database_id, context=None)
         artifact = self._artifact_enum(artifact_type)
         prompt_id = template_id if template_id and template_id != "default" else self._template_id_for(artifact_type)
         generation_context = self._assemble_generation_context(context, prompt_id)
@@ -510,16 +513,16 @@ class PromptStudioService:
             "message": "Prompt Studio bundle generated successfully.",
         }
 
-    async def _build_context(self, database_id: int) -> dict[str, Any]:
+    async def _build_context(self, database_id: int, context: IntelligenceContext | None = None) -> dict[str, Any]:
         database = await self._fetch_database(database_id)
-        semantic = await self._fetch_semantic(database_id)
-        semantic_package = await self._fetch_semantic_package(database_id)
+        semantic = await self._fetch_semantic(database_id) if not (context and context.semantics and context.semantics.package) else None
+        semantic_package = context.semantics.package if context and context.semantics and context.semantics.package else await self._fetch_semantic_package(database_id)
         tables = await self._fetch_tables(database_id)
         pii_map = await self._fetch_pii_map(database_id)
-        governance_summary = await ColumnSemanticService(self.db).governance_summary(database_id)
-        governance_packages = await self._fetch_governance_packages(database_id)
-        relationship_packages = await self._fetch_relationship_packages(database_id)
-        kpi_summary = await self._fetch_kpi_summary(database_id)
+        governance_summary = await ColumnSemanticService(self.db).governance_summary(database_id) if not (context and context.governance and context.governance.packages) else {"used_context": True}
+        governance_packages = list(context.governance.packages) if context and context.governance and context.governance.packages else await self._fetch_governance_packages(database_id)
+        relationship_packages = list(context.relationships.packages) if context and context.relationships and context.relationships.packages else await self._fetch_relationship_packages(database_id)
+        kpi_summary = await self._fetch_kpi_summary(database_id) if not (context and context.kpis and context.kpis.package) else context.kpis.package or {}
         hierarchy = self.chunker.build(database, pii_map=pii_map)
         relationship_intelligence = self._relationship_intelligence_from_packages(relationship_packages)
         try:
@@ -636,6 +639,7 @@ class PromptStudioService:
                 "embedding_protection_enabled": governance_summary.get("embedding_protection_enabled", False),
             },
             "governance_packages": [self._governance_package_to_dict(row) for row in governance_packages],
+            "context_source": "runtime" if context else "persisted",
         }
 
     async def _fetch_database(self, database_id: int) -> ConnectedDatabase:
@@ -679,17 +683,12 @@ class PromptStudioService:
     def _relationship_intelligence_from_packages(packages: list[RelationshipPackage]) -> dict[str, Any]:
         if not packages:
             return {}
-        first = packages[0]
+        first = relationship_package_to_dto(packages[0])
         return {
             "entity_graph": first.entity_graph or [],
-            "business_process_flows": first.business_process_flows or [],
-            "hidden_relationships": first.hidden_relationships or [],
-            "upstream_dependencies": first.upstream_dependencies or [],
-            "downstream_dependencies": first.downstream_dependencies or [],
             "lifecycle_flows": first.lifecycle_flows or [],
             "cluster_summary": first.cluster_summary or "",
             "confidence_score": first.confidence_score or 0.0,
-            "cluster_confidence": first.confidence_score or 0.0,
             "domain_name": first.domain_name or "",
             "prompt_id": first.prompt_id or "",
             "prompt_version": first.prompt_version or "",
@@ -730,7 +729,7 @@ class PromptStudioService:
             )
             rows = list(result.scalars().all())
         except Exception as exc:
-            logger.warning("KPI summary unavailable for database_id=%s: %s", database_id, exc)
+            logger.warning(error_message("kpi summary unavailable", database_id=database_id, reason=exc))
             return {"kpi_count": 0, "kpis": [], "unavailable": True}
         return {
             "kpi_count": len(rows),
@@ -778,19 +777,16 @@ class PromptStudioService:
 
     @staticmethod
     def _relationship_package_to_dict(row: RelationshipPackage) -> dict[str, Any]:
+        dto = relationship_package_to_dto(row)
         return {
-            "id": row.id,
-            "database_id": row.database_id,
-            "cluster_id": row.cluster_id,
-            "domain_name": row.domain_name,
-            "cluster_summary": row.cluster_summary,
-            "entity_graph": row.entity_graph,
-            "business_process_flows": row.business_process_flows,
-            "hidden_relationships": row.hidden_relationships,
-            "upstream_dependencies": row.upstream_dependencies,
-            "downstream_dependencies": row.downstream_dependencies,
-            "lifecycle_flows": row.lifecycle_flows,
-            "confidence_score": row.confidence_score,
+            "id": dto.id,
+            "database_id": dto.database_id,
+            "cluster_id": dto.cluster_id,
+            "domain_name": dto.domain_name,
+            "cluster_summary": dto.cluster_summary,
+            "entity_graph": dto.entity_graph,
+            "lifecycle_flows": dto.lifecycle_flows,
+            "confidence_score": dto.confidence_score,
         }
 
     async def _generate_context_package(self, artifact_type: str, context: dict[str, Any]) -> ContextPackageResult:

@@ -124,7 +124,7 @@ async def _load_trace_list(
                 source_type="prompt",
                 trace_id=log.trace_id,
                 prompt_id=package.template_id,
-                prompt_version=package.prompt_version,
+                prompt_version=getattr(package, "prompt_version", None),
                 model_name=log.model_name,
                 database_id=database_id,
                 module="prompt_studio",
@@ -136,7 +136,10 @@ async def _load_trace_list(
                 execution_status=log.execution_status,
                 estimated_cost_usd=_estimate_cost(log.prompt_tokens or 0, log.completion_tokens or 0, log.reasoning_tokens or 0),
                 created_at=log.created_at,
-                details={"failure_reason": log.failure_reason, "prompt_package_id": log.prompt_package_id},
+                details={
+                    "failure_reason": getattr(log, "failure_reason", getattr(log, "raw_failure_reason", None)),
+                    "prompt_package_id": log.prompt_package_id,
+                },
             )
         )
 
@@ -165,6 +168,10 @@ async def _load_trace_list(
                 created_at=row.start_time,
                 details={
                     "token_usage_json": row.token_usage_json or "{}",
+                    "pipeline_context_json": getattr(row, "pipeline_context_json", None),
+                    "context_source": getattr(row, "context_source", None),
+                    "used_context": getattr(row, "used_context", None),
+                    "fallback_reason": getattr(row, "fallback_reason", None),
                     "estimated_input_tokens": row.estimated_input_tokens,
                     "actual_input_tokens": row.actual_input_tokens,
                     "estimated_output_tokens": row.estimated_output_tokens,
@@ -298,7 +305,7 @@ async def _get_trace_detail(database_id: int, trace_id: str, db: AsyncSession) -
     return ObservabilityTraceDetailResponse(
         trace_id=trace_id,
         prompt_id=package_detail.template_id if package_detail else None,
-        prompt_version=package_detail.prompt_version if package_detail else None,
+        prompt_version=getattr(package_detail, "prompt_version", None) if package_detail else None,
         model_name=prompt_detail.model_name if prompt_detail else None,
         deployment=prompt_detail.model_name if prompt_detail else None,
         module="prompt_studio",
@@ -306,7 +313,7 @@ async def _get_trace_detail(database_id: int, trace_id: str, db: AsyncSession) -
         database_id=database_id,
         latency_ms=prompt_detail.latency_ms if prompt_detail else 0.0,
         finish_reason=prompt_detail.finish_reason if prompt_detail else None,
-        execution_status=prompt_detail.execution_status if prompt_detail else None,
+        execution_status=getattr(prompt_detail, "execution_status", None) if prompt_detail else None,
         prompt_tokens=prompt_tokens or 0,
         completion_tokens=completion_tokens or 0,
         reasoning_tokens=reasoning_tokens or 0,
@@ -337,6 +344,10 @@ async def _get_trace_detail(database_id: int, trace_id: str, db: AsyncSession) -
                 "actual_input_tokens": row.actual_input_tokens,
                 "estimated_output_tokens": row.estimated_output_tokens,
                 "actual_output_tokens": row.actual_output_tokens,
+                "pipeline_context_json": getattr(row, "pipeline_context_json", None),
+                "context_source": getattr(row, "context_source", None),
+                "used_context": getattr(row, "used_context", None),
+                "fallback_reason": getattr(row, "fallback_reason", None),
                 "prompt_size_bytes": row.prompt_size_bytes,
                 "completion_truncated": row.completion_truncated,
                 "triggered_by": row.triggered_by,
@@ -358,6 +369,10 @@ async def _get_trace_detail(database_id: int, trace_id: str, db: AsyncSession) -
                 "actual_input_tokens": row.actual_input_tokens,
                 "estimated_output_tokens": row.estimated_output_tokens,
                 "actual_output_tokens": row.actual_output_tokens,
+                "pipeline_context_json": getattr(row, "pipeline_context_json", None),
+                "context_source": getattr(row, "context_source", None),
+                "used_context": getattr(row, "used_context", None),
+                "fallback_reason": getattr(row, "fallback_reason", None),
                 "prompt_size_bytes": row.prompt_size_bytes,
                 "completion_truncated": row.completion_truncated,
                 "execution_order": row.execution_order,
@@ -383,7 +398,7 @@ async def _get_trace_detail(database_id: int, trace_id: str, db: AsyncSession) -
                 "latency_ms": row.latency_ms,
                 "finish_reason": row.finish_reason,
                 "execution_status": row.execution_status,
-                "failure_reason": row.failure_reason,
+                "failure_reason": getattr(row, "failure_reason", getattr(row, "raw_failure_reason", None)),
                 "created_at": row.created_at,
             }
             for row, _pkg in prompt_records

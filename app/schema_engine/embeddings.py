@@ -40,6 +40,8 @@ from app.models.metadata import (
 from app.models.embedding_document import EmbeddingDocument
 from app.services.ai_observability_service import AIObservabilityService
 from app.services.embedding_document_service import EmbeddingDocumentService
+from app.services.pipeline_context import IntelligenceContext
+from app.core.structured_logging import error_message
 from app.utils import safe_flush, truncate
 from app.config.package_registry import package_is_enabled
 
@@ -102,6 +104,9 @@ class EmbeddingBatchResult:
     latency_ms: float = 0.0
     success: bool = True
     message: str = ""
+    context_source: str | None = None
+    used_context: bool = False
+    fallback_reason: str | None = None
 
 
 def _traceable(name: str, run_type: str = "chain"):
@@ -472,30 +477,35 @@ class EmbeddingEngine:
         semantic_package: SemanticPackage | None,
         relationship_packages: list[RelationshipPackage],
     ) -> tuple[str, str, str]:
+        def _get(value: Any, key: str, default: Any = None) -> Any:
+            if isinstance(value, dict):
+                return value.get(key, default)
+            return getattr(value, key, default)
+
         governance_bits = []
         if governance:
             governance_bits.extend([
-                f"Governance summary: {governance.table_summary or ''}",
-                f"Business purpose: {governance.business_purpose or ''}",
-                f"PII columns: {', '.join(item.get('column_name', '') for item in governance.pii_columns[:10])}",
+                f"Governance summary: {_get(governance, 'table_summary', '') or ''}",
+                f"Business purpose: {_get(governance, 'business_purpose', '') or ''}",
+                f"PII columns: {', '.join(item.get('column_name', '') for item in (_get(governance, 'pii_columns', []) or [])[:10])}",
             ])
         semantic_bits = []
         if semantic_package:
             semantic_bits.extend([
-                f"Business domain: {semantic_package.business_domain or ''}",
-                f"Semantic summary: {semantic_package.semantic_summary or ''}",
-                f"Business entities: {', '.join(semantic_package.business_entities[:10])}",
-                f"Business processes: {', '.join(semantic_package.business_processes[:10])}",
-                f"Business capabilities: {', '.join(semantic_package.business_capabilities[:10])}",
+                f"Business domain: {_get(semantic_package, 'business_domain', '') or ''}",
+                f"Semantic summary: {_get(semantic_package, 'semantic_summary', '') or ''}",
+                f"Business entities: {', '.join((_get(semantic_package, 'business_entities', []) or [])[:10])}",
+                f"Business processes: {', '.join((_get(semantic_package, 'business_processes', []) or [])[:10])}",
+                f"Business capabilities: {', '.join((_get(semantic_package, 'business_capabilities', []) or [])[:10])}",
             ])
         relationship_bits = []
         relevant_relationships = [
             package for package in relationship_packages
-            if package.cluster_id and table.name in package.cluster_id
+            if _get(package, "cluster_id") and table.name in str(_get(package, "cluster_id"))
         ]
         for package in relevant_relationships[:3]:
             relationship_bits.append(
-                f"Relationship cluster {package.cluster_id}: {package.cluster_summary or ''}"
+                f"Relationship cluster {_get(package, 'cluster_id')}: {_get(package, 'cluster_summary', '') or ''}"
             )
         governance_text = "\n".join(bit for bit in governance_bits if bit)
         semantic_text = "\n".join(bit for bit in semantic_bits if bit)
@@ -593,12 +603,20 @@ class EmbeddingEngine:
         )
 
     @_traceable("generate_database_embeddings", run_type="chain")
-    async def generate_database_embeddings(self, database_id: int) -> EmbeddingBatchResult:
+    async def generate_database_embeddings(self, database_id: int, context: IntelligenceContext | None = None) -> EmbeddingBatchResult:
         start = time.perf_counter()
         if not package_is_enabled("rag"):
             raise ValueError("RAG package is disabled by registry")
         database = await self._fetch_database(database_id)
         tables = await self._fetch_tables(database_id)
+        used_context = bool(context and (context.governance or context.semantics or context.relationships))
+        fallback_reason = None
+        if used_context and not (context and context.governance and context.governance.packages):
+            fallback_reason = fallback_reason or "governance"
+        if used_context and not (context and context.semantics and context.semantics.package):
+            fallback_reason = fallback_reason or "semantics"
+        if used_context and not (context and context.relationships and context.relationships.packages):
+            fallback_reason = fallback_reason or "relationships"
 
         if not tables:
             raise ValueError(f"Database {database_id} has no tables to index")
@@ -609,6 +627,9 @@ class EmbeddingEngine:
             database_id=database.id,
             database_name=database.name,
             embedding_model=settings.azure_openai_embedding_deployment,
+            context_source="runtime" if used_context else "persisted",
+            used_context=used_context,
+            fallback_reason=fallback_reason,
         )
 
         total_vectors = 0
@@ -617,7 +638,7 @@ class EmbeddingEngine:
         for table in tables:
             table_start = time.monotonic()
             try:
-                table_result = await self.generate_table_embeddings(database_id, table.id)
+                table_result = await self.generate_table_embeddings(database_id, table.id, context=context)
                 _log_stage_duration(
                     "embedding generation / table",
                     table_start,
@@ -626,12 +647,7 @@ class EmbeddingEngine:
                     table_name=table.name,
                 )
             except Exception as exc:
-                logger.exception(
-                    "Failed to index table_id=%s for db_id=%s: %s",
-                    table.id,
-                    database_id,
-                    exc,
-                )
+                logger.exception(error_message("failed to index table", table_id=table.id, db_id=database_id, reason=exc))
                 await self._sync_embedding_row(
                     table_id=table.id,
                     embedding_model=settings.azure_openai_embedding_deployment,
@@ -663,7 +679,7 @@ class EmbeddingEngine:
         return batch_result
 
     @_traceable("generate_table_embeddings", run_type="chain")
-    async def generate_table_embeddings(self, database_id: int, table_id: int) -> EmbeddingBatchResult:
+    async def generate_table_embeddings(self, database_id: int, table_id: int, context: IntelligenceContext | None = None) -> EmbeddingBatchResult:
         start = time.perf_counter()
         if not package_is_enabled("rag"):
             raise ValueError("RAG package is disabled by registry")
@@ -671,10 +687,10 @@ class EmbeddingEngine:
         table = await self._fetch_table(table_id)
         semantic = await self._fetch_semantic_summary(table_id)
         pii_map = await self._fetch_pii_map(database_id)
-        governance_packages = await self._fetch_governance_packages(database_id)
-        semantic_package = await self._fetch_semantic_package(database_id)
-        relationship_packages = await self._fetch_relationship_packages(database_id)
-        package_governance = governance_packages.get(table.id)
+        governance_packages = list(context.governance.packages) if context and context.governance and context.governance.packages else list((await self._fetch_governance_packages(database_id)).values())
+        semantic_package = context.semantics.package if context and context.semantics and context.semantics.package else await self._fetch_semantic_package(database_id)
+        relationship_packages = list(context.relationships.packages) if context and context.relationships and context.relationships.packages else await self._fetch_relationship_packages(database_id)
+        package_governance = next((pkg for pkg in governance_packages if getattr(pkg, "table_id", None) == table.id or (isinstance(pkg, dict) and pkg.get("table_id") == table.id)), None)
 
         document_service = EmbeddingDocumentService(self.db)
         knowledge_documents = await document_service.build_documents_for_table(database_id, table_id)
@@ -684,7 +700,11 @@ class EmbeddingEngine:
         relationship_text = self._build_relationship_text(table, pii_map)
         prompt_text = self._build_prompt_text(table, semantic)
         governance_text, semantic_text, relationship_package_text = self._build_package_text(
-            database, table, package_governance, semantic_package, relationship_packages
+            database,
+            table,
+            package_governance,
+            semantic_package,
+            relationship_packages,
         )
         if governance_text:
             table_text = "\n\n".join([table_text, governance_text])
@@ -804,6 +824,9 @@ class EmbeddingEngine:
             latency_ms=(time.perf_counter() - start) * 1000,
             success=True,
             message=f"Indexed table {table.schema.name}.{table.name}",
+            context_source="runtime" if context and (context.governance or context.semantics or context.relationships) else "persisted",
+            used_context=bool(context and (context.governance or context.semantics or context.relationships)),
+            fallback_reason=None,
         )
         logger.info(
             "Indexed table embeddings for table_id=%s in %.2fms",

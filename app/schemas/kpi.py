@@ -18,4 +18,5 @@ class KpiPackageResponse(BaseModel):
     confidence_score: float = 0.0
     evidence: List[Dict[str, Any]] = Field(default_factory=list)
     trace_id: Optional[str] = None
+    cache_status: Optional[str] = None
     created_at: Optional[datetime] = None

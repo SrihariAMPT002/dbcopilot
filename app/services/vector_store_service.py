@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -65,7 +66,29 @@ class VectorStoreService:
             row.status = "healthy"
             row.last_synced = datetime.now(timezone.utc)
             rows.append(row)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            rows = []
+            for name in CANONICAL_COLLECTIONS:
+                existing = await self.db.execute(select(VectorCollection).where(VectorCollection.collection_name == name))
+                row = existing.scalars().first()
+                if row is None:
+                    row = VectorCollection(
+                        collection_name=name,
+                        embedding_model=settings.azure_openai_embedding_deployment,
+                        vector_count=0,
+                        status="pending",
+                        last_synced=None,
+                        metadata_json=self._json({"created_by": "vector_store_service"}),
+                    )
+                    self.db.add(row)
+                row.embedding_model = settings.azure_openai_embedding_deployment
+                row.status = "healthy"
+                row.last_synced = datetime.now(timezone.utc)
+                rows.append(row)
+            await self.db.flush()
         return rows
 
     async def sync_collection(self, collection_name: str) -> VectorCollection:
@@ -110,4 +133,3 @@ class VectorStoreService:
             }
             for row in rows
         ]
-

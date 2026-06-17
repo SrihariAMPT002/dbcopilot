@@ -99,6 +99,8 @@ class Settings(BaseSettings):
     langsmith_api_key: Optional[str] = Field(default=None)
     langsmith_project: Optional[str] = Field(default=None)
     langsmith_endpoint: Optional[str] = Field(default=None)
+    enable_sql_debug: bool = Field(default=False)
+    sql_echo: bool = Field(default=False)
 
     # Intelligence Package Registry
     intelligence_packages_enabled: bool = Field(default=True)
@@ -140,6 +142,10 @@ class Settings(BaseSettings):
         has_dedicated = bool(self.azure_openai_embedding_url and self.azure_openai_embedding_api_key)
         has_fallback = bool(self.azure_openai_endpoint and self.azure_openai_key)
         return has_dedicated or has_fallback
+
+    @property
+    def sql_debug_enabled(self) -> bool:
+        return bool(self.enable_sql_debug or self.sql_echo or self.debug)
     
 @lru_cache()
 def get_settings() -> Settings:

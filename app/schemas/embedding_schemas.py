@@ -48,6 +48,7 @@ class EmbeddingStatusResponse(BaseModel):
     last_generated_at: Optional[datetime] = None
     status_breakdown: Dict[str, int]
     message: str
+    cache_status: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

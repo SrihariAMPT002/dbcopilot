@@ -4,6 +4,7 @@ Relationship graph APIs.
 
 import json
 import logging
+import time
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -11,7 +12,10 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
+from app.services.cache_service import cache_service
 from app.schema_engine.relationship_graph import RelationshipGraphEngine
+from app.services.relationship_package_mapper import relationship_package_to_dto
+from app.core.structured_logging import api_message, error_message
 from app.schemas.api_schemas import (
     GraphExportResponse,
     RelationshipGraphResponse,
@@ -69,17 +73,29 @@ def _map_paths(items):
 )
 async def get_relationship_graph(db_id: int, db: AsyncSession = Depends(get_db)) -> RelationshipGraphResponse:
     engine = RelationshipGraphEngine(db)
+    start = time.perf_counter()
+    cache_key = f"relationships:{db_id}:graph"
+    cached = await cache_service.get(cache_key)
+    if cached:
+        payload = json.loads(cached)
+        payload["cache_status"] = "cache"
+        logger.info(api_message("relationships graph", db_id=db_id, duration_ms=f"{(time.perf_counter() - start) * 1000:.2f}", cache_hit=True))
+        return RelationshipGraphResponse.model_validate(payload)
     try:
         snapshot = await engine.get_relationship_graph(db_id)
         payload = asdict(snapshot)
         payload["metrics"] = asdict(snapshot.metrics)
         payload["nodes"] = _map_nodes(snapshot.nodes)
         payload["edges"] = _map_edges(snapshot.edges)
+        payload["cache_status"] = "live"
+        await cache_service.set(cache_key, json.dumps(payload, default=str), ttl_seconds=600)
+        duration_ms = (time.perf_counter() - start) * 1000
+        logger.info(api_message("relationships graph", db_id=db_id, duration_ms=f"{duration_ms:.2f}"))
         return RelationshipGraphResponse.model_validate(payload)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except Exception as exc:
-        logger.error("Relationship graph lookup failed for db_id=%s: %s", db_id, exc, exc_info=True)
+        logger.error(error_message("relationship graph lookup failed", db_id=db_id, reason=exc), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to build relationship graph",
@@ -93,8 +109,23 @@ async def get_relationship_graph(db_id: int, db: AsyncSession = Depends(get_db))
 )
 async def get_relationship_package(db_id: int, db: AsyncSession = Depends(get_db)) -> RelationshipPackageResponse:
     engine = RelationshipGraphEngine(db)
+    start = time.perf_counter()
+    cache_key = f"relationships:{db_id}:package"
+    cached = await cache_service.get(cache_key)
+    if cached:
+        payload = json.loads(cached)
+        payload["cache_status"] = "cache"
+        logger.info(api_message("relationships package", db_id=db_id, duration_ms=f"{(time.perf_counter() - start) * 1000:.2f}", cache_hit=True))
+        return RelationshipPackageResponse.model_validate(payload)
     package = await engine.get_relationship_package(db_id)
-    return RelationshipPackageResponse.model_validate(package)
+    normalized = {
+        "database_id": package.get("database_id", db_id),
+        "packages": [asdict(relationship_package_to_dto(item)) for item in package.get("packages", [])],
+        "cache_status": "live",
+    }
+    await cache_service.set(cache_key, json.dumps(normalized, default=str), ttl_seconds=600)
+    logger.info(api_message("relationships package", db_id=db_id, duration_ms=f"{(time.perf_counter() - start) * 1000:.2f}"))
+    return RelationshipPackageResponse.model_validate(normalized)
 
 
 @router.get(
@@ -104,8 +135,23 @@ async def get_relationship_package(db_id: int, db: AsyncSession = Depends(get_db
 )
 async def get_relationship_domains(db_id: int, db: AsyncSession = Depends(get_db)) -> RelationshipPackageResponse:
     engine = RelationshipGraphEngine(db)
+    start = time.perf_counter()
+    cache_key = f"relationships:{db_id}:domains"
+    cached = await cache_service.get(cache_key)
+    if cached:
+        payload = json.loads(cached)
+        payload["cache_status"] = "cache"
+        logger.info(api_message("relationships domains", db_id=db_id, duration_ms=f"{(time.perf_counter() - start) * 1000:.2f}", cache_hit=True))
+        return RelationshipPackageResponse.model_validate(payload)
     package = await engine.get_relationship_package(db_id)
-    return RelationshipPackageResponse.model_validate(package)
+    normalized = {
+        "database_id": package.get("database_id", db_id),
+        "packages": [asdict(relationship_package_to_dto(item)) for item in package.get("packages", [])],
+        "cache_status": "live",
+    }
+    await cache_service.set(cache_key, json.dumps(normalized, default=str), ttl_seconds=600)
+    logger.info(api_message("relationships domains", db_id=db_id, duration_ms=f"{(time.perf_counter() - start) * 1000:.2f}"))
+    return RelationshipPackageResponse.model_validate(normalized)
 
 
 @router.get(
@@ -115,13 +161,23 @@ async def get_relationship_domains(db_id: int, db: AsyncSession = Depends(get_db
 )
 async def get_relationship_lineage(db_id: int, db: AsyncSession = Depends(get_db)) -> RelationshipLineageResponse:
     engine = RelationshipGraphEngine(db)
+    start = time.perf_counter()
+    cache_key = f"relationships:{db_id}:lineage"
+    cached = await cache_service.get(cache_key)
+    if cached:
+        payload = json.loads(cached)
+        logger.info(api_message("relationships lineage", db_id=db_id, duration_ms=f"{(time.perf_counter() - start) * 1000:.2f}", cache_hit=True))
+        return RelationshipLineageResponse.model_validate(payload)
     package = await engine.get_relationship_package(db_id)
     lineage: list[dict] = []
     for item in package.get("packages", []):
-        lineage.extend(item.get("entity_graph") or [])
-        lineage.extend(item.get("upstream_dependencies") or [])
-        lineage.extend(item.get("downstream_dependencies") or [])
-    return RelationshipLineageResponse(database_id=db_id, lineage=lineage)
+        dto = relationship_package_to_dto(item)
+        lineage.extend(dto.entity_graph or [])
+        lineage.extend(dto.lifecycle_flows or [])
+    payload = {"database_id": db_id, "lineage": lineage}
+    await cache_service.set(cache_key, json.dumps(payload, default=str), ttl_seconds=600)
+    logger.info(api_message("relationships lineage", db_id=db_id, duration_ms=f"{(time.perf_counter() - start) * 1000:.2f}"))
+    return RelationshipLineageResponse.model_validate(payload)
 
 
 @router.get(
@@ -140,16 +196,18 @@ async def get_table_neighbors(
     db: AsyncSession = Depends(get_db),
 ) -> TableNeighborsResponse:
     engine = RelationshipGraphEngine(db)
+    start = time.perf_counter()
     try:
         snapshot = await engine.get_neighbors(table_id, depth=depth)
         payload = asdict(snapshot)
         payload["neighbors"] = _map_nodes(snapshot.neighbors)
         payload["edges"] = _map_edges(snapshot.edges)
+        logger.info(api_message("relationships neighbors", table_id=table_id, duration_ms=f"{(time.perf_counter() - start) * 1000:.2f}"))
         return TableNeighborsResponse.model_validate(payload)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except Exception as exc:
-        logger.error("Neighbor lookup failed for table_id=%s: %s", table_id, exc, exc_info=True)
+        logger.error(error_message("neighbor lookup failed", table_id=table_id, reason=exc), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to load table neighbors",
@@ -173,21 +231,17 @@ async def get_join_paths(
     db: AsyncSession = Depends(get_db),
 ) -> JoinPathsResponse:
     engine = RelationshipGraphEngine(db)
+    start = time.perf_counter()
     try:
         snapshot = await engine.get_join_paths(table_a, table_b, max_paths=max_paths)
         payload = asdict(snapshot)
         payload["paths"] = _map_paths(snapshot.paths)
+        logger.info(api_message("relationships join paths", table_a=table_a, table_b=table_b, duration_ms=f"{(time.perf_counter() - start) * 1000:.2f}"))
         return JoinPathsResponse.model_validate(payload)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except Exception as exc:
-        logger.error(
-            "Join path lookup failed for table_a=%s table_b=%s: %s",
-            table_a,
-            table_b,
-            exc,
-            exc_info=True,
-        )
+        logger.error(error_message("join path lookup failed", table_a=table_a, table_b=table_b, reason=exc), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to load join paths",
@@ -210,9 +264,11 @@ async def export_relationship_graph(
     db: AsyncSession = Depends(get_db),
 ) -> GraphExportResponse:
     engine = RelationshipGraphEngine(db)
+    start = time.perf_counter()
     try:
         snapshot = await engine.get_relationship_graph(db_id)
         bundle = engine.export_graph(snapshot, export_format=export_format)
+        logger.info(api_message("relationships export", db_id=db_id, duration_ms=f"{(time.perf_counter() - start) * 1000:.2f}"))
         return GraphExportResponse(
             format=bundle.format,
             filename=bundle.filename,
@@ -221,7 +277,7 @@ async def export_relationship_graph(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except Exception as exc:
-        logger.error("Graph export failed for db_id=%s: %s", db_id, exc, exc_info=True)
+        logger.error(error_message("graph export failed", db_id=db_id, reason=exc), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to export relationship graph",

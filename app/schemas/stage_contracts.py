@@ -19,6 +19,7 @@ class StageStatus(str, enum.Enum):
     running = "running"
     success = "success"
     failed = "failed"
+    blocked = "blocked"
     fallback = "fallback"
     retrying = "retrying"
 
@@ -214,6 +215,7 @@ class StageProgressItem(BaseModel):
     progress_percentage: int = 0
     retries: int = 0
     failure_reason: Optional[str] = None
+    blocked_by_stage: Optional[str] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     depends_on: list[str] = Field(default_factory=list)
@@ -222,6 +224,7 @@ class StageProgressItem(BaseModel):
 class StageProgressResponse(BaseModel):
     database_id: int
     parent_job_id: Optional[int] = None
+    cache_status: Optional[str] = None
     overall_status: str = "pending"
     overall_progress_percentage: int = 0
     current_stage: Optional[str] = None

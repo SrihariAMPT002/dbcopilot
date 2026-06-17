@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.models.business_insight import BusinessInsight
 from app.models.metadata import GovernancePackage, KPIIntelligence, RelationshipPackage, SemanticPackage
 from app.services.ai_observability_service import AIObservabilityService
+from app.services.relationship_package_mapper import relationship_package_to_dto
 
 
 class BusinessInsightService:
@@ -193,15 +194,18 @@ class BusinessInsightService:
     def _relationship_texts(self, relationship_packages: list[RelationshipPackage]) -> list[str]:
         texts: list[str] = []
         for package in relationship_packages:
-            for rel in package.entity_graph[:10]:
+            dto = relationship_package_to_dto(package)
+            for rel in dto.entity_graph[:10]:
                 source = rel.get("source_table_name") or rel.get("source") or rel.get("from") or "source"
                 target = rel.get("target_table_name") or rel.get("target") or rel.get("to") or "target"
                 texts.append(f"{source} depends on {target}.")
-            for flow in package.lifecycle_flows[:10]:
+            for flow in dto.lifecycle_flows[:10]:
                 if isinstance(flow, dict):
                     source = flow.get("source") or flow.get("from") or "source"
                     target = flow.get("target") or flow.get("to") or "target"
                     texts.append(f"{source} flows into {target}.")
+                elif isinstance(flow, str):
+                    texts.append(flow)
         return texts
 
     def _event_texts(self, governance_packages: list[GovernancePackage], relationship_packages: list[RelationshipPackage]) -> list[str]:
@@ -249,13 +253,14 @@ class BusinessInsightService:
 
     @staticmethod
     def _relationship_row(pkg: RelationshipPackage) -> dict[str, Any]:
+        dto = relationship_package_to_dto(pkg)
         return {
-            "cluster_id": pkg.cluster_id,
-            "domain_name": pkg.domain_name,
-            "cluster_summary": pkg.cluster_summary,
-            "entity_graph": pkg.entity_graph,
-            "lifecycle_flows": pkg.lifecycle_flows,
-            "confidence_score": pkg.confidence_score,
+            "cluster_id": dto.cluster_id,
+            "domain_name": dto.domain_name,
+            "cluster_summary": dto.cluster_summary,
+            "entity_graph": dto.entity_graph,
+            "lifecycle_flows": dto.lifecycle_flows,
+            "confidence_score": dto.confidence_score,
         }
 
     @staticmethod

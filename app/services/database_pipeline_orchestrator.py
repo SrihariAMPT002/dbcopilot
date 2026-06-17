@@ -29,6 +29,16 @@ from app.services.pipeline_service import PipelineService
 from app.services.readiness_service import ReadinessService
 from app.services.prompt_studio_service import PromptStudioService
 from app.schemas.stage_contracts import StageProgressItem, StageProgressResponse
+from app.services.pipeline_context import (
+    EmbeddingContext,
+    GovernanceContext,
+    IntelligenceContext,
+    KPIContext,
+    PromptContext,
+    RelationshipContext,
+    SemanticContext,
+)
+from app.core.structured_logging import error_message, stage_message, sync_message
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +132,7 @@ class DatabasePipelineOrchestrator:
             raise ValueError(f"Pipeline job {parent_job_id} not found")
 
         await self.pipeline.update_status(parent_job_id, JobStatus.running, progress_percentage=1)
+        logger.info(sync_message("orchestrator run started", db_id=database_id, parent_job_id=parent_job_id))
 
         database_id = parent.database_id
         database = await self._fetch_database(database_id)
@@ -131,7 +142,7 @@ class DatabasePipelineOrchestrator:
             try:
                 await MongoDBService(self.db).ensure_collection_registry(database_id)
             except Exception as exc:
-                logger.warning("Mongo registry refresh failed: %s", exc, exc_info=True)
+                logger.warning(error_message("mongo registry refresh failed", db_id=database_id, reason=exc))
 
         entities = await self._fetch_entities(database_id)
         total_units = max(1, len(entities) * 2 + len(STAGE_GRAPH))
@@ -140,6 +151,8 @@ class DatabasePipelineOrchestrator:
         # Run stage graph in order; each stage can resume independently.
         enricher = SchemaEnricher(self.db)
         embedder = EmbeddingEngine(self.db)
+        context = IntelligenceContext()
+        failed_stage: str | None = None
 
         for node in STAGE_GRAPH:
             if (await self.pipeline.get_job(parent_job_id)).status == JobStatus.cancelled:
@@ -151,12 +164,40 @@ class DatabasePipelineOrchestrator:
                 completed_units += 1
                 continue
 
+            if failed_stage is not None and node.stage not in {"metadata"}:
+                await self.pipeline.update_status(
+                    job_id,
+                    JobStatus.failed,
+                    progress_percentage=0,
+                    failure_reason=f"Blocked: waiting for {failed_stage}",
+                )
+                completed_units += 1
+                await self._update_parent_progress(parent_job_id, completed_units, total_units)
+                continue
+
+            if not self._dependencies_satisfied(node.stage, context):
+                dependency_stage = self._first_missing_dependency(node.stage, context) or "upstream stage"
+                await self.pipeline.update_status(
+                    job_id,
+                    JobStatus.failed,
+                    progress_percentage=0,
+                    failure_reason=f"Blocked: waiting for {dependency_stage}",
+                )
+                completed_units += 1
+                await self._update_parent_progress(parent_job_id, completed_units, total_units)
+                continue
+
             await self.pipeline.update_status(job_id, JobStatus.running, progress_percentage=10)
+            logger.info(stage_message("started", stage=node.stage, db_id=database_id, job_id=job_id))
             try:
-                await self._execute_stage(node.stage, database_id, parent_job_id, job_id)
+                stage_output = await self._execute_stage(node.stage, database_id, parent_job_id, job_id, context=context)
+                self._store_context(node.stage, context, stage_output)
                 await self.pipeline.update_status(job_id, JobStatus.completed, progress_percentage=100)
+                logger.info(stage_message("completed", stage=node.stage, db_id=database_id, job_id=job_id))
             except Exception as exc:
                 await self.pipeline.update_status(job_id, JobStatus.failed, failure_reason=str(exc), progress_percentage=0)
+                logger.error(error_message("stage failed", stage=node.stage, db_id=database_id, job_id=job_id, reason=exc), exc_info=True)
+                failed_stage = failed_stage or node.stage
                 if await self._can_retry(job_id):
                     await self.pipeline.retry_job(job_id, triggered_by="orchestrator")
             completed_units += 1
@@ -171,13 +212,15 @@ class DatabasePipelineOrchestrator:
                 progress_percentage=100,
                 failure_reason=f"{failed_children} child job(s) failed",
             )
+            logger.warning(error_message("orchestrator completed with failures", parent_job_id=parent_job_id, failed_children=failed_children))
             return
 
         await self.pipeline.update_status(parent_job_id, JobStatus.completed, progress_percentage=100)
+        logger.info(sync_message("orchestrator run completed", parent_job_id=parent_job_id, db_id=database_id))
 
-    async def _execute_stage(self, stage: str, database_id: int, parent_job_id: int, job_id: int) -> None:
+    async def _execute_stage(self, stage: str, database_id: int, parent_job_id: int, job_id: int, *, context: IntelligenceContext | None = None) -> Any:
         if stage == "metadata":
-            return
+            return {"database_id": database_id, "stage": stage}
         if stage == "governance":
             return await self._run_governance(database_id, parent_job_id, job_id)
         if stage == "semantics":
@@ -185,14 +228,66 @@ class DatabasePipelineOrchestrator:
         if stage == "relationships":
             return await RelationshipGraphEngine(self.db).build_relationship_graph(database_id, persist=True)
         if stage == "kpi":
-            return await KPIIntelligenceService(self.db).generate_for_database(database_id, job_id=job_id)
+            return await KPIIntelligenceService(self.db).generate_for_database(database_id, job_id=job_id, context=context)
         if stage == "prompt":
-            return await PromptStudioService(self.db).generate_artifacts(database_id)
+            return await PromptStudioService(self.db).generate_artifacts(database_id, context=context)
         if stage == "embeddings":
-            return await EmbeddingEngine(self.db).generate_database_embeddings(database_id)
+            return await EmbeddingEngine(self.db).generate_database_embeddings(database_id, context=context)
         if stage == "readiness":
-            return await ReadinessService(self.db).recompute(database_id)
+            return await ReadinessService(self.db).recompute(database_id, context=context)
         raise ValueError(f"Unknown stage {stage}")
+
+    @staticmethod
+    def _store_context(stage: str, context: IntelligenceContext, payload: Any) -> None:
+        if stage == "governance":
+            context.governance = GovernanceContext(packages=list(payload or []))
+        elif stage == "semantics":
+            context.semantics = SemanticContext(package=payload if isinstance(payload, dict) else None)
+        elif stage == "relationships":
+            context.relationships = RelationshipContext(packages=list((payload or {}).get("packages", []) if isinstance(payload, dict) else []))
+        elif stage == "kpi":
+            context.kpis = KPIContext(package=payload if isinstance(payload, dict) else None, catalog=list((payload or {}).get("catalog", []) if isinstance(payload, dict) else []))
+        elif stage == "prompt":
+            context.prompts = PromptContext(artifacts=list((payload or {}).get("artifacts", []) if isinstance(payload, dict) else []), package=payload if isinstance(payload, dict) else None)
+        elif stage == "embeddings":
+            context.embeddings = EmbeddingContext(status=payload if isinstance(payload, dict) else {})
+        elif stage == "readiness":
+            context.readiness = payload if isinstance(payload, dict) else None
+
+    @staticmethod
+    def _dependencies_satisfied(stage: str, context: IntelligenceContext) -> bool:
+        if stage == "metadata":
+            return True
+        if stage == "governance":
+            return True
+        if stage == "semantics":
+            return context.governance is not None
+        if stage == "relationships":
+            return context.governance is not None and context.semantics is not None
+        if stage == "kpi":
+            return context.governance is not None and context.semantics is not None and context.relationships is not None
+        if stage == "prompt":
+            return context.governance is not None and context.semantics is not None and context.relationships is not None and context.kpis is not None
+        if stage == "embeddings":
+            return context.governance is not None and context.semantics is not None and context.relationships is not None and context.kpis is not None and context.prompts is not None
+        if stage == "readiness":
+            return context.embeddings is not None and context.prompts is not None
+        return True
+
+    @staticmethod
+    def _first_missing_dependency(stage: str, context: IntelligenceContext) -> str | None:
+        checks = {
+            "semantics": [("governance", context.governance)],
+            "relationships": [("governance", context.governance), ("semantics", context.semantics)],
+            "kpi": [("governance", context.governance), ("semantics", context.semantics), ("relationships", context.relationships)],
+            "prompt": [("governance", context.governance), ("semantics", context.semantics), ("relationships", context.relationships), ("kpi", context.kpis)],
+            "embeddings": [("governance", context.governance), ("semantics", context.semantics), ("relationships", context.relationships), ("kpi", context.kpis), ("prompt", context.prompts)],
+            "readiness": [("embeddings", context.embeddings), ("prompt", context.prompts)],
+        }
+        for dep, value in checks.get(stage, []):
+            if value is None:
+                return dep
+        return None
 
     async def _run_governance(self, database_id: int, parent_job_id: int, job_id: int) -> None:
         from app.services.column_semantic_service import ColumnSemanticService
@@ -297,6 +392,8 @@ class DatabasePipelineOrchestrator:
         for node in STAGE_GRAPH:
             match = next((job for job in filtered if job.stage_name == node.stage), None)
             status = (match.status.value if match else "PENDING").lower()
+            if match and match.failure_reason and str(match.failure_reason).startswith("Blocked:"):
+                status = "blocked"
             progress = int(getattr(match, "progress_percentage", 0) or 0)
             stage_items.append(
                 StageProgressItem(
@@ -306,6 +403,11 @@ class DatabasePipelineOrchestrator:
                     progress_percentage=progress,
                     retries=match.retry_count if match else 0,
                     failure_reason=match.failure_reason if match else None,
+                    blocked_by_stage=(
+                        str(match.failure_reason).split("Blocked: waiting for ", 1)[1]
+                        if match and match.failure_reason and str(match.failure_reason).startswith("Blocked: waiting for ")
+                        else None
+                    ),
                     started_at=match.started_at if match else None,
                     completed_at=match.completed_at if match else None,
                     depends_on=node.depends_on,
@@ -319,6 +421,8 @@ class DatabasePipelineOrchestrator:
             elif status == "failed":
                 failed += 1
                 current_stage = current_stage or node.stage
+            elif status == "blocked":
+                pending += 1
             else:
                 pending += 1
 

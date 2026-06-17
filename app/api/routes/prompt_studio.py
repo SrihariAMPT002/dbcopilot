@@ -303,7 +303,7 @@ async def list_prompt_packages(db_id: int, db: AsyncSession = Depends(get_db)) -
                 generated_prompt=row.generated_prompt,
                 model_name=row.model_name,
                 trace_id=row.trace_id,
-                prompt_version=row.prompt_version,
+                prompt_version=getattr(row, "prompt_version", None),
                 confidence_score=row.confidence_score,
                 generation_metadata=row.generation_metadata,
                 execution_status=row.execution_status,
@@ -371,7 +371,7 @@ async def list_prompt_observability(
                 latency_ms=row.latency_ms,
                 finish_reason=row.finish_reason,
                 execution_status=row.execution_status,
-                failure_reason=row.failure_reason,
+                failure_reason=getattr(row, "failure_reason", getattr(row, "raw_failure_reason", None)),
                 created_at=row.created_at,
             )
             for row in rows

@@ -38,10 +38,12 @@ from app.models.metadata import (
     DatabaseSemantic,
 )
 from app.services.ai_observability_service import AIObservabilityService
+from app.services.relationship_package_mapper import normalize_lifecycle_flows, normalize_relationship_items
 from app.services.cluster_scoring_service import ClusterScoringService
 from app.services.graph_feature_service import GraphFeatureService
 from app.services.column_semantic_service import ColumnSemanticService
 from app.services.lineage_service import LineageService
+from app.core.structured_logging import error_message
 from app.services.relationship_validator_service import RelationshipValidatorService
 from app.utils import safe_flush
 from app.config.prompts import get_prompt_registry
@@ -1343,10 +1345,13 @@ class RelationshipGraphEngine:
                         )
                     except Exception as exc:
                         logger.exception(
-                            "Relationship cluster failed | database_id=%s domain=%s tables=%s",
-                            database.id,
-                            domain_name,
-                            reduced_cluster,
+                            error_message(
+                                "relationship cluster failed",
+                                database_id=database.id,
+                                domain=domain_name,
+                                tables=reduced_cluster,
+                                reason=exc,
+                            )
                         )
                         cluster_payloads.append(
                             {
@@ -1537,14 +1542,14 @@ class RelationshipGraphEngine:
                     relationship_strength=edge.relationship_strength,
                     path_depth=edge.path_depth,
                     is_circular=edge.is_circular,
-                    entity_graph=self._json_safe(cluster_intel.get("entity_graph") or intelligence.get("entity_graph", [])),
+                    entity_graph=self._json_safe(normalize_relationship_items(cluster_intel.get("entity_graph") or intelligence.get("entity_graph", []))),
                     upstream_dependencies=self._json_safe(
-                        cluster_intel.get("upstream_dependencies") or intelligence.get("upstream_dependencies", [])
+                        normalize_relationship_items(cluster_intel.get("upstream_dependencies") or intelligence.get("upstream_dependencies", []))
                     ),
                     downstream_dependencies=self._json_safe(
-                        cluster_intel.get("downstream_dependencies") or intelligence.get("downstream_dependencies", [])
+                        normalize_relationship_items(cluster_intel.get("downstream_dependencies") or intelligence.get("downstream_dependencies", []))
                     ),
-                    lifecycle_flows=self._json_safe(cluster_intel.get("lifecycle_flows") or intelligence.get("lifecycle_flows", [])),
+                    lifecycle_flows=self._json_safe(normalize_lifecycle_flows(cluster_intel.get("lifecycle_flows") or intelligence.get("lifecycle_flows", []))),
                     ai_summary=cluster_summary or intelligence.get("business_relationship_summary"),
                     ai_confidence=float(cluster_confidence if cluster_confidence is not None else intelligence.get("confidence_score", 0.0) or 0.0),
                     ai_model_name=intelligence.get("model_name"),

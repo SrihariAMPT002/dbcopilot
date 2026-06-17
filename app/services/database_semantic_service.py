@@ -801,7 +801,38 @@ class DatabaseSemanticService:
             ]
             row.updated_at = datetime.now(timezone.utc)
 
-        await safe_flush(self.db)
+        try:
+            await safe_flush(self.db)
+        except IntegrityError:
+            await self.db.rollback()
+            for item in table_semantics:
+                schema_name = str(item.get("schema_name") or "")
+                table_name = str(item.get("table_name") or "")
+                table = table_lookup.get((schema_name, table_name))
+                if table is None:
+                    continue
+                result = await self.db.execute(
+                    select(SchemaSemantic).where(SchemaSemantic.table_id == table.id)
+                )
+                row = result.scalars().first()
+                if row is None:
+                    row = SchemaSemantic(
+                        database_id=database.id,
+                        table_id=table.id,
+                        semantic_summary=str(item.get("semantic_summary") or f"{schema_name}.{table_name}"),
+                    )
+                    self.db.add(row)
+                row.semantic_summary = str(item.get("semantic_summary") or row.semantic_summary)
+                row.business_capabilities = list(item.get("business_capabilities") or [])
+                row.business_entities = list(item.get("business_entities") or [])
+                row.business_processes = list(item.get("business_processes") or [])
+                row.business_keywords = list(item.get("business_entities") or [])[:10]
+                row.possible_questions = [
+                    f"What business process uses {table_name}?",
+                    f"Which entities are modeled in {table_name}?",
+                ]
+                row.updated_at = datetime.now(timezone.utc)
+            await safe_flush(self.db)
 
     async def _upsert_semantic_package(self, enrichment: DatabaseSemanticEnrichment) -> SemanticPackage:
         result = await self.db.execute(
@@ -934,7 +965,30 @@ class DatabaseSemanticService:
         row.model_name = model_name
         row.trace_id = self._trace_id_as_string(trace_id)
         row.updated_at = datetime.now(timezone.utc)
-        await safe_flush(self.db)
+        try:
+            await safe_flush(self.db)
+        except IntegrityError:
+            await self.db.rollback()
+            result = await self.db.execute(
+                select(TableSemanticPackage).where(TableSemanticPackage.table_id == table.id)
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                row = TableSemanticPackage(database_id=database.id, table_id=table.id)
+                self.db.add(row)
+            row.business_purpose = semantic.semantic_summary
+            row.business_entity = ", ".join(semantic.business_entities or [])
+            row.business_capability = ", ".join(semantic.business_capabilities or [])
+            row.business_process = ", ".join(semantic.business_processes or [])
+            row.business_keywords = list(semantic.business_entities or [])[:10]
+            row.semantic_summary = semantic.semantic_summary
+            row.confidence_score = 1.0
+            row.prompt_id = prompt_id
+            row.prompt_version = prompt_version
+            row.model_name = model_name
+            row.trace_id = self._trace_id_as_string(trace_id)
+            row.updated_at = datetime.now(timezone.utc)
+            await safe_flush(self.db)
         return row
 
     # ── Confidence scoring ─────────────────────────────────────────────────

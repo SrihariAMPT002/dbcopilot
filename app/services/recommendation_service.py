@@ -14,6 +14,7 @@ from app.models.metadata import GovernancePackage, RelationshipPackage, Semantic
 from app.models.recommendation import Recommendation
 from app.models.readiness_snapshot import ReadinessSnapshot
 from app.services.ai_observability_service import AIObservabilityService
+from app.services.relationship_package_mapper import relationship_package_to_dto
 
 
 class RecommendationService:
@@ -81,8 +82,8 @@ class RecommendationService:
 
     @staticmethod
     def _relationship_row(pkg: RelationshipPackage) -> dict[str, Any]:
-        confidence = float(getattr(pkg, "confidence_score", getattr(pkg, "cluster_confidence", 0.0)) or 0.0)
-        return {"cluster_id": pkg.cluster_id, "confidence_score": confidence, "cluster_confidence": confidence}
+        dto = relationship_package_to_dto(pkg)
+        return {"cluster_id": dto.cluster_id, "confidence_score": dto.confidence_score}
 
     @staticmethod
     def _readiness_row(row: ReadinessSnapshot | None) -> dict[str, Any]:

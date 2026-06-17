@@ -19,8 +19,8 @@ function Stat({ label, value }: { label: string; value: string | number }) {
 }
 
 export function RelationshipsPage() {
-  const { selectedDatabaseId } = useDatabaseContext();
-  const dbId = selectedDatabaseId ?? 1;
+  const { selectedDatabase } = useDatabaseContext();
+  const dbId = selectedDatabase?.database_id ?? null;
   const { data } = useRelationships(dbId);
   const clusters = data?.packages ?? [];
   const selectedCluster = clusters[0];

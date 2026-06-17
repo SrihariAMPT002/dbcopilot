@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
@@ -27,6 +28,7 @@ from app.models.prompt_embedding import PromptEmbedding
 from app.models.retrieval_log import RetrievalLog
 from app.models.pipeline_job import JobStatus, JobType, PipelineJob
 from app.models.readiness_snapshot import ReadinessSnapshot
+from app.services.cache_service import cache_service
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -34,6 +36,7 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 class DashboardSummaryResponse(BaseModel):
     database_id: int | None = None
     database_name: str | None = None
+    cache_status: str = "live"
     total_databases: int = 0
     schemas: int = 0
     tables: int = 0
@@ -64,6 +67,12 @@ async def get_dashboard_summary(
     database_id: int | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> DashboardSummaryResponse:
+    cache_key = f"dashboard:{database_id or 'latest'}"
+    cached = await cache_service.get(cache_key)
+    if cached:
+        payload = DashboardSummaryResponse.model_validate(json.loads(cached))
+        payload.cache_status = "cache"
+        return payload
     selected_db_id = database_id
     selected_db_name = None
     if selected_db_id is None:
@@ -203,9 +212,10 @@ async def get_dashboard_summary(
         conn = await db.get(ConnectedDatabase, selected_db_id)
         last_sync_at = getattr(conn, "last_sync_at", None)
 
-    return DashboardSummaryResponse(
+    payload = DashboardSummaryResponse(
         database_id=selected_db_id,
         database_name=selected_db_name,
+        cache_status="live",
         total_databases=int(total_databases),
         schemas=schema_count,
         tables=table_count,
@@ -230,3 +240,5 @@ async def get_dashboard_summary(
         retrieval_evaluations=retrieval_evaluations,
         retrieval_logs=retrieval_logs,
     )
+    await cache_service.set(cache_key, payload.model_dump_json(), ttl_seconds=300)
+    return payload
