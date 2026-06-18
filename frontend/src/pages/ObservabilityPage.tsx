@@ -14,6 +14,7 @@ import { useLifecycleEvents, useObservabilityTraceDetail, useObservabilityTraces
 import { usePipelineExecutions } from "@/hooks/usePipelineExecutions";
 import { usePromptPackages } from "@/hooks/usePromptStudio";
 import { useConnections } from "@/hooks/useConnections";
+import { cn } from "@/lib/utils";
 
 export function ObservabilityPage() {
   const { selectedDatabase } = useDatabaseContext();
@@ -141,6 +142,10 @@ export function ObservabilityPage() {
             <TraceSummary label="Lifecycle" value={selectedDatabase?.lifecycle_status ?? "ACTIVE"} />
             <TraceSummary label="Total modules" value={String(modules.length)} />
             <TraceSummary label="Recent lifecycle events" value={String(lifecycle.length)} />
+            <TraceSummary label="Linked job" value={String(traceDetail?.linked_job?.job_id ?? "n/a")} />
+            <TraceSummary label="Pipeline execution" value={String(traceDetail?.linked_pipeline_execution?.pipeline_execution_id ?? "n/a")} />
+            <TraceSummary label="Stage executions" value={String(traceDetail?.linked_stage_executions?.length ?? 0)} />
+            <TraceSummary label="Prompt version" value={String(traceDetail?.linked_prompt_versions?.[0]?.version ?? traceDetail?.prompt_version ?? "n/a")} />
           </CardContent>
         </Card>
       </section>
@@ -226,9 +231,7 @@ export function ObservabilityPage() {
             <Metric label="Completion truncated" value={traceDetail?.completion_truncated ? "Yes" : "No"} icon={TextQuote} />
             <Metric label="Estimated cost" value={`$${(traceDetail?.estimated_cost_usd ?? 0).toFixed(4)}`} icon={Zap} />
             <Metric label="Latency" value={`${Math.round(traceDetail?.latency_ms ?? 0)} ms`} icon={Clock3} />
-            <div className="rounded-md border border-border bg-card p-3 text-xs text-muted-foreground">
-              Finish reason: {traceDetail?.finish_reason ?? "n/a"}
-            </div>
+            <DetailPill label="Finish reason" value={traceDetail?.finish_reason ?? "n/a"} />
           </CardContent>
         </Card>
       </section>
@@ -241,18 +244,21 @@ export function ObservabilityPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             {(pipelineExecutions?.executions ?? []).slice(0, 5).map((item) => (
-              <div key={item.id} className="rounded-md border border-border bg-card p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm font-medium text-foreground">Execution #{item.id}</div>
+              <div key={item.id} className="rounded-xl border border-border bg-gradient-to-br from-card via-card to-muted/30 p-4 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Pipeline execution</div>
+                    <div className="text-base font-semibold text-foreground">Execution #{item.id}</div>
+                  </div>
                   <Badge variant="outline" className="text-[10px] uppercase">
                     {item.status}
                   </Badge>
                 </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Trace: {item.trace_id ?? "n/a"} · Model: {item.model_name ?? "n/a"}
-                </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Duration: {item.duration_seconds?.toFixed(2) ?? "n/a"}s · Error: {item.error_message ?? "none"}
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <DetailPill label="Trace" value={item.trace_id ?? "n/a"} href={item.trace_id ? `/observability?trace_id=${encodeURIComponent(item.trace_id)}` : undefined} />
+                  <DetailPill label="Model" value={item.model_name ?? "n/a"} />
+                  <DetailPill label="Duration" value={`${item.duration_seconds?.toFixed(2) ?? "n/a"}s`} />
+                  <DetailPill label="Error" value={item.error_message ?? "none"} />
                 </div>
               </div>
             ))}
@@ -267,9 +273,12 @@ export function ObservabilityPage() {
           <CardContent className="space-y-3">
             {lifecycle.length ? (
               lifecycle.slice(0, 6).map((event) => (
-                <div key={event.id} className="rounded-md border border-border bg-card p-3">
+                <div key={event.id} className="rounded-xl border border-border bg-card p-4 shadow-sm">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm font-medium text-foreground">{event.event_type}</div>
+                    <div>
+                      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Lifecycle event</div>
+                      <div className="text-sm font-medium text-foreground">{event.event_type}</div>
+                    </div>
                     <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[11px]" asChild>
                       <a href={`/observability?trace_id=${encodeURIComponent(event.trace_id ?? "")}`}>
                         <LinkIcon className="h-3.5 w-3.5" /> Open trace
@@ -297,14 +306,24 @@ export function ObservabilityPage() {
           <CardContent className="space-y-3">
             {promptVersions.length ? (
               promptVersions.slice(0, 3).map((version) => (
-                <div key={String(version.id ?? version.trace_id ?? Math.random())} className="rounded-md border border-border bg-card p-3">
+                <div key={String(version.id ?? version.trace_id ?? Math.random())} className="rounded-xl border border-border bg-gradient-to-br from-card to-muted/20 p-4 shadow-sm">
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-sm font-medium text-foreground">Version {String(version.version ?? "n/a")}</div>
                     <Badge variant="outline" className="text-[10px] uppercase">
                       {String(version.model_name ?? "unknown")}
                     </Badge>
                   </div>
-                  <div className="mt-2 rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <Badge variant="outline" className="text-[10px] uppercase">
+                      Trace {version.trace_id ?? "n/a"}
+                    </Badge>
+                    <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[11px]" asChild>
+                      <a href={version.trace_id ? `/observability?trace_id=${encodeURIComponent(version.trace_id)}` : "#"}>
+                        <LinkIcon className="h-3.5 w-3.5" /> Trace
+                      </a>
+                    </Button>
+                  </div>
+                  <div className="mt-3 rounded-lg border border-border/70 bg-background/70 p-3 text-xs leading-relaxed text-muted-foreground">
                     {String(version.generated_prompt ?? "").slice(0, 420)}
                   </div>
                 </div>
@@ -334,7 +353,7 @@ export function ObservabilityPage() {
             <Detail label="Completion tokens" value={String(traceDetail?.completion_tokens ?? 0)} />
             <Detail label="Reasoning tokens" value={String(traceDetail?.reasoning_tokens ?? 0)} />
             <Detail label="Estimated cost" value={`$${(traceDetail?.estimated_cost_usd ?? 0).toFixed(4)}`} />
-            <div className="rounded-md border border-border bg-card p-3">
+            <div className="rounded-xl border border-border bg-gradient-to-br from-card via-card to-muted/20 p-4 shadow-sm">
               <div className="flex items-center justify-between">
                 <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Prompt observability</div>
                 <div className="flex items-center gap-2">
@@ -361,9 +380,9 @@ export function ObservabilityPage() {
                   </Button>
                 </div>
               </div>
-              <div className="mt-2 flex flex-wrap gap-2">
+              <div className="mt-3 flex flex-wrap gap-2">
                 {promptObservability.length ? promptObservability.slice(0, 8).map((item: any, index: number) => (
-                  <div key={`${item.id ?? index}`} className="rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+                  <div key={`${item.id ?? index}`} className="rounded-lg border border-border bg-background/70 px-3 py-2 text-xs text-muted-foreground shadow-sm">
                     <div className="font-medium text-foreground">{String(item.model_name ?? "prompt")} · {String(item.finish_reason ?? "n/a")}</div>
                     <div className="mt-1 flex flex-wrap gap-2">
                       <Badge variant="outline" className="text-[10px] uppercase">Prompt {item.prompt_tokens ?? 0}</Badge>
@@ -375,7 +394,7 @@ export function ObservabilityPage() {
                 )) : <div className="text-xs text-muted-foreground">No prompt observability records yet.</div>}
               </div>
             </div>
-            <div className="rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+            <div className="rounded-lg border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
               {traceDetail?.pipeline_executions?.length
                 ? "This trace has a persisted pipeline context snapshot and execution history."
                 : "No persisted pipeline context snapshot is attached to this trace."}
@@ -392,9 +411,9 @@ export function ObservabilityPage() {
           </SheetHeader>
           <div className="mt-6 space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
-              <Detail label="Trace ID" value={traceDetail?.trace_id ?? "n/a"} />
-              <Detail label="Prompt ID" value={traceDetail?.prompt_id ?? "n/a"} />
-              <Detail label="Prompt version" value={traceDetail?.prompt_version ?? "n/a"} />
+              <Detail label="Trace ID" value={traceDetail?.trace_id ?? "n/a"} href={traceDetail?.trace_id ? `/observability?trace_id=${encodeURIComponent(traceDetail.trace_id)}` : undefined} />
+              <Detail label="Prompt ID" value={traceDetail?.prompt_id ?? "n/a"} href={traceDetail?.trace_id ? `/prompt-studio?trace_id=${encodeURIComponent(traceDetail.trace_id)}` : undefined} />
+              <Detail label="Prompt version" value={traceDetail?.prompt_version ?? "n/a"} href={traceDetail?.trace_id ? `/prompt-studio?trace_id=${encodeURIComponent(traceDetail.trace_id)}` : undefined} />
               <Detail label="Model" value={traceDetail?.model_name ?? "n/a"} />
               <Detail label="Deployment" value={traceDetail?.deployment ?? "n/a"} />
               <Detail label="Module" value={traceDetail?.module ?? "n/a"} />
@@ -417,6 +436,10 @@ export function ObservabilityPage() {
             <TraceSummaryChips title="Stage executions" value={traceDetail?.stage_executions ?? []} />
             <TraceSummaryChips title="Pipeline executions" value={traceDetail?.pipeline_executions ?? []} />
             <TraceSummaryChips title="Prompt versions" value={traceDetail?.prompt_versions ?? []} />
+            <TraceSummaryChips title="Linked prompt versions" value={traceDetail?.linked_prompt_versions ?? []} />
+            <TraceSummaryChips title="Linked stage executions" value={traceDetail?.linked_stage_executions ?? []} />
+            <TraceSummaryChips title="Linked pipeline execution" value={traceDetail?.linked_pipeline_execution ? [traceDetail.linked_pipeline_execution] : []} />
+            <TraceSummaryChips title="Linked job" value={traceDetail?.linked_job ? [traceDetail.linked_job] : []} />
           </div>
         </SheetContent>
       </Sheet>
@@ -436,12 +459,19 @@ function Metric({ label, value, icon: Icon }: { label: string; value: string; ic
   );
 }
 
-function Detail({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-border bg-card p-3">
+function Detail({ label, value, href }: { label: string; value: string; href?: string }) {
+  const shell = (
+    <div className="rounded-xl border border-border bg-gradient-to-br from-card to-muted/20 p-4 shadow-sm transition-colors hover:border-primary/40 hover:bg-primary/5">
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-1 text-sm text-foreground">{value}</div>
+      <div className="mt-1 truncate text-sm font-medium text-foreground">{value}</div>
     </div>
+  );
+
+  if (!href) return shell;
+  return (
+    <a href={href} className="block">
+      {shell}
+    </a>
   );
 }
 
@@ -466,6 +496,22 @@ function TraceSummaryChips({ title, value }: { title: string; value: Array<Recor
         )) : <div className="text-xs text-muted-foreground">No records available.</div>}
       </div>
     </div>
+  );
+}
+
+function DetailPill({ label, value, href }: { label: string; value: string; href?: string }) {
+  const inner = (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background/80 px-3 py-2 text-xs shadow-sm transition-colors hover:border-primary/40 hover:bg-primary/5">
+      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
+      <span className="truncate font-medium text-foreground">{value}</span>
+    </div>
+  );
+
+  if (!href) return inner;
+  return (
+    <a href={href} className="block">
+      {inner}
+    </a>
   );
 }
 

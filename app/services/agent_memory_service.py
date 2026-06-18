@@ -50,6 +50,16 @@ class AgentMemoryService:
         await self.vector_store.ensure_collections()
         context_json = context_json or {}
         tags = tags or []
+        existing = await self._find_duplicate(
+            database_id=database_id,
+            query_text=query_text,
+            response_text=response_text,
+            context_json=context_json,
+            memory_type=memory_type,
+            tags=tags,
+        )
+        if existing is not None:
+            return existing
         text_for_embedding = self._build_embedding_text(query_text=query_text, response_text=response_text, context_json=context_json)
         observability = AIObservabilityService()
         ai_result = await observability.generate(
@@ -86,6 +96,29 @@ class AgentMemoryService:
             await self.db.flush()
 
         return memory
+
+    async def _find_duplicate(
+        self,
+        *,
+        database_id: int,
+        query_text: str,
+        response_text: str | None,
+        context_json: dict[str, Any],
+        memory_type: str,
+        tags: list[str],
+    ) -> AgentMemory | None:
+        result = await self.db.execute(
+            select(AgentMemory)
+            .where(AgentMemory.database_id == database_id)
+            .where(AgentMemory.query_text == query_text)
+            .where(AgentMemory.response_text == response_text)
+            .where(AgentMemory.memory_type == memory_type)
+            .where(AgentMemory.context_json == self._json(context_json))
+            .where(AgentMemory.tags_json == self._json(tags))
+            .order_by(desc(AgentMemory.created_at), desc(AgentMemory.id))
+            .limit(1)
+        )
+        return result.scalars().first()
 
     async def get_history(self, database_id: int, limit: int = 20) -> dict[str, Any]:
         await self._ensure_database(database_id)
@@ -159,6 +192,32 @@ class AgentMemoryService:
             )
         return {"database_id": database_id, "query": query, "total_hits": len(results), "results": results}
 
+    async def get_health(self, database_id: int) -> dict[str, Any]:
+        await self._ensure_database(database_id)
+        history = await self.get_history(database_id, limit=1)
+        vector_count = 0
+        if qmodels is not None:
+            client = get_qdrant_client()
+            try:
+                vector_count = int(
+                    client.count(
+                        collection_name="memory_vectors",
+                        count_filter=qmodels.Filter(
+                            must=[qmodels.FieldCondition(key="database_id", match=qmodels.MatchValue(value=database_id))]
+                        ),
+                        exact=True,
+                    ).count
+                )
+            except Exception:
+                vector_count = 0
+        return {
+            "database_id": database_id,
+            "memory_rows": int(history.get("total") or 0),
+            "vector_count": vector_count,
+            "search_health": vector_count >= 0,
+            "status": "healthy" if vector_count > 0 or int(history.get("total") or 0) > 0 else "empty",
+        }
+
     def _upsert_vector(
         self,
         *,
@@ -186,7 +245,7 @@ class AgentMemoryService:
             collection_name="memory_vectors",
             points=[
                 qmodels.PointStruct(
-                    id=self._vector_id(memory.database_id),
+                    id=self._vector_id(memory.id),
                     vector=vector,
                     payload=payload,
                 )

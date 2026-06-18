@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -65,7 +65,10 @@ class ContextPackageResult:
     prompt_id: str | None = None
     prompt_version: str | None = None
     model_name: str | None = None
+    request_id: str | None = None
     trace_id: str | None = None
+    usage: dict[str, int] = field(default_factory=dict)
+    timestamps: dict[str, datetime] = field(default_factory=dict)
     prompt_tokens: int = 0
     completion_tokens: int = 0
     reasoning_tokens: int = 0
@@ -898,21 +901,24 @@ class PromptStudioService:
         )
         return ContextPackageResult(
             artifact_type=artifact,
-            prompt_id=getattr(result, "prompt_id", prompt_id),
-            prompt_version=getattr(result, "prompt_version", prompt_version),
-            model_name=getattr(result, "model_name", settings.azure_openai_deployment),
+            prompt_id=result.prompt_id or prompt_id,
+            prompt_version=result.prompt_version or prompt_version,
+            model_name=result.model_name or settings.azure_openai_deployment,
             content=content,
             mime=mime,
             filename=filename,
             context_quality_score=quality["context_quality_score"],
             governance_coverage=quality["governance_coverage"],
             pii_coverage=quality["pii_coverage"],
-            generated_at=getattr(result, "generated_at", now_utc()),
-            trace_id=getattr(result, "trace_id", None),
-            prompt_tokens=int(getattr(result, "prompt_tokens", 0) or 0),
-            completion_tokens=int(getattr(result, "completion_tokens", 0) or 0),
-            reasoning_tokens=int(getattr(result, "reasoning_tokens", 0) or 0),
-            latency_ms=float(getattr(result, "latency_ms", 0.0) or 0.0),
+            generated_at=result.timestamps.get("generated_at", now_utc()) if getattr(result, "timestamps", None) else now_utc(),
+            request_id=result.request_id,
+            trace_id=result.trace_id,
+            usage=result.token_usage,
+            timestamps=result.timestamps,
+            prompt_tokens=int(result.prompt_tokens or 0),
+            completion_tokens=int(result.completion_tokens or 0),
+            reasoning_tokens=int(result.reasoning_tokens or 0),
+            latency_ms=float(result.latency_ms or 0.0),
             manifest=saved,
         )
 

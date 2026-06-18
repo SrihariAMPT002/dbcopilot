@@ -346,6 +346,13 @@ export type BusinessEventsResponse = {
   events: BusinessEvent[];
 };
 
+export type BusinessEventsHealthResponse = {
+  database_id: number;
+  event_rows: number;
+  latest_trace_id?: string | null;
+  state: string;
+};
+
 export type BusinessInsight = {
   id?: number;
   database_id?: number;
@@ -490,6 +497,14 @@ export type AgentMemorySearchResponse = {
   results: AgentMemorySearchHit[];
 };
 
+export type AgentMemoryHealthResponse = {
+  database_id: number;
+  memory_rows: number;
+  vector_count: number;
+  search_health: boolean;
+  status: string;
+};
+
 export type PredictiveReadiness = {
   id?: number;
   database_id?: number;
@@ -509,6 +524,11 @@ export type PredictiveReadiness = {
 export type PredictiveReadinessResponse = {
   database_id: number;
   predictive_readiness: PredictiveReadiness | null;
+};
+
+export type BusinessIntelligenceHealthResponse = {
+  database_id: number;
+  packages: Record<string, { count: number; latest_trace_id?: string | null; state: string }>;
 };
 
 export type ReadinessSnapshot = {
@@ -600,6 +620,8 @@ export type EmbeddingStatus = {
     vectors: number;
     indexed_tables?: number;
     last_indexed_at?: string | null;
+    collection_exists?: boolean;
+    status?: string;
   }>;
   message?: string;
 };
@@ -649,6 +671,19 @@ export type RetrievalMetricsResponse = {
   total_documents: number;
   retrieval_logs: number;
   retrieval_evaluations: number;
+  collection_scope?: string;
+  collections: Array<{
+    collection_name: string;
+    vector_count: number;
+    status: string;
+    embedding_model?: string | null;
+    last_synced?: string | null;
+    collection_exists?: boolean;
+  }>;
+};
+
+export type RetrievalRegistryResponse = {
+  collection_scope: string;
   collections: Array<{
     collection_name: string;
     vector_count: number;
@@ -912,13 +947,43 @@ export type PipelineJob = {
   id: number;
   job_type: string;
   database_id: number;
+  parent_job_id?: number | null;
   status: string;
   progress_percentage: number;
   started_at: string;
   completed_at?: string | null;
   failure_reason?: string | null;
   triggered_by?: string | null;
+  retry_count?: number;
+  stage_name?: string | null;
+  depends_on?: string[];
   trace_id?: string | null;
+  execution_trace?: ExecutionTrace;
+};
+
+export type ExecutionTrace = {
+  job_id?: number | null;
+  parent_job_id?: number | null;
+  pipeline_execution_id?: number | null;
+  stage_execution_id?: number | null;
+  trace_id?: string | null;
+  request_id?: string | null;
+  prompt_id?: string | null;
+  prompt_version?: string | null;
+  database_id?: number | null;
+  stage_name?: string | null;
+  job_type?: string | null;
+  model_name?: string | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  reasoning_tokens: number;
+  total_tokens: number;
+  latency_ms: number;
+  finish_reason?: string | null;
+  execution_status?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  error_message?: string | null;
 };
 
 export type PipelineExecution = {
@@ -945,6 +1010,7 @@ export type PipelineExecution = {
   triggered_by?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+  execution_trace?: ExecutionTrace;
 };
 
 export type StageExecution = {
@@ -973,6 +1039,7 @@ export type StageExecution = {
   execution_order?: number | null;
   created_at?: string | null;
   updated_at?: string | null;
+  execution_trace?: ExecutionTrace;
 };
 
 export type PipelineExecutionsResponse = {
@@ -1070,4 +1137,9 @@ export type ObservabilityTraceDetailResponse = {
   pipeline_executions: Array<Record<string, unknown>>;
   stage_executions: Array<Record<string, unknown>>;
   prompt_observability: Array<Record<string, unknown>>;
+  linked_job?: Record<string, unknown> | null;
+  linked_pipeline_execution?: Record<string, unknown> | null;
+  linked_stage_executions: Array<Record<string, unknown>>;
+  linked_prompt_versions: Array<Record<string, unknown>>;
+  execution_trace?: ExecutionTrace | null;
 };

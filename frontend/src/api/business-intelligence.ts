@@ -1,6 +1,7 @@
 import { request } from "./client";
 import type {
   DataProductsResponse,
+  BusinessIntelligenceHealthResponse,
   OpportunityRecommendationsResponse,
   PredictiveReadinessResponse,
   RecommendationsResponse,
@@ -14,4 +15,5 @@ export const businessIntelligenceApi = {
   warehouseDesigns: (databaseId: number) => request<WarehouseDesignsResponse>(`/business-intelligence/warehouse-designs/${databaseId}`),
   recommendations: (databaseId: number) => request<RecommendationsResponse>(`/business-intelligence/recommendations/${databaseId}`),
   predictiveReadiness: (databaseId: number) => request<PredictiveReadinessResponse>(`/business-intelligence/predictive-readiness/${databaseId}`),
+  health: (databaseId: number) => request<BusinessIntelligenceHealthResponse>(`/business-intelligence/health/${databaseId}`),
 };

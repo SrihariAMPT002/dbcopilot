@@ -167,6 +167,25 @@ def test_prompt_normalizer_defaults_missing_prompt_id() -> None:
     assert normalized["prompt_id"] == "template-42"
 
 
+def test_readiness_prompt_safe_context_breaks_cycles() -> None:
+    payload: dict[str, object] = {"name": "demo"}
+    payload["self"] = payload
+
+    sanitized = ReadinessService._prompt_safe_context(payload)
+
+    assert sanitized["self"] == "[CYCLE]"
+    assert sanitized["name"] == "demo"
+
+
+def test_readiness_prompt_safe_context_handles_nested_objects() -> None:
+    nested = SimpleNamespace(name="nested")
+    payload = {"outer": {"inner": nested}}
+
+    sanitized = ReadinessService._prompt_safe_context(payload)
+
+    assert sanitized["outer"]["inner"]["name"] == "nested"
+
+
 def test_readiness_collect_stats_compiles_successfully() -> None:
     db = AsyncMock()
     scalar_statements = []

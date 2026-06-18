@@ -104,6 +104,28 @@ class PromptInventoryItem:
     consumer: str
 
 
+@dataclass
+class PromptSafeSummary:
+    present: bool = False
+    count: int = 0
+    score: float = 0.0
+    status: str | None = None
+    name: str | None = None
+    summary: str | None = None
+    keys: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "present": self.present,
+            "count": self.count,
+            "score": self.score,
+            "status": self.status,
+            "name": self.name,
+            "summary": self.summary,
+            "keys": self.keys,
+        }
+
+
 class ReadinessService:
     """Computes deterministic AI-readiness scores from existing metadata."""
 
@@ -116,6 +138,59 @@ class ReadinessService:
     @staticmethod
     def _stage_metadata_fingerprint(*parts: Any) -> str:
         return hashlib.sha256(json.dumps(parts, default=str, sort_keys=True).encode("utf-8")).hexdigest()[:32]
+
+    @staticmethod
+    def _prompt_safe_value(value: Any, *, _seen: set[int] | None = None) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if _seen is None:
+            _seen = set()
+        obj_id = id(value)
+        if obj_id in _seen:
+            return "[CYCLE]"
+        _seen.add(obj_id)
+        try:
+            if isinstance(value, dict):
+                return {str(key): ReadinessService._prompt_safe_value(item, _seen=_seen) for key, item in value.items()}
+            if isinstance(value, (list, tuple, set)):
+                return [ReadinessService._prompt_safe_value(item, _seen=_seen) for item in value]
+            if hasattr(value, "model_dump") and callable(getattr(value, "model_dump")):
+                return ReadinessService._prompt_safe_value(value.model_dump(), _seen=_seen)
+            if hasattr(value, "__dict__"):
+                return ReadinessService._prompt_safe_value({k: v for k, v in vars(value).items() if not k.startswith("_")}, _seen=_seen)
+            return str(value)
+        finally:
+            _seen.discard(obj_id)
+
+    @classmethod
+    def _prompt_safe_context(cls, context: dict[str, Any]) -> dict[str, Any]:
+        return cls._prompt_safe_value(context)
+
+    @staticmethod
+    def _prompt_safe_summary(value: Any, *, keys: list[str] | None = None, name: str | None = None) -> dict[str, Any]:
+        payload = value if isinstance(value, dict) else {}
+        summary = PromptSafeSummary(
+            present=bool(payload),
+            count=int(payload.get("count", payload.get("kpi_count", payload.get("table_count", payload.get("schemas", 0)))) or 0),
+            score=float(payload.get("score", payload.get("confidence_score", payload.get("coverage_score", 0.0))) or 0.0),
+            status=str(payload.get("status", payload.get("generation_status", payload.get("readiness_status", "unknown")))),
+            name=name or str(payload.get("name", payload.get("business_domain", payload.get("database_name", ""))) or ""),
+            summary=str(payload.get("summary", payload.get("business_summary", payload.get("ai_summary", ""))) or ""),
+            keys=keys or sorted([str(k) for k in payload.keys()])[:12],
+        )
+        return summary.to_dict()
+
+    @staticmethod
+    def _prompt_context_diagnostics(prompt_id: str, context: dict[str, Any]) -> None:
+        try:
+            logger.info(
+                "Readiness prompt context | prompt_id=%s context_keys=%s context_types=%s",
+                prompt_id,
+                list(context.keys()),
+                {key: type(value).__name__ for key, value in context.items()},
+            )
+        except Exception:
+            logger.debug("Readiness prompt diagnostics failed for %s", prompt_id, exc_info=True)
 
     def _load_readiness_rules(self) -> dict[str, Any]:
         rules = self.config.get_readiness_rules()
@@ -723,17 +798,9 @@ class ReadinessService:
     async def _collect_stats(self, database_id: int, context: IntelligenceContext | None = None) -> dict[str, Any]:
         snapshot = None
         database = await self._fetch_database(database_id)
-        governance_packages = list(context.governance.packages) if context and context.governance and context.governance.packages else await self._fetch_governance_packages(database_id)
-        semantic_package = context.semantics.package if context and context.semantics and context.semantics.package else await self._fetch_semantic_package(database_id)
-        relationship_packages = list(context.relationships.packages) if context and context.relationships and context.relationships.packages else await self._fetch_relationship_packages(database_id)
-        schemas = await self.db.scalar(
-            select(func.count(DatabaseSchema.id)).where(DatabaseSchema.connected_db_id == database_id)
-        ) or 0
+        schemas = await self.db.scalar(select(func.count(DatabaseSchema.id)).where(DatabaseSchema.connected_db_id == database_id)) or 0
         tables = await self.db.scalar(
-            select(func.count(DatabaseTable.id))
-            .select_from(DatabaseTable)
-            .join(DatabaseSchema)
-            .where(DatabaseSchema.connected_db_id == database_id)
+            select(func.count(DatabaseTable.id)).select_from(DatabaseTable).join(DatabaseSchema).where(DatabaseSchema.connected_db_id == database_id)
         ) or 0
         columns = await self.db.scalar(
             select(func.count(DatabaseColumn.id))
@@ -745,16 +812,13 @@ class ReadinessService:
         relationships = await self.db.scalar(
             select(func.count(DatabaseRelationship.id))
             .select_from(DatabaseRelationship)
-            .join(
-                DatabaseTable,
-                DatabaseRelationship.table_id == DatabaseTable.id,
-            )
-            .join(
-                DatabaseSchema,
-                DatabaseTable.schema_id == DatabaseSchema.id,
-            )
+            .join(DatabaseTable, DatabaseRelationship.table_id == DatabaseTable.id)
+            .join(DatabaseSchema, DatabaseTable.schema_id == DatabaseSchema.id)
             .where(DatabaseSchema.connected_db_id == database_id)
         ) or 0
+        governance_packages = list(context.governance.packages) if context and context.governance and context.governance.packages else await self._fetch_governance_packages(database_id)
+        semantic_package = context.semantics.package if context and context.semantics and context.semantics.package else await self._fetch_semantic_package(database_id)
+        relationship_packages = list(context.relationships.packages) if context and context.relationships and context.relationships.packages else await self._fetch_relationship_packages(database_id)
         schemas_with_description = await self.db.scalar(
             select(func.count(DatabaseSchema.id))
             .where(
@@ -1159,6 +1223,7 @@ class ReadinessService:
                 },
                 "package_completeness": package_completeness,
             }
+            readiness_context = self._prompt_safe_context(readiness_context)
             for template_id in readiness_prompt_names:
                 try:
                     category, prompt_id = template_id.split("/", 1)
@@ -1203,32 +1268,80 @@ class ReadinessService:
             "database_name": database.display_name or database.name,
             "database_type": database.db_type.value,
             "scores": {
-                "overall_score": breakdown.overall_score,
-                "metadata_score": breakdown.metadata_score,
-                "semantic_score": breakdown.semantic_score,
-                "relationship_score": breakdown.relationship_score,
-                "prompt_score": breakdown.prompt_score,
-                "governance_readiness_score": breakdown.governance_readiness_score,
-                "kpi_readiness_score": breakdown.kpi_readiness_score,
+                "overall_score": int(breakdown.overall_score),
+                "metadata_score": int(breakdown.metadata_score),
+                "semantic_score": int(breakdown.semantic_score),
+                "relationship_score": int(breakdown.relationship_score),
+                "prompt_score": int(breakdown.prompt_score),
+                "governance_readiness_score": int(breakdown.governance_readiness_score),
+                "kpi_readiness_score": int(breakdown.kpi_readiness_score),
             },
-            "category_scores": breakdown.category_scores,
-            "metadata": context.get("metadata", {}),
-            "semantic": context.get("semantic", {}),
-            "relationships": context.get("relationships", {}),
-            "governance": context.get("governance", {}),
-            "kpi": context.get("kpi", {}),
-            "ai_context": context.get("ai_context", {}),
-            "package_coverage": {
-                "enabled_packages": self._enabled_packages(),
-                "total_enabled": len(self._enabled_packages()),
-                "expected_packages": len(self._readiness_dimensions()),
-                "completeness": breakdown.details.get("package_completeness", {}),
+            "category_scores": {str(k): int(v) for k, v in breakdown.category_scores.items()},
+            "metadata": self._prompt_safe_summary(context.get("metadata", {}), keys=["schemas", "tables", "columns", "relationships"], name="metadata"),
+            "semantic": {
+                "has_profile": bool((context.get("semantic") or {}).get("profile", {}).get("has_profile")),
+                "business_domain": bool((context.get("semantic") or {}).get("profile", {}).get("business_domain")),
+                "business_summary": bool((context.get("semantic") or {}).get("profile", {}).get("business_summary")),
+                "key_entities": int((context.get("semantic") or {}).get("profile", {}).get("key_entities", 0) or 0),
+                "business_glossary": int((context.get("semantic") or {}).get("profile", {}).get("business_glossary", 0) or 0),
+                "suggested_use_cases": int((context.get("semantic") or {}).get("profile", {}).get("suggested_use_cases", 0) or 0),
+                "confidence_score": float((context.get("semantic") or {}).get("profile", {}).get("confidence_score", 0.0) or 0.0),
+                "generation_status": str((context.get("semantic") or {}).get("profile", {}).get("generation_status", "not_generated")),
+                "semantic_package_present": bool((context.get("semantic") or {}).get("profile", {}).get("semantic_package_present")),
+                "semantic_package_domain": (context.get("semantic") or {}).get("profile", {}).get("semantic_package_domain"),
             },
+            "relationships": {
+                "graph_edges": int((context.get("relationships") or {}).get("graph_edges", 0) or 0),
+                "graph_nodes": int((context.get("relationships") or {}).get("graph_nodes", 0) or 0),
+                "isolated_tables": int((context.get("relationships") or {}).get("isolated_tables", 0) or 0),
+                "graph_cycles": int((context.get("relationships") or {}).get("graph_cycles", 0) or 0),
+                "relationship_package_coverage": int((context.get("relationships") or {}).get("relationship_package_coverage", 0) or 0),
+                "relationship_count": int((context.get("relationships") or {}).get("relationship_count", 0) or 0),
+            },
+            "governance": {
+                "column_semantics": int((context.get("governance") or {}).get("column_semantics", 0) or 0),
+                "pii_columns": int((context.get("governance") or {}).get("pii_columns", 0) or 0),
+                "pii_identified_coverage": int((context.get("governance") or {}).get("pii_identified_coverage", 0) or 0),
+                "pii_classified_coverage": int((context.get("governance") or {}).get("pii_classified_coverage", 0) or 0),
+                "documentation_coverage": int((context.get("governance") or {}).get("documentation_coverage", 0) or 0),
+                "governance_complete": bool((context.get("governance") or {}).get("governance_complete")),
+                "prompt_protection_enabled": bool((context.get("governance") or {}).get("prompt_protection_enabled")),
+                "embedding_protection_enabled": bool((context.get("governance") or {}).get("embedding_protection_enabled")),
+                "governance_package_coverage": int((context.get("governance") or {}).get("governance_package_coverage", 0) or 0),
+                "ownership_metadata_present": bool((context.get("governance") or {}).get("ownership_metadata_present")),
+            },
+            "kpi": {
+                "enabled": bool((context.get("kpi") or {}).get("enabled")),
+                "kpi_count": int((context.get("kpi") or {}).get("kpi_count", 0) or 0),
+                "artifact_count": int((context.get("kpi") or {}).get("artifact_count", 0) or 0),
+                "artifact_fresh": bool((context.get("kpi") or {}).get("artifact_fresh")),
+                "coverage_score": int((context.get("kpi") or {}).get("coverage_score", 0) or 0),
+                "confidence_score": float((context.get("kpi") or {}).get("confidence_score", 0.0) or 0.0),
+                "kpi_cluster_count": int((context.get("kpi") or {}).get("kpi_cluster_count", 0) or 0),
+                "successful_cluster_count": int((context.get("kpi") or {}).get("successful_cluster_count", 0) or 0),
+                "failed_cluster_count": int((context.get("kpi") or {}).get("failed_cluster_count", 0) or 0),
+                "coverage_percentage": float((context.get("kpi") or {}).get("coverage_percentage", 0.0) or 0.0),
+            },
+            "ai_context": {
+                "prompt_artifacts_rendered": int((context.get("ai_context") or {}).get("prompt_artifacts_rendered", 0) or 0),
+                "prompt_artifacts_expected": int((context.get("ai_context") or {}).get("prompt_artifacts_expected", 0) or 0),
+                "prompt_context_length": int((context.get("ai_context") or {}).get("prompt_context_length", 0) or 0),
+                "embedding_coverage": int((context.get("ai_context") or {}).get("embedding_coverage", 0) or 0),
+                "semantic_dependency_coverage": int((context.get("ai_context") or {}).get("semantic_dependency_coverage", 0) or 0),
+                "package_coverage": int((context.get("ai_context") or {}).get("package_coverage", 0) or 0),
+            },
+            "package_coverage": self._prompt_safe_summary(
+                breakdown.details.get("package_completeness", {}),
+                keys=["governance_packages", "semantic_package_present", "relationship_packages", "kpi_cluster_count", "prompt_artifacts_rendered", "embeddings", "readiness_snapshots"],
+                name="package_coverage",
+            ),
         }
+        prompt_context = self._prompt_safe_context(prompt_context)
 
         try:
             assessment_prompt = self._readiness_assessment_prompt()
             category, prompt_id = assessment_prompt.split("/", 1)
+            self._prompt_context_diagnostics(prompt_id, prompt_context)
             rendered = self.registry.render_prompt(prompt_id, prompt_context, category=category)
             observability = AIObservabilityService()
             ai_result = await observability.generate(
@@ -1245,7 +1358,6 @@ class ReadinessService:
                     {"role": "user", "content": rendered.user_prompt},
                 ],
                 request_kwargs={
-                    "response_format": {"type": "json_object"},
                     "response_format": {"type": "json_object"},
                 },
                 completeness_score=breakdown.metadata_readiness_score / 100.0,

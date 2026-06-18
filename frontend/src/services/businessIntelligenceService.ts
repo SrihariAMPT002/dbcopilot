@@ -7,4 +7,5 @@ export const BusinessIntelligenceService = {
   warehouseDesigns: businessIntelligenceApi.warehouseDesigns,
   recommendations: businessIntelligenceApi.recommendations,
   predictiveReadiness: businessIntelligenceApi.predictiveReadiness,
+  health: businessIntelligenceApi.health,
 };

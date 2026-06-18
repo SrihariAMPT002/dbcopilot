@@ -13,17 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.vector_collection import VectorCollection
 from app.schema_engine.embeddings import get_qdrant_client
-
-
-CANONICAL_COLLECTIONS = (
-    "metadata_vectors",
-    "governance_vectors",
-    "semantic_vectors",
-    "relationship_vectors",
-    "kpi_vectors",
-    "prompt_vectors",
-    "memory_vectors",
-)
+from app.services.qdrant_service import REQUIRED_COLLECTIONS
 
 
 class VectorStoreService:
@@ -39,7 +29,7 @@ class VectorStoreService:
         from qdrant_client.http import models as qmodels
 
         rows: list[VectorCollection] = []
-        for name in CANONICAL_COLLECTIONS:
+        for name in REQUIRED_COLLECTIONS:
             existing = await self.db.execute(select(VectorCollection).where(VectorCollection.collection_name == name))
             row = existing.scalars().first()
             if row is None:
@@ -71,7 +61,7 @@ class VectorStoreService:
         except IntegrityError:
             await self.db.rollback()
             rows = []
-            for name in CANONICAL_COLLECTIONS:
+            for name in REQUIRED_COLLECTIONS:
                 existing = await self.db.execute(select(VectorCollection).where(VectorCollection.collection_name == name))
                 row = existing.scalars().first()
                 if row is None:
@@ -123,6 +113,7 @@ class VectorStoreService:
     async def health_status(self) -> list[dict[str, Any]]:
         result = await self.db.execute(select(VectorCollection).order_by(VectorCollection.collection_name))
         rows = result.scalars().all()
+        client = get_qdrant_client()
         return [
             {
                 "collection_name": row.collection_name,
@@ -130,6 +121,15 @@ class VectorStoreService:
                 "vector_count": row.vector_count,
                 "status": row.status,
                 "last_synced": row.last_synced,
+                "collection_exists": self._collection_exists(client, row.collection_name),
             }
             for row in rows
         ]
+
+    @staticmethod
+    def _collection_exists(client: Any, collection_name: str) -> bool:
+        try:
+            client.get_collection(collection_name)
+            return True
+        except Exception:
+            return False

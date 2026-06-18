@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/empty-state";
+import { queryKeys } from "@/lib/query-keys";
 import { useConnections } from "@/hooks/useConnections";
 import { useEmbeddings } from "@/hooks/useEmbeddings";
 import { healthApi } from "@/api/health";
@@ -17,7 +18,7 @@ export function SettingsPage() {
   const { data: connections = [] } = useConnections();
   const active = connections.find((c) => c.status === "active") ?? connections[0] ?? null;
   const { data: embeddingStatus } = useEmbeddings(active?.id ?? null);
-  const { data: health } = useQuery({ queryKey: ["health"], queryFn: healthApi.health });
+  const { data: health } = useQuery({ queryKey: queryKeys.health(), queryFn: healthApi.health });
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
   const runtimeMode = import.meta.env.MODE;
 

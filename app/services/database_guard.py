@@ -3,13 +3,22 @@ from __future__ import annotations
 from typing import Optional
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.metadata import ConnectedDatabase, DatabaseLifecycleStatus
+from app.models.metadata import ConnectedDatabase, DatabaseLifecycleStatus, DatabaseSchema, DatabaseTable
 
 
 async def get_database_or_none(db: AsyncSession, database_id: int) -> Optional[ConnectedDatabase]:
-    return await db.get(ConnectedDatabase, database_id)
+    result = await db.execute(
+        select(ConnectedDatabase)
+        .options(
+            selectinload(ConnectedDatabase.schemas).selectinload(DatabaseSchema.tables).selectinload(DatabaseTable.columns),
+            selectinload(ConnectedDatabase.schemas).selectinload(DatabaseSchema.tables).selectinload(DatabaseTable.relationships_from),
+        )
+        .where(ConnectedDatabase.id == database_id)
+    )
+    return result.scalars().first()
 
 
 async def validate_database_access(

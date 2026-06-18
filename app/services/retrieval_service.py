@@ -204,10 +204,17 @@ class RetrievalService:
 
         scored: List[HybridRetrievalHit] = []
         for doc in docs:
+            try:
+                doc_meta = json.loads(doc.metadata_json or "{}")
+            except Exception:
+                doc_meta = {}
             vector_score = 0.0
             for hit in embedding_hits:
                 payload = hit.get("payload") or {}
-                if payload.get("table_name") == doc.metadata_json:
+                if (
+                    payload.get("table_name") == doc_meta.get("table_name")
+                    and payload.get("schema_name") == doc_meta.get("schema_name")
+                ):
                     vector_score = max(vector_score, hit.get("score", 0.0))
             keyword_score = self._keyword_score(query, doc.content)
             metadata_score = self._metadata_score(doc, query)
@@ -225,8 +232,8 @@ class RetrievalService:
                     score=combined,
                     collection=doc.source_package or doc.document_type,
                     database_id=doc.database_id,
-                    schema_name=json.loads(doc.metadata_json or "{}").get("schema_name", ""),
-                    table_name=json.loads(doc.metadata_json or "{}").get("table_name", ""),
+                    schema_name=doc_meta.get("schema_name", ""),
+                    table_name=doc_meta.get("table_name", ""),
                     document_type=doc.document_type,
                     content=doc.content,
                     metadata={"document_id": doc.id, "vector_id": doc.vector_id, "trace_id": doc.trace_id},

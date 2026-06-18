@@ -26,7 +26,9 @@ export function RetrievalPlayground({ databaseId }: { databaseId: number }) {
             Search
           </Button>
         </div>
-        {hits.length ? (
+        {!submittedQuery.trim() ? (
+          <EmptyState icon={Search} title="Ready to search" description="Enter a query to inspect hybrid retrieval output." />
+        ) : hits.length ? (
           <div className="space-y-2">
             {hits.map((hit, index) => (
               <div key={`${hit.collection}-${index}`} className="rounded-md border border-border bg-card p-3">

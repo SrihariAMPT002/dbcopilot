@@ -14,18 +14,12 @@ export const agentMemoryApi = {
       body: JSON.stringify(payload),
     }),
   history: async (databaseId: number, limit = 20) => {
-    try {
-      return await request<AgentMemoryHistoryResponse>(`/agent-memory/${databaseId}?limit=${limit}`);
-    } catch (error) {
-      if (error instanceof Error && /Request failed: 404/.test(error.message)) {
-        return { database_id: databaseId, total: 0, results: [] } as AgentMemoryHistoryResponse;
-      }
-      throw error;
-    }
+    return request<AgentMemoryHistoryResponse>(`/agent-memory/${databaseId}?limit=${limit}`);
   },
   search: (payload: AgentMemorySearchRequest) =>
     request<AgentMemorySearchResponse>("/agent-memory/search", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  health: (databaseId: number) => request<import("@/types/backend").AgentMemoryHealthResponse>(`/agent-memory/health/${databaseId}`),
 };

@@ -10,8 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { EmptyState } from "@/components/empty-state";
+import { LoadingShell, ErrorShell } from "@/components/state-shells";
 import { useDatabaseContext } from "@/context/database-context";
-import { useAgentMemoryHistory, useAgentMemorySearch } from "@/hooks/useAgentMemory";
+import { useAgentMemoryHistory, useAgentMemorySearch, useAgentMemoryHealth } from "@/hooks/useAgentMemory";
 import { AgentMemoryService } from "@/services/agentMemoryService";
 import { TraceLink } from "@/components/common/TraceLink";
 
@@ -23,8 +24,12 @@ export function AgentsPage() {
   const [memoryQuery, setMemoryQuery] = useState("");
   const [memoryResponse, setMemoryResponse] = useState("");
   const dbId = selectedDatabase?.database_id ?? null;
-  const { data: history } = useAgentMemoryHistory(dbId, 10);
-  const { data: search } = useAgentMemorySearch(dbId, query, 5);
+  const historyQuery = useAgentMemoryHistory(dbId, 10);
+  const searchQuery = useAgentMemorySearch(dbId, query, 5);
+  const healthQuery = useAgentMemoryHealth(dbId);
+  const { data: history, isLoading: historyLoading, isError: historyError, error: historyErrorValue } = historyQuery;
+  const { data: search, isLoading: searchLoading, isError: searchError, error: searchErrorValue } = searchQuery;
+  const { data: health } = healthQuery;
 
   const createMemory = useMutation({
     mutationFn: () =>
@@ -44,6 +49,29 @@ export function AgentsPage() {
 
   const searchResults = useMemo(() => search?.results ?? [], [search]);
   const selectedSearchHit = searchResults.find((item) => item.id === selectedHitId) ?? searchResults[0] ?? null;
+
+  if (historyLoading || searchLoading || healthQuery.isLoading) {
+    return (
+      <div className="space-y-6">
+        <PageHeader eyebrow="AI Surface" title="Agents" description="Query history and long-term memory surfaced from persisted agent interactions." actions={<ActiveDatabaseBadge />} />
+        <LoadingShell title="Agent memory loading" description="Loading agent memory and health signals..." />
+      </div>
+    );
+  }
+
+  if (historyError || searchError || healthQuery.isError) {
+    const message =
+      (historyErrorValue instanceof Error && historyErrorValue.message) ||
+      (searchErrorValue instanceof Error && searchErrorValue.message) ||
+      (healthQuery.error instanceof Error && healthQuery.error.message) ||
+      "Failed to load agent memory.";
+    return (
+      <div className="space-y-6">
+        <PageHeader eyebrow="AI Surface" title="Agents" description="Query history and long-term memory surfaced from persisted agent interactions." actions={<ActiveDatabaseBadge />} />
+        <ErrorShell title="Agent memory unavailable" description={message} />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -103,6 +131,29 @@ export function AgentsPage() {
             ) : (
               <EmptyState icon={History} title="No agent memory yet" description="Record agent interactions to build reusable memory." />
             )}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Memory health</CardTitle>
+            <CardDescription>Row, vector, and search health for long-term memory.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-md border border-border bg-card p-3">
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Rows</div>
+              <div className="mt-1 text-sm font-medium text-foreground">{health?.memory_rows ?? 0}</div>
+            </div>
+            <div className="rounded-md border border-border bg-card p-3">
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Vectors</div>
+              <div className="mt-1 text-sm font-medium text-foreground">{health?.vector_count ?? 0}</div>
+            </div>
+            <div className="rounded-md border border-border bg-card p-3">
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Status</div>
+              <div className="mt-1 text-sm font-medium text-foreground">{health?.status ?? "n/a"}</div>
+            </div>
           </CardContent>
         </Card>
       </section>

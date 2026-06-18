@@ -16,6 +16,7 @@ from app.models.pipeline_execution import PipelineExecution, StageExecution
 from app.models.prompt_observability_log import PromptObservabilityLog
 from app.models.prompt_package import PromptPackage
 from app.models.prompt_version import PromptVersion
+from app.schemas.api_schemas import ExecutionTraceResponse
 
 router = APIRouter(prefix="/observability", tags=["Observability"])
 
@@ -65,6 +66,11 @@ class ObservabilityTraceDetailResponse(BaseModel):
     pipeline_executions: list[dict[str, Any]] = Field(default_factory=list)
     stage_executions: list[dict[str, Any]] = Field(default_factory=list)
     prompt_observability: list[dict[str, Any]] = Field(default_factory=list)
+    linked_job: Optional[dict[str, Any]] = None
+    linked_pipeline_execution: Optional[dict[str, Any]] = None
+    linked_stage_executions: list[dict[str, Any]] = Field(default_factory=list)
+    linked_prompt_versions: list[dict[str, Any]] = Field(default_factory=list)
+    execution_trace: Optional[ExecutionTraceResponse] = None
 
 
 class LifecycleEventItem(BaseModel):
@@ -108,7 +114,46 @@ def _normalize_trace_details(payload: dict[str, Any] | None, *, fallback: dict[s
         "prompt_version": data.get("prompt_version", fallback.get("prompt_version")),
         "model_name": data.get("model_name", fallback.get("model_name")),
         "trace_id": data.get("trace_id", fallback.get("trace_id")),
+        "request_id": data.get("request_id", fallback.get("request_id")),
     }
+
+
+def _execution_trace_from_observability(
+    *,
+    trace_id: str,
+    database_id: int,
+    prompt_id: Optional[str],
+    prompt_version: Optional[str],
+    model_name: Optional[str],
+    prompt_tokens: int,
+    completion_tokens: int,
+    reasoning_tokens: int,
+    latency_ms: float,
+    finish_reason: Optional[str],
+    execution_status: Optional[str],
+    started_at: Optional[datetime],
+    completed_at: Optional[datetime],
+    error_message: Optional[str] = None,
+) -> ExecutionTraceResponse:
+    total_tokens = prompt_tokens + completion_tokens + reasoning_tokens
+    return ExecutionTraceResponse(
+        trace_id=trace_id,
+        request_id=trace_id,
+        prompt_id=prompt_id,
+        prompt_version=prompt_version,
+        database_id=database_id,
+        model_name=model_name,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        reasoning_tokens=reasoning_tokens,
+        total_tokens=total_tokens,
+        latency_ms=latency_ms,
+        finish_reason=finish_reason,
+        execution_status=execution_status,
+        started_at=started_at,
+        completed_at=completed_at,
+        error_message=error_message,
+    )
 
 
 async def _load_trace_list(
@@ -345,6 +390,8 @@ async def _get_trace_detail(database_id: int, trace_id: str, db: AsyncSession) -
     prompt_tokens = getattr(prompt_detail, "prompt_tokens", 0) if prompt_detail else 0
     completion_tokens = getattr(prompt_detail, "completion_tokens", 0) if prompt_detail else 0
     reasoning_tokens = getattr(prompt_detail, "reasoning_tokens", 0) if prompt_detail else 0
+    linked_pipeline = pipe_rows[0] if pipe_rows else None
+    linked_stage = stage_rows[0] if stage_rows else None
     prompt_meta = _normalize_trace_details(
         {
             "prompt_version": getattr(package_detail, "prompt_version", None),
@@ -454,6 +501,55 @@ async def _get_trace_detail(database_id: int, trace_id: str, db: AsyncSession) -
             }
             for row, _pkg in prompt_records
         ],
+        linked_job={
+            "job_id": getattr(linked_stage, "job_id", None) if linked_stage else None,
+            "parent_job_id": getattr(linked_pipeline, "parent_job_id", None) if linked_pipeline else None,
+            "trace_id": trace_id,
+            "database_id": database_id,
+        },
+        linked_pipeline_execution=
+            {
+                "pipeline_execution_id": linked_pipeline.id,
+                "trace_id": getattr(linked_pipeline, "trace_id", None),
+                "database_id": database_id,
+            }
+            if linked_pipeline
+            else None,
+        linked_stage_executions=[
+            {
+                "stage_execution_id": row.id,
+                "pipeline_execution_id": row.pipeline_execution_id,
+                "trace_id": row.trace_id,
+                "stage_name": row.stage_name,
+                "database_id": database_id,
+            }
+            for row in stage_rows
+        ],
+        linked_prompt_versions=[
+            {
+                "prompt_version_id": version.id,
+                "prompt_package_id": version.prompt_package_id,
+                "trace_id": version.trace_id,
+                "version": version.version,
+            }
+            for version, _package in version_rows[:5]
+        ],
+        execution_trace=_execution_trace_from_observability(
+            trace_id=trace_id,
+            database_id=database_id,
+            prompt_id=getattr(package_detail, "template_id", None) if package_detail else None,
+            prompt_version=prompt_meta["prompt_version"],
+            model_name=prompt_meta["model_name"],
+            prompt_tokens=prompt_tokens or 0,
+            completion_tokens=completion_tokens or 0,
+            reasoning_tokens=reasoning_tokens or 0,
+            latency_ms=getattr(prompt_detail, "latency_ms", 0.0) if prompt_detail else 0.0,
+            finish_reason=getattr(prompt_detail, "finish_reason", None) if prompt_detail else None,
+            execution_status=getattr(prompt_detail, "execution_status", None) if prompt_detail else None,
+            started_at=getattr(prompt_detail, "created_at", None) if prompt_detail else None,
+            completed_at=getattr(prompt_detail, "created_at", None) if prompt_detail else None,
+            error_message=getattr(prompt_detail, "failure_reason", None) if prompt_detail else None,
+        ),
     )
 
 

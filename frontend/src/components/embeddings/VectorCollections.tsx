@@ -22,8 +22,9 @@ export function VectorCollections({
             <TableHead>Collection</TableHead>
             <TableHead className="text-right">Vectors</TableHead>
             <TableHead className="text-right">Indexed tables</TableHead>
-            <TableHead className="min-w-[160px]">Coverage</TableHead>
             <TableHead>Status</TableHead>
+            <TableHead>Freshness</TableHead>
+            <TableHead className="min-w-[160px]">Coverage</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -34,16 +35,19 @@ export function VectorCollections({
                 <TableCell className="text-right tabular-nums">{c.vectors.toLocaleString()}</TableCell>
                 <TableCell className="text-right tabular-nums">{c.indexed_tables ?? 0}</TableCell>
                 <TableCell>
-                  <CoverageBar value={Math.min(100, c.vectors ? 100 : 0)} />
+                  <StatusBadge status={c.collection_exists === false ? "failed" : c.vectors > 0 ? "success" : "warning"} />
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  {c.collection_exists === false ? "missing" : c.last_indexed_at ? new Date(c.last_indexed_at).toLocaleString() : "not synced"}
                 </TableCell>
                 <TableCell>
-                  <StatusBadge status={(healthy ? "success" : "warning") as StatusKind} />
+                  <CoverageBar value={Math.min(100, c.indexed_tables ? (c.vectors > 0 ? 100 : 0) : 0)} />
                 </TableCell>
               </TableRow>
             ))
           ) : (
             <TableRow>
-              <TableCell colSpan={5} className="text-sm text-muted-foreground">
+              <TableCell colSpan={6} className="text-sm text-muted-foreground">
                 No embedding collections available yet.
               </TableCell>
             </TableRow>

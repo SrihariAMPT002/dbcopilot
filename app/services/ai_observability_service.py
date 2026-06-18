@@ -224,8 +224,10 @@ class AIObservationResult:
     content: Optional[str] = None
     embeddings: Optional[list[list[float]]] = None
     raw_response: Any = None
+    request_id: Optional[str] = None
     trace_id: Optional[str] = None
     trace_url: Optional[str] = None
+    timestamps: dict[str, datetime] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -753,8 +755,13 @@ class AIObservabilityService:
                     token_usage=usage,
                     content=content,
                     raw_response=response,
+                    request_id=str(_response_attr(response, "id", None)) if _response_attr(response, "id", None) is not None else None,
                     trace_id=str(getattr(generation, "id", None)) if getattr(generation, "id", None) is not None else None,
                     trace_url=None,
+                    timestamps={
+                        "generated_at": datetime.now(timezone.utc),
+                        "observed_at": datetime.now(timezone.utc),
+                    },
                     metadata={
                         **metadata,
                         "estimated_input_tokens": estimated_input_tokens,
@@ -864,8 +871,13 @@ class AIObservabilityService:
                     token_usage=usage,
                     embeddings=vectors,
                     raw_response=response,
+                    request_id=str(_response_attr(response, "id", None)) if _response_attr(response, "id", None) is not None else None,
                     trace_id=str(getattr(embedding_obs, "id", None)) if getattr(embedding_obs, "id", None) is not None else None,
                     trace_url=None,
+                    timestamps={
+                        "generated_at": datetime.now(timezone.utc),
+                        "observed_at": datetime.now(timezone.utc),
+                    },
                     metadata={
                         **metadata,
                         "estimated_input_tokens": estimated_input_tokens,

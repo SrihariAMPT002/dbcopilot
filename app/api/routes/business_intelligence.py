@@ -13,9 +13,42 @@ from app.services.opportunity_service import OpportunityService
 from app.services.predictive_readiness_service import PredictiveReadinessService
 from app.services.recommendation_service import RecommendationService
 from app.services.warehouse_design_service import WarehouseDesignService
+from app.models.business_insight import BusinessInsight
+from app.models.recommendation import Recommendation
+from app.models.data_product import DataProduct
+from app.models.warehouse_design import WarehouseDesign
+from app.models.predictive_readiness import PredictiveReadiness
+from sqlalchemy import func, select
 
 router = APIRouter(prefix="/business-intelligence", tags=["Business Intelligence"])
 logger = logging.getLogger(__name__)
+
+
+@router.get("/health/{db_id}")
+async def health(db_id: int, db: AsyncSession = Depends(get_db)) -> dict:
+    counts = {}
+    for label, model, field, extra_filter in [
+        ("business_insights", BusinessInsight, BusinessInsight.database_id, None),
+        ("opportunities", Recommendation, Recommendation.database_id, Recommendation.recommendation_type == "opportunity"),
+        ("recommendations", Recommendation, Recommendation.database_id, Recommendation.recommendation_type != "opportunity"),
+        ("data_products", DataProduct, DataProduct.database_id, None),
+        ("warehouse_designs", WarehouseDesign, WarehouseDesign.database_id, None),
+        ("predictive_readiness", PredictiveReadiness, PredictiveReadiness.database_id, None),
+    ]:
+        stmt = select(func.count(model.id)).where(field == db_id)
+        latest_stmt = select(model).where(field == db_id)
+        if extra_filter is not None:
+          stmt = stmt.where(extra_filter)
+          latest_stmt = latest_stmt.where(extra_filter)
+        result = await db.execute(stmt)
+        latest = await db.execute(latest_stmt.order_by(model.created_at.desc()).limit(1))
+        row = latest.scalars().first()
+        counts[label] = {
+            "count": int(result.scalar() or 0),
+            "latest_trace_id": getattr(row, "trace_id", None) if row else None,
+            "state": "empty" if not row else "healthy",
+        }
+    return {"database_id": db_id, "packages": counts}
 
 
 @router.post("/generate/{db_id}")

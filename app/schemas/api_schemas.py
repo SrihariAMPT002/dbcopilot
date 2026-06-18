@@ -689,6 +689,36 @@ class PipelineJobResponse(BaseModel):
     completed_at: Optional[datetime] = None
     failure_reason: Optional[str] = None
     triggered_by: Optional[str] = None
+    retry_count: int = 0
+    stage_name: Optional[str] = None
+    depends_on: List[str] = Field(default_factory=list)
+    trace_id: Optional[str] = None
+    execution_trace: Optional["ExecutionTraceResponse"] = None
+
+
+class ExecutionTraceResponse(BaseModel):
+    job_id: Optional[int] = None
+    parent_job_id: Optional[int] = None
+    pipeline_execution_id: Optional[int] = None
+    stage_execution_id: Optional[int] = None
+    trace_id: Optional[str] = None
+    request_id: Optional[str] = None
+    prompt_id: Optional[str] = None
+    prompt_version: Optional[str] = None
+    database_id: Optional[int] = None
+    stage_name: Optional[str] = None
+    job_type: Optional[str] = None
+    model_name: Optional[str] = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    reasoning_tokens: int = 0
+    total_tokens: int = 0
+    latency_ms: float = 0.0
+    finish_reason: Optional[str] = None
+    execution_status: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error_message: Optional[str] = None
 
 
 class PipelineRunResponse(BaseModel):
@@ -1070,3 +1100,5 @@ class PromptStudioBundleResponse(BaseModel):
 ConnectionDetail.model_rebuild()
 SchemaDetail.model_rebuild()
 TableDetail.model_rebuild()
+PipelineJobResponse.model_rebuild()
+ExecutionTraceResponse.model_rebuild()

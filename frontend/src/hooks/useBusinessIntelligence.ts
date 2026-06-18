@@ -29,6 +29,11 @@ export function useBusinessIntelligence(databaseId?: number | null) {
         queryFn: () => BusinessIntelligenceService.predictiveReadiness(Number(databaseId ?? 0)),
         enabled: typeof databaseId === "number" && databaseId > 0,
       },
+      {
+        queryKey: ["business-intelligence", "health", databaseId ?? "default"],
+        queryFn: () => BusinessIntelligenceService.health(Number(databaseId ?? 0)),
+        enabled: typeof databaseId === "number" && databaseId > 0,
+      },
     ],
   });
 }

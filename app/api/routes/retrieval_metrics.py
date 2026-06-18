@@ -20,13 +20,22 @@ async def retrieval_metrics(db_id: int, db: AsyncSession = Depends(get_db)) -> d
     docs = await db.execute(select(func.count(EmbeddingDocument.id)).where(EmbeddingDocument.database_id == db_id))
     logs = await db.execute(select(func.count(RetrievalLog.id)).where(RetrievalLog.database_id == db_id))
     evaluations = await db.execute(select(func.count(RetrievalEvaluation.id)).where(RetrievalEvaluation.database_id == db_id))
-    collections = await db.execute(select(VectorCollection))
-    collection_rows = collections.scalars().all()
     return {
         "database_id": db_id,
         "total_documents": int(docs.scalar() or 0),
         "retrieval_logs": int(logs.scalar() or 0),
         "retrieval_evaluations": int(evaluations.scalar() or 0),
+        "collection_scope": "database",
+        "collections": [],
+    }
+
+
+@router.get("/registry")
+async def retrieval_registry(db: AsyncSession = Depends(get_db)) -> dict:
+    collections = await db.execute(select(VectorCollection).order_by(VectorCollection.collection_name))
+    rows = collections.scalars().all()
+    return {
+        "collection_scope": "global_registry",
         "collections": [
             {
                 "collection_name": row.collection_name,
@@ -35,6 +44,6 @@ async def retrieval_metrics(db_id: int, db: AsyncSession = Depends(get_db)) -> d
                 "embedding_model": row.embedding_model,
                 "last_synced": row.last_synced.isoformat() if row.last_synced else None,
             }
-            for row in collection_rows
+            for row in rows
         ],
     }

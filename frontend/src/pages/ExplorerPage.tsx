@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/empty-state";
 import { metadataApi } from "@/api/metadata";
 import { useConnections } from "@/hooks/useConnections";
 import { useDatabaseContext } from "@/context/database-context";
+import { queryKeys } from "@/lib/query-keys";
 
 export function ExplorerPage() {
   const { data: connections = [] } = useConnections();
@@ -22,27 +23,27 @@ export function ExplorerPage() {
   const [selectedTableId, setSelectedTableId] = useState<number | null>(null);
 
   const { data: schemas = [] } = useQuery({
-    queryKey: ["schemas", selectedDb],
+    queryKey: queryKeys.schemas(selectedDb ?? "default"),
     queryFn: () => metadataApi.schemas(Number(selectedDb)),
     enabled: !!selectedDb,
   });
   const { data: tables = [] } = useQuery({
-    queryKey: ["tables", selectedSchemaId],
+    queryKey: queryKeys.tables(selectedSchemaId ?? "default"),
     queryFn: () => metadataApi.tables(Number(selectedSchemaId)),
     enabled: !!selectedSchemaId,
   });
   const { data: columns = [] } = useQuery({
-    queryKey: ["columns", selectedTableId],
+    queryKey: queryKeys.columns(selectedTableId ?? "default"),
     queryFn: () => metadataApi.columns(Number(selectedTableId)),
     enabled: !!selectedTableId,
   });
   const { data: relationships = [] } = useQuery({
-    queryKey: ["relationships", selectedTableId],
+    queryKey: queryKeys.relationshipsByTable(selectedTableId ?? "default"),
     queryFn: () => metadataApi.relationships(Number(selectedTableId)),
     enabled: !!selectedTableId,
   });
   const { data: diag } = useQuery({
-    queryKey: ["diagnose", selectedDb],
+    queryKey: queryKeys.diagnose(selectedDb ?? "default"),
     queryFn: () => metadataApi.diagnose(Number(selectedDb)),
     enabled: !!selectedDb,
   });

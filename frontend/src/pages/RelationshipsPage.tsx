@@ -8,6 +8,7 @@ import { TraceLink } from "@/components/common/TraceLink";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CoverageBar } from "@/components/coverage-bar";
+import { Skeleton } from "@/components/ui/skeleton";
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
@@ -21,7 +22,7 @@ function Stat({ label, value }: { label: string; value: string | number }) {
 export function RelationshipsPage() {
   const { selectedDatabase } = useDatabaseContext();
   const dbId = selectedDatabase?.database_id ?? null;
-  const { data } = useRelationships(dbId);
+  const { data, isLoading, isError, error, refetch } = useRelationships(dbId);
   const clusters = data?.packages ?? [];
   const selectedCluster = clusters[0];
   const evidence = selectedCluster?.evidence ?? [];
@@ -32,10 +33,33 @@ export function RelationshipsPage() {
     () => evidence.flatMap((item: any) => [item.metric, item.type, item.source]).filter(Boolean).slice(0, 12),
     [evidence],
   );
+  const graph = useMemo(() => buildRelationshipGraph(clusters), [clusters]);
 
   return (
     <div className="space-y-6">
       <PageHeader eyebrow="Intelligence" title="Relationships" description="Cluster summaries, graph metrics, evidence, and lifecycle flows from persisted relationship packages." />
+
+      {isLoading ? (
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <Skeleton className="h-28 rounded-xl" />
+          <Skeleton className="h-28 rounded-xl" />
+          <Skeleton className="h-28 rounded-xl" />
+          <Skeleton className="h-28 rounded-xl" />
+        </section>
+      ) : isError ? (
+        <Card className="border-destructive/30 bg-destructive/5">
+          <CardHeader>
+            <CardTitle className="text-base text-destructive">Relationship data unavailable</CardTitle>
+            <CardDescription>{error instanceof Error ? error.message : "Failed to load relationship intelligence for the selected database."}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <button type="button" onClick={() => void refetch()} className="rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition hover:border-primary/40">
+              Retry load
+            </button>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Clusters" value={String(clusters.length)} icon={Network} tone="info" />
         <MetricCard label="Graph nodes" value={String((graphMetrics as any).node_count ?? 0)} icon={Layers} tone="success" />
@@ -50,6 +74,16 @@ export function RelationshipsPage() {
             <CardDescription>Hidden relationships, process flows, lifecycle flows, and cluster scoring.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <section className="space-y-2">
+              <div className="text-sm font-semibold text-foreground">Relationship graph</div>
+              {graph.nodes.length ? (
+                <RelationshipGraphCanvas nodes={graph.nodes} edges={graph.edges} />
+              ) : (
+                <div className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
+                  No graph nodes available yet.
+                </div>
+              )}
+            </section>
             <section className="space-y-2">
               <div className="text-sm font-semibold text-foreground">Cluster dependencies</div>
               {clusters.length ? (
@@ -68,7 +102,9 @@ export function RelationshipsPage() {
                   })}
                 </div>
               ) : (
-                <div className="text-sm text-muted-foreground">No dependencies available.</div>
+                <div className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
+                  No relationship packages found yet for this database.
+                </div>
               )}
             </section>
             <section className="space-y-2">
@@ -81,7 +117,7 @@ export function RelationshipsPage() {
                   <code className="text-xs text-foreground">{item.relationship.right ?? item.relationship.target ?? item.relationship.to ?? "unknown"}</code>
                   <span className="ml-auto text-[11px] text-muted-foreground">{item.relationship.note ?? item.relationship.summary ?? item.relationship.description ?? "persisted hidden relationship"}</span>
                 </div>
-              )) : <div className="text-sm text-muted-foreground">No relationship packages found yet.</div>}
+              )) : <div className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">No hidden relationships persisted yet.</div>}
             </section>
             <section className="space-y-2">
               <div className="text-sm font-semibold text-foreground">Lifecycle flows</div>
@@ -90,7 +126,7 @@ export function RelationshipsPage() {
                   <Badge key={`${flow.name ?? index}`} variant="outline" className="text-[10px] uppercase">
                     {flow.summary ?? flow.name ?? "lifecycle flow"}
                   </Badge>
-                )) : <div className="text-sm text-muted-foreground">No lifecycle flows available.</div>}
+                )) : <div className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">No lifecycle flows available.</div>}
               </div>
             </section>
             {evidence?.length ? (
@@ -132,6 +168,128 @@ export function RelationshipsPage() {
           </CardContent>
         </Card>
       </section>
+    </div>
+  );
+}
+
+type GraphNode = {
+  id: string;
+  label: string;
+  clusterId: string;
+  x: number;
+  y: number;
+};
+
+type GraphEdge = {
+  from: string;
+  to: string;
+};
+
+function buildRelationshipGraph(
+  clusters: Array<{
+    cluster_id: string;
+    cluster_summary?: string | null;
+    domain_name?: string | null;
+    hidden_relationships?: Array<Record<string, unknown>>;
+    entity_graph?: Array<Record<string, unknown>>;
+  }>,
+): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  const nodesByName = new Map<string, GraphNode>();
+  const edges: GraphEdge[] = [];
+
+  const addNode = (name: string) => {
+    if (!name) return;
+    if (!nodesByName.has(name)) {
+      nodesByName.set(name, {
+        id: name,
+        label: name,
+        clusterId: "",
+        x: 0,
+        y: 0,
+      });
+    }
+  };
+
+  clusters.forEach((cluster) => {
+    const relationships = [...(cluster.hidden_relationships ?? []), ...(cluster.entity_graph ?? [])];
+    relationships.forEach((relationship) => {
+      const source = String(relationship.source ?? relationship.from ?? relationship.left ?? relationship.source_table_name ?? relationship.table_name ?? "").trim();
+      const target = String(relationship.target ?? relationship.to ?? relationship.right ?? relationship.target_table_name ?? relationship.referenced_table_name ?? "").trim();
+      if (source && target) {
+        addNode(source);
+        addNode(target);
+        edges.push({ from: source, to: target });
+      }
+    });
+  });
+
+  if (!nodesByName.size) {
+    clusters.slice(0, 8).forEach((cluster) => {
+      const label = cluster.cluster_summary ?? cluster.domain_name ?? cluster.cluster_id;
+      if (label) addNode(label);
+    });
+  }
+
+  const nodes = Array.from(nodesByName.values()).slice(0, 12).map((node, index) => ({
+    ...node,
+    x: 120 + (index % 4) * 180,
+    y: 70 + Math.floor(index / 4) * 120,
+  }));
+
+  const valid = new Set(nodes.map((node) => node.id));
+  return {
+    nodes,
+    edges: edges.filter((edge) => valid.has(edge.from) && valid.has(edge.to)).slice(0, 20),
+  };
+}
+
+function RelationshipGraphCanvas({ nodes, edges }: { nodes: GraphNode[]; edges: GraphEdge[] }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-border bg-gradient-to-br from-background via-background to-muted/30 p-4">
+      <svg viewBox="0 0 900 360" className="h-[320px] w-full">
+        <defs>
+          <linearGradient id="relationship-node" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.95" />
+            <stop offset="100%" stopColor="hsl(var(--accent))" stopOpacity="0.75" />
+          </linearGradient>
+        </defs>
+        {edges.map((edge, index) => {
+          const source = nodes.find((node) => node.id === edge.from);
+          const target = nodes.find((node) => node.id === edge.to);
+          if (!source || !target) return null;
+          return (
+            <line
+              key={`${edge.from}-${edge.to}-${index}`}
+              x1={source.x}
+              y1={source.y}
+              x2={target.x}
+              y2={target.y}
+              stroke="hsl(var(--border))"
+              strokeWidth="2"
+              strokeDasharray="6 4"
+            />
+          );
+        })}
+        {nodes.map((node) => (
+          <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
+            <circle r="34" fill="url(#relationship-node)" opacity="0.95" />
+            <circle r="38" fill="none" stroke="hsl(var(--border))" strokeWidth="1" opacity="0.9" />
+            <text textAnchor="middle" y="-2" className="fill-background text-[10px] font-semibold">
+              {node.label.slice(0, 12)}
+            </text>
+            <text textAnchor="middle" y="12" className="fill-background/80 text-[9px]">
+              {node.clusterId.slice(0, 8)}
+            </text>
+          </g>
+        ))}
+      </svg>
+      <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+        {nodes.slice(0, 8).map((node) => (
+          <Badge key={node.id} variant="outline" className="text-[10px] uppercase">
+            {node.label}
+          </Badge>
+        ))}
+      </div>
     </div>
   );
 }

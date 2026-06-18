@@ -14,8 +14,8 @@ class VectorCollectionItem(BaseModel):
     vector_count: int = 0
     status: str
     last_synced: Optional[datetime] = None
+    collection_exists: bool = False
 
 
 class VectorCollectionListResponse(BaseModel):
     collections: list[VectorCollectionItem] = Field(default_factory=list)
-

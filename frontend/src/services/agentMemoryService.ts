@@ -4,4 +4,5 @@ export const AgentMemoryService = {
   create: agentMemoryApi.create,
   history: agentMemoryApi.history,
   search: agentMemoryApi.search,
+  health: agentMemoryApi.health,
 };

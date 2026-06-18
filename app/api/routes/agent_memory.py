@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.schemas.agent_memory import (
     AgentMemoryCreate,
+    AgentMemoryHealthResponse,
     AgentMemoryHistoryResponse,
     AgentMemoryResponse,
     AgentMemorySearchRequest,
@@ -38,9 +41,9 @@ async def create_memory(request: AgentMemoryCreate, db: AsyncSession = Depends(g
         database_id=row.database_id,
         query_text=row.query_text,
         response_text=row.response_text,
-        context_json=request.context_json,
+        context_json=json.loads(row.context_json or "{}"),
         memory_type=row.memory_type,
-        tags=request.tags,
+        tags=json.loads(row.tags_json or "[]"),
         embedding_model=row.embedding_model,
         vector_id=row.vector_id,
         trace_id=row.trace_id,
@@ -70,3 +73,12 @@ async def search(request: AgentMemorySearchRequest, db: AsyncSession = Depends(g
         total_hits=payload["total_hits"],
         results=[AgentMemorySearchHit(**item) for item in payload["results"]],
     )
+
+
+@router.get("/health/{database_id}", response_model=AgentMemoryHealthResponse)
+async def health(database_id: int, db: AsyncSession = Depends(get_db)) -> AgentMemoryHealthResponse:
+    try:
+        payload = await AgentMemoryService(db).get_health(database_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return AgentMemoryHealthResponse(**payload)

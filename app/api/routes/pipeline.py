@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.models.pipeline_job import JobStatus, PipelineJob
 from app.models.pipeline_execution import PipelineExecution, StageExecution
-from app.schemas.api_schemas import PipelineJobResponse, PipelineRunResponse
+from app.schemas.api_schemas import ExecutionTraceResponse, PipelineJobResponse, PipelineRunResponse
 from app.schemas.stage_contracts import StageGraphResponse, StageProgressResponse
 from app.db.session import db_session
 from app.services.pipeline_service import PipelineService
@@ -41,6 +41,83 @@ def _to_job_response(job: PipelineJob) -> PipelineJobResponse:
         completed_at=job.completed_at,
         failure_reason=getattr(job, "failure_reason", None),
         triggered_by=job.triggered_by,
+        retry_count=getattr(job, "retry_count", 0) or 0,
+        stage_name=getattr(job, "stage_name", None),
+        depends_on=json.loads(getattr(job, "depends_on", "[]") or "[]") if isinstance(getattr(job, "depends_on", None), str) else (getattr(job, "depends_on", None) or []),
+        trace_id=getattr(job, "trace_id", None),
+        execution_trace=_execution_trace_from_job(job),
+    )
+
+
+def _execution_trace_from_job(job: PipelineJob) -> ExecutionTraceResponse:
+    return ExecutionTraceResponse(
+        job_id=job.id,
+        parent_job_id=getattr(job, "parent_job_id", None),
+        trace_id=getattr(job, "trace_id", None),
+        request_id=getattr(job, "trace_id", None),
+        prompt_id=getattr(job, "entity_name", None),
+        prompt_version=None,
+        database_id=job.database_id,
+        stage_name=getattr(job, "stage_name", None),
+        job_type=job.job_type.value,
+        model_name=None,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        error_message=getattr(job, "failure_reason", None),
+        execution_status=job.status.value,
+    )
+
+
+def _execution_trace_from_pipeline_row(row: PipelineExecution, stage_row: StageExecution | None = None) -> ExecutionTraceResponse:
+    trace_id = getattr(stage_row, "trace_id", None) or getattr(row, "trace_id", None)
+    return ExecutionTraceResponse(
+        job_id=None,
+        parent_job_id=None,
+        pipeline_execution_id=row.id,
+        stage_execution_id=getattr(stage_row, "id", None),
+        trace_id=trace_id,
+        request_id=trace_id,
+        prompt_id=getattr(stage_row, "stage_name", None),
+        prompt_version=getattr(row, "prompt_version", None),
+        database_id=row.database_id,
+        stage_name=getattr(stage_row, "stage_name", None),
+        job_type=getattr(stage_row, "stage_name", None) or "PIPELINE",
+        model_name=getattr(stage_row or row, "model_name", None),
+        prompt_tokens=int(getattr(stage_row or row, "actual_input_tokens", 0) or 0),
+        completion_tokens=int(getattr(stage_row or row, "actual_output_tokens", 0) or 0),
+        reasoning_tokens=0,
+        total_tokens=int(getattr(stage_row or row, "actual_input_tokens", 0) or 0) + int(getattr(stage_row or row, "actual_output_tokens", 0) or 0),
+        latency_ms=float((getattr(stage_row or row, "duration_seconds", None) or 0) * 1000),
+        finish_reason=getattr(stage_row or row, "status", None),
+        execution_status=getattr(stage_row or row, "status", None),
+        started_at=getattr(stage_row or row, "start_time", None),
+        completed_at=getattr(stage_row or row, "end_time", None),
+        error_message=getattr(stage_row or row, "error_message", None),
+    )
+
+
+def _execution_trace_from_stage_row(row: StageExecution) -> ExecutionTraceResponse:
+    trace_id = getattr(row, "trace_id", None)
+    return ExecutionTraceResponse(
+        stage_execution_id=row.id,
+        pipeline_execution_id=row.pipeline_execution_id,
+        trace_id=trace_id,
+        request_id=trace_id,
+        prompt_id=getattr(row, "stage_name", None),
+        database_id=row.database_id,
+        stage_name=getattr(row, "stage_name", None),
+        job_type=getattr(row, "stage_name", None),
+        model_name=getattr(row, "model_name", None),
+        prompt_tokens=int(getattr(row, "actual_input_tokens", 0) or 0),
+        completion_tokens=int(getattr(row, "actual_output_tokens", 0) or 0),
+        reasoning_tokens=0,
+        total_tokens=int(getattr(row, "actual_input_tokens", 0) or 0) + int(getattr(row, "actual_output_tokens", 0) or 0),
+        latency_ms=float((getattr(row, "duration_seconds", None) or 0) * 1000),
+        finish_reason=getattr(row, "status", None),
+        execution_status=getattr(row, "status", None),
+        started_at=getattr(row, "start_time", None),
+        completed_at=getattr(row, "end_time", None),
+        error_message=getattr(row, "error_message", None),
     )
 
 
@@ -295,6 +372,7 @@ async def list_pipeline_executions(
                 "triggered_by": row.triggered_by,
                 "created_at": row.created_at,
                 "updated_at": row.updated_at,
+                "execution_trace": _execution_trace_from_pipeline_row(row).model_dump(),
             }
             for row in rows
         ],
@@ -353,6 +431,7 @@ async def list_stage_executions(
                 "execution_order": row.execution_order,
                 "created_at": row.created_at,
                 "updated_at": row.updated_at,
+                "execution_trace": _execution_trace_from_stage_row(row).model_dump(),
             }
             for row in rows
         ],

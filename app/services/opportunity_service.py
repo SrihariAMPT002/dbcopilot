@@ -12,7 +12,7 @@ from app.config.prompts import get_prompt_registry
 from app.core.config import settings
 from app.models.data_product import DataProduct
 from app.models.metadata import GovernancePackage, KPIIntelligence, RelationshipPackage, SemanticPackage
-from app.models.opportunity_recommendation import OpportunityRecommendation
+from app.models.recommendation import Recommendation
 from app.models.readiness_snapshot import ReadinessSnapshot
 from app.services.ai_observability_service import AIObservabilityService
 from app.services.relationship_package_mapper import relationship_package_to_dto
@@ -32,7 +32,10 @@ class OpportunityService:
 
     async def get_opportunities(self, database_id: int) -> dict[str, Any]:
         result = await self.db.execute(
-            select(OpportunityRecommendation).where(OpportunityRecommendation.database_id == database_id).order_by(OpportunityRecommendation.confidence_score.desc())
+            select(Recommendation)
+            .where(Recommendation.database_id == database_id)
+            .where(Recommendation.recommendation_type == "opportunity")
+            .order_by(Recommendation.confidence_score.desc())
         )
         rows = result.scalars().all()
         return {"database_id": database_id, "opportunities": [self._row(row) for row in rows]}
@@ -106,14 +109,37 @@ class OpportunityService:
         return fallback
 
     async def _persist(self, database_id: int, rows: list[dict[str, Any]]) -> None:
-        await self.db.execute(delete(OpportunityRecommendation).where(OpportunityRecommendation.database_id == database_id))
+        await self.db.execute(
+            delete(Recommendation)
+            .where(Recommendation.database_id == database_id)
+            .where(Recommendation.recommendation_type == "opportunity")
+        )
         for row in rows:
-            self.db.add(OpportunityRecommendation(database_id=database_id, recommendation_text=row["recommendation_text"], recommendation_type=row.get("recommendation_type"), confidence_score=float(row.get("confidence_score", 0.0)), evidence=json.dumps(row.get("evidence", []), default=str), trace_id=row.get("trace_id")))
+            self.db.add(
+                Recommendation(
+                    database_id=database_id,
+                    recommendation_text=row["recommendation_text"],
+                    recommendation_type=row.get("recommendation_type") or "opportunity",
+                    priority=row.get("priority"),
+                    confidence_score=float(row.get("confidence_score", 0.0)),
+                    evidence=json.dumps(row.get("evidence", []), default=str),
+                    trace_id=row.get("trace_id"),
+                )
+            )
         await self.db.flush()
 
     @staticmethod
-    def _row(row: OpportunityRecommendation) -> dict[str, Any]:
-        return {"id": row.id, "recommendation_text": row.recommendation_text, "recommendation_type": row.recommendation_type, "confidence_score": row.confidence_score, "evidence": json.loads(row.evidence or "[]"), "trace_id": row.trace_id, "created_at": row.created_at.isoformat() if row.created_at else None}
+    def _row(row: Recommendation) -> dict[str, Any]:
+        return {
+            "id": row.id,
+            "recommendation_text": row.recommendation_text,
+            "recommendation_type": row.recommendation_type,
+            "priority": row.priority,
+            "confidence_score": row.confidence_score,
+            "evidence": json.loads(row.evidence or "[]"),
+            "trace_id": row.trace_id,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
 
     @staticmethod
     def _governance_row(pkg: GovernancePackage) -> dict[str, Any]:

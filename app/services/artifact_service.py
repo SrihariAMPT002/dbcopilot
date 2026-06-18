@@ -26,8 +26,9 @@ class ArtifactService:
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
-        # /tmp is writable in containerized environments where app code volume is read-only.
-        self.registry_root = Path("/tmp/artifacts_registry")
+        from app.core.config import settings
+
+        self.registry_root = Path(settings.prompt_artifact_registry_root).expanduser()
 
     async def list_artifacts(self, db_id: int) -> list[ArtifactManifest]:
         await self._ensure_database(db_id)

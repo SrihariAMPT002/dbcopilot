@@ -16,7 +16,6 @@ from app.services.cache_service import cache_service
 from app.core.structured_logging import api_message, error_message
 
 router = APIRouter(prefix="/kpi-intelligence", tags=["KPI Intelligence"])
-kpi_router = APIRouter(prefix="/kpi", tags=["KPI Intelligence"])
 logger = logging.getLogger(__name__)
 
 
@@ -72,7 +71,3 @@ async def _read_kpi_package(db_id: int, db: AsyncSession) -> KpiPackageResponse:
 async def get_kpi_package(db_id: int, db: AsyncSession = Depends(get_db)) -> KpiPackageResponse:
     return await _read_kpi_package(db_id, db)
 
-
-@kpi_router.get("/{db_id}", response_model=KpiPackageResponse)
-async def get_kpi_package_alias(db_id: int, db: AsyncSession = Depends(get_db)) -> KpiPackageResponse:
-    return await _read_kpi_package(db_id, db)

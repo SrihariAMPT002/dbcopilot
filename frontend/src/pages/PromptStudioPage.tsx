@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { Sparkles, Copy, History, Eye, Download, RefreshCw, Workflow, Gauge, Wand2, FileDiff, Brain, ListOrdered } from "lucide-react";
-import { Link } from "@tanstack/react-router";
-import { PageHeader } from "@/components/page-header";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/empty-state";
+import { LoadingShell, ErrorShell } from "@/components/state-shells";
+import { PageHeader } from "@/components/page-header";
+import { TraceLink } from "@/components/common/TraceLink";
 import { cn } from "@/lib/utils";
+import { useDatabaseContext } from "@/context/database-context";
 import {
   usePromptBundle,
   usePromptInventory,
@@ -19,14 +22,18 @@ import {
   useOptimizePrompt,
   useEvaluatePrompt,
 } from "@/hooks/usePromptStudio";
-import { useDatabaseContext } from "@/context/database-context";
 import { useQueryClient } from "@tanstack/react-query";
-import { TraceLink } from "@/components/common/TraceLink";
+import { queryKeys } from "@/lib/query-keys";
+import { Copy, Download, Eye, FileDiff, Gauge, History, RefreshCw, Sparkles, Wand2, Workflow, BarChart3, ShieldAlert } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, XAxis, YAxis } from "recharts";
+import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
 
-type DiffLine = {
-  type: "added" | "removed" | "unchanged";
-  oldLine?: string;
-  newLine?: string;
+type DiffLine = { type: "added" | "removed" | "unchanged"; oldLine?: string; newLine?: string };
+
+const chartConfig: ChartConfig = {
+  versions: { label: "Versions", color: "hsl(var(--primary))" },
+  observability: { label: "Observability", color: "hsl(var(--success))" },
+  quality: { label: "Quality", color: "hsl(var(--warning))" },
 };
 
 function buildLineDiff(previousText: string, currentText: string): DiffLine[] {
@@ -37,28 +44,24 @@ function buildLineDiff(previousText: string, currentText: string): DiffLine[] {
   for (let i = 0; i < max; i += 1) {
     const oldLine = previousLines[i];
     const newLine = currentLines[i];
-    if (oldLine === undefined && newLine !== undefined) {
-      diff.push({ type: "added", newLine });
-      continue;
+    if (oldLine === undefined && newLine !== undefined) diff.push({ type: "added", newLine });
+    else if (newLine === undefined && oldLine !== undefined) diff.push({ type: "removed", oldLine });
+    else if (oldLine === newLine) diff.push({ type: "unchanged", oldLine, newLine });
+    else {
+      if (oldLine !== undefined) diff.push({ type: "removed", oldLine });
+      if (newLine !== undefined) diff.push({ type: "added", newLine });
     }
-    if (newLine === undefined && oldLine !== undefined) {
-      diff.push({ type: "removed", oldLine });
-      continue;
-    }
-    if (oldLine === newLine) {
-      diff.push({ type: "unchanged", oldLine, newLine });
-      continue;
-    }
-    if (oldLine !== undefined) diff.push({ type: "removed", oldLine });
-    if (newLine !== undefined) diff.push({ type: "added", newLine });
   }
   return diff;
 }
 
 export function PromptStudioPage() {
+  const { selectedDatabase } = useDatabaseContext();
+  const dbId = selectedDatabase?.database_id ?? null;
+  const queryClient = useQueryClient();
   const [templateId, setTemplateId] = useState("default");
   const [artifactType, setArtifactType] = useState("system_prompt");
-  const [generatedPrompt, setGeneratedPrompt] = useState<string>("");
+  const [generatedPrompt, setGeneratedPrompt] = useState("");
   const [selectedPackageId, setSelectedPackageId] = useState<number | null>(null);
   const [selectedEvaluation, setSelectedEvaluation] = useState<{
     completeness_score: number;
@@ -72,26 +75,32 @@ export function PromptStudioPage() {
     reasoning_summary?: string | null;
     trace_id?: string | null;
   } | null>(null);
-  const { selectedDatabase } = useDatabaseContext();
-  const dbId = selectedDatabase?.database_id ?? null;
-  const queryClient = useQueryClient();
-  const { data: templates } = usePromptTemplates();
-  const { data: inventory } = usePromptInventory();
-  const { data: bundle } = usePromptBundle(dbId);
-  const { data: promptPackages } = usePromptPackages(dbId);
-  const { data: promptVersions } = usePromptVersions(selectedPackageId);
-  const { data: promptObservability } = usePromptObservability(selectedPackageId);
+
+  const templates = usePromptTemplates();
+  const inventory = usePromptInventory();
+  const bundle = usePromptBundle(dbId ?? 0);
+  const promptPackages = usePromptPackages(dbId ?? 0);
+  const promptVersions = usePromptVersions(selectedPackageId);
+  const promptObservability = usePromptObservability(selectedPackageId);
   const generate = useGeneratePrompt();
   const optimize = useOptimizePrompt();
   const evaluate = useEvaluatePrompt();
 
-  const templateCatalog = templates?.templates ?? [];
-  const promptPackageList = promptPackages?.prompt_packages ?? [];
+  const isLoading =
+    templates.isLoading ||
+    inventory.isLoading ||
+    bundle.isLoading ||
+    promptPackages.isLoading;
+  const isError =
+    templates.isError ||
+    inventory.isError ||
+    bundle.isError ||
+    promptPackages.isError;
+  const error = templates.error ?? inventory.error ?? bundle.error ?? promptPackages.error ?? null;
+
+  const templateCatalog = templates.data?.templates ?? [];
+  const promptPackageList = promptPackages.data?.prompt_packages ?? [];
   const selectedPackage = promptPackageList.find((item) => item.id === selectedPackageId) ?? promptPackageList[0] ?? null;
-  const previousVersion = promptVersions?.versions?.[1]?.generated_prompt ?? "";
-  const currentVersion = promptVersions?.versions?.[0]?.generated_prompt ?? selectedPackage?.generated_prompt ?? generatedPrompt ?? "";
-  const promptDiff = useMemo(() => buildLineDiff(previousVersion, currentVersion), [previousVersion, currentVersion]);
-  const formatPct = (value: number | null | undefined) => (typeof value === "number" ? `${Math.round(value * 100)}%` : "N/A");
 
   useEffect(() => {
     if (!selectedPackageId && promptPackageList.length > 0) {
@@ -99,55 +108,71 @@ export function PromptStudioPage() {
     }
   }, [promptPackageList, selectedPackageId]);
 
-  const templateOptions = useMemo(
-    () => templateCatalog.map((v) => ({ id: v.id, label: `${v.name} · ${v.version}` })),
-    [templateCatalog],
+  const previousVersion = promptVersions.data?.versions?.[1]?.generated_prompt ?? "";
+  const currentVersion = promptVersions.data?.versions?.[0]?.generated_prompt ?? selectedPackage?.generated_prompt ?? generatedPrompt ?? "";
+  const promptDiff = useMemo(() => buildLineDiff(previousVersion, currentVersion), [previousVersion, currentVersion]);
+  const templateOptions = useMemo(() => templateCatalog.map((v) => ({ id: v.id, label: `${v.name} · ${v.version}` })), [templateCatalog]);
+  const latestVersion = promptVersions.data?.versions?.[0] ?? null;
+  const priorVersion = promptVersions.data?.versions?.[1] ?? null;
+
+  const generatedText = selectedPackage?.generated_prompt ?? generatedPrompt;
+  const generatedPreview = generatedText || "";
+
+  const trendData = useMemo(
+    () => [
+      {
+        label: "Packages",
+        versions: promptPackageList.length,
+        observability: promptObservability.data?.observability_logs?.length ?? 0,
+        quality: Math.round((selectedPackage?.confidence_score ?? 0) * 100),
+      },
+      {
+        label: "Versions",
+        versions: promptVersions.data?.versions?.length ?? 0,
+        observability: promptObservability.data?.observability_logs?.length ?? 0,
+        quality: Math.round((selectedEvaluation?.prompt_quality_score ?? selectedPackage?.confidence_score ?? 0) * 100),
+      },
+      {
+        label: "Trace",
+        versions: selectedPackage?.trace_id ? 1 : 0,
+        observability: promptObservability.data?.observability_logs?.length ?? 0,
+        quality: Math.round((selectedEvaluation?.safety_score ?? 0) * 100),
+      },
+    ],
+    [promptPackageList.length, promptObservability.data?.observability_logs?.length, promptVersions.data?.versions?.length, selectedEvaluation?.prompt_quality_score, selectedEvaluation?.safety_score, selectedPackage?.confidence_score, selectedPackage?.trace_id],
   );
 
-  const contexts: Record<string, string> = {
-    system: bundle?.content?.slice(0, 1800) || "No template seed available yet.",
-    generated: selectedPackage?.generated_prompt || generatedPrompt || bundle?.content?.slice(0, 1800) || "No AI-generated prompt available yet.",
-    database: inventory?.prompts?.map((p) => `${p.prompt}: ${p.consumer}`).join("\n") || "No inventory available yet.",
-    agent: bundle?.artifacts?.map((a) => `${a.artifact_type}: ${a.filename ?? "artifact"}`).join("\n") || "No agent context available yet.",
-    rag: bundle?.bundle_filename || "No RAG context available yet.",
-    sql: bundle?.bundle_mime || "No text-to-SQL context available yet.",
-  };
-
   const onGenerate = async () => {
-    const result = await generate.mutateAsync({
-      database_id: dbId,
-      artifact_type: artifactType,
-      template_id: templateId,
-    });
+    if (!dbId) return;
+    const result = await generate.mutateAsync({ database_id: dbId, artifact_type: artifactType, template_id: templateId });
     setGeneratedPrompt(result.generated_prompt);
     setSelectedPackageId(result.artifact_id ?? null);
-    await queryClient.invalidateQueries({ queryKey: ["prompt-bundle", dbId] });
-    await queryClient.invalidateQueries({ queryKey: ["prompt-packages", dbId] });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.promptBundle(dbId) });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.promptPackages(dbId) });
   };
 
   const onOptimize = async () => {
     if (!selectedPackage) return;
     await optimize.mutateAsync({ prompt_package_id: selectedPackage.id });
-    await queryClient.invalidateQueries({ queryKey: ["prompt-packages", dbId] });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.promptPackages(dbId) });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.promptVersions(selectedPackage.id) });
   };
 
   const onEvaluate = async () => {
     if (!selectedPackage) return;
     const result = await evaluate.mutateAsync({ prompt_package_id: selectedPackage.id });
     setSelectedEvaluation(result);
-    await queryClient.invalidateQueries({ queryKey: ["prompt-packages", dbId] });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.promptPackages(dbId) });
   };
 
   const onCopyGenerated = async () => {
-    const text = selectedPackage?.generated_prompt || generatedPrompt || "";
-    if (!text) return;
-    await navigator.clipboard.writeText(text);
+    if (!generatedPreview) return;
+    await navigator.clipboard.writeText(generatedPreview);
   };
 
   const onDownloadGenerated = () => {
-    const text = selectedPackage?.generated_prompt || generatedPrompt || "";
-    if (!text) return;
-    const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+    if (!generatedPreview) return;
+    const blob = new Blob([generatedPreview], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -155,6 +180,43 @@ export function PromptStudioPage() {
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <PageHeader eyebrow="AI Surface" title="Prompt Studio" description="AI-generated prompt artifacts and versioned prompt packages generated from persisted intelligence packages." />
+        <LoadingShell title="Prompt Studio loading" description="Loading prompt templates, inventory, bundle, and package history..." />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="space-y-6">
+        <PageHeader eyebrow="AI Surface" title="Prompt Studio" description="AI-generated prompt artifacts and versioned prompt packages generated from persisted intelligence packages." />
+        <ErrorShell title="Prompt Studio unavailable" description={error instanceof Error ? error.message : "Failed to load prompt studio data for the selected database."} />
+      </div>
+    );
+  }
+
+  if (!promptPackageList.length && !generatedText) {
+    return (
+      <div className="space-y-6">
+        <PageHeader eyebrow="AI Surface" title="Prompt Studio" description="AI-generated prompt artifacts and versioned prompt packages generated from persisted intelligence packages." />
+        <EmptyState
+          icon={Sparkles}
+          title="No prompt packages yet"
+          description="Generate your first prompt bundle after sync so the studio can show versions, traces, and evaluation data."
+          action={
+            <Button onClick={onGenerate} disabled={!dbId || generate.isPending} className="gap-1.5">
+              <Sparkles className="h-3.5 w-3.5" />
+              Generate prompt
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -164,10 +226,17 @@ export function PromptStudioPage() {
         description="AI-generated prompt artifacts and versioned prompt packages generated from persisted intelligence packages."
         actions={
           <>
+            <Badge variant="outline" className="text-[11px]">
+              db {dbId}
+            </Badge>
+            <Badge variant="outline" className="text-[11px]">
+              packages {promptPackageList.length}
+            </Badge>
             <Button variant="outline" size="sm" className="gap-1.5" onClick={() => document.getElementById("prompt-versions")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
-              <History className="h-3.5 w-3.5" /> Versions
+              <History className="h-3.5 w-3.5" />
+              Versions
             </Button>
-            <Button size="sm" onClick={onGenerate} disabled={generate.isPending} className="gap-1.5 bg-gradient-to-br from-primary to-primary-glow text-primary-foreground">
+            <Button size="sm" onClick={onGenerate} disabled={!dbId || generate.isPending} className="gap-1.5 bg-gradient-to-br from-primary to-primary-glow text-primary-foreground">
               {generate.isPending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
               Regenerate
             </Button>
@@ -175,26 +244,57 @@ export function PromptStudioPage() {
         }
       />
 
-      <section className="grid gap-4 xl:grid-cols-[1fr_340px]">
-        <Card>
-          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
-            <div>
-              <CardTitle className="text-base">Prompt intelligence workspace</CardTitle>
-              <CardDescription>Generate, optimize, evaluate, and version AI prompts from persisted intelligence packages.</CardDescription>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline" className="text-[11px]">db {dbId}</Badge>
-              <Badge variant="outline" className="text-[11px]">model {generate.data?.model ?? "gpt-5-nano"}</Badge>
-              <Badge variant="outline" className="text-[11px] tabular-nums">{generate.data?.trace_id ?? "no trace"}</Badge>
-              <TraceLink traceId={generate.data?.trace_id} label="Open trace" className="rounded-md border border-border px-2 py-1 text-[11px]" />
-              <Badge variant="outline" className="text-[11px]">packages {promptPackageList.length}</Badge>
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Card className="border-border bg-card shadow-sm">
+          <CardContent className="p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground">Prompt quality</div>
+            <div className="mt-2 text-2xl font-semibold text-foreground">{Math.round((selectedEvaluation?.prompt_quality_score ?? selectedPackage?.confidence_score ?? 0) * 100)}%</div>
+            <div className="mt-1 text-xs text-muted-foreground">Quality is derived from persisted package confidence and latest evaluation.</div>
+          </CardContent>
+        </Card>
+        <Card className="border-border bg-card shadow-sm">
+          <CardContent className="p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground">Trace</div>
+            <div className="mt-2 text-2xl font-semibold text-foreground truncate">{selectedPackage?.trace_id ?? generate.data?.trace_id ?? "n/a"}</div>
+            <div className="mt-1 text-xs text-muted-foreground">Open the trace to inspect prompt tokens, latency, and finish reason.</div>
+          </CardContent>
+        </Card>
+        <Card className="border-border bg-card shadow-sm">
+          <CardContent className="p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground">Versions</div>
+            <div className="mt-2 text-2xl font-semibold text-foreground">{promptVersions.data?.versions?.length ?? 0}</div>
+            <div className="mt-1 text-xs text-muted-foreground">Versioned prompt snapshots for the selected package.</div>
+          </CardContent>
+        </Card>
+        <Card className="border-border bg-card shadow-sm">
+          <CardContent className="p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground">Observability</div>
+            <div className="mt-2 text-2xl font-semibold text-foreground">{promptObservability.data?.observability_logs?.length ?? 0}</div>
+            <div className="mt-1 text-xs text-muted-foreground">Traceable logs with tokens, latency, and finish reason.</div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
+        <Card className="overflow-hidden border-border/70 bg-card/90 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.45)]">
+          <CardHeader className="border-b border-border/60 bg-gradient-to-r from-slate-950/5 via-background to-slate-900/5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-base">Prompt workspace</CardTitle>
+                <CardDescription>Generate, optimize, evaluate, and version prompts from persisted intelligence packages.</CardDescription>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className="text-[11px]">model {generate.data?.model ?? selectedPackage?.model_name ?? "gpt-5-nano"}</Badge>
+                <Badge variant="outline" className="text-[11px] tabular-nums">{selectedPackage?.prompt_version ?? generate.data?.prompt_version ?? "1.0"}</Badge>
+                <TraceLink traceId={selectedPackage?.trace_id ?? generate.data?.trace_id} label="Open trace" className="rounded-md border border-border px-2 py-1 text-[11px]" />
+              </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-5">
+          <CardContent className="space-y-5 p-5">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <label className="space-y-1 text-sm">
                 <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Artifact</div>
-                <select value={artifactType} onChange={(e) => setArtifactType(e.target.value)} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm">
+                <select value={artifactType} onChange={(e) => setArtifactType(e.target.value)} className="h-11 w-full rounded-lg border border-border bg-background px-3 text-sm">
                   <option value="system_prompt">system_prompt</option>
                   <option value="database_context">database_context</option>
                   <option value="rag_context">rag_context</option>
@@ -204,120 +304,194 @@ export function PromptStudioPage() {
               </label>
               <label className="space-y-1 text-sm">
                 <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Template</div>
-                <select value={templateId} onChange={(e) => setTemplateId(e.target.value)} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm">
+                <select value={templateId} onChange={(e) => setTemplateId(e.target.value)} className="h-11 w-full rounded-lg border border-border bg-background px-3 text-sm">
                   <option value="default">default</option>
                   {templateOptions.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.label}
-                    </option>
+                    <option key={t.id} value={t.id}>{t.label}</option>
                   ))}
                 </select>
               </label>
               <div className="space-y-1 text-sm">
                 <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Status</div>
-                <div className="flex h-10 items-center rounded-md border border-border bg-background px-3 text-xs text-muted-foreground">
-                  {generate.isPending ? "Generating prompt..." : generate.data ? "Prompt generated" : "Ready"}
+                <div className="flex h-11 items-center rounded-lg border border-border bg-background px-3 text-xs text-muted-foreground">
+                  {generate.isPending ? "Generating prompt..." : selectedPackage ? "Prompt ready" : "Ready to generate"}
                 </div>
               </div>
             </div>
 
-            <section className="space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <div className="text-sm font-semibold text-foreground">Generated prompt</div>
-                  <div className="text-xs text-muted-foreground">Primary canonical artifact created by the prompt intelligence system.</div>
+            <section className="grid gap-4 lg:grid-cols-2">
+              <div className="space-y-3 rounded-2xl border border-border/70 bg-background/80 p-4 shadow-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-semibold text-foreground">Generated prompt</div>
+                    <div className="text-xs text-muted-foreground">Primary canonical artifact created by the prompt intelligence system.</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="ghost" size="sm" className="h-8 gap-1 px-2 text-[11px]" onClick={onCopyGenerated} disabled={!generatedPreview}>
+                      <Copy className="h-3 w-3" /> Copy
+                    </Button>
+                    <Button variant="ghost" size="sm" className="h-8 gap-1 px-2 text-[11px]" onClick={onDownloadGenerated} disabled={!generatedPreview}>
+                      <Download className="h-3 w-3" /> Download
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[11px]" onClick={onCopyGenerated}>
-                    <Copy className="h-3 w-3" /> Copy
-                  </Button>
-                  <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[11px]" onClick={onDownloadGenerated}>
-                    <Download className="h-3 w-3" /> Download
-                  </Button>
+                <div className="rounded-xl border border-border bg-[var(--muted)]/35">
+                  <div className="border-b border-border/70 bg-card/70 px-3 py-2 text-[11px] font-mono text-muted-foreground">generated_prompt.md</div>
+                  <ScrollArea className="max-h-[340px]">
+                    <div className="whitespace-pre-wrap p-4 font-mono text-xs leading-6 text-foreground">{generatedPreview || "No prompt generated yet."}</div>
+                  </ScrollArea>
                 </div>
               </div>
-                <div className="relative overflow-hidden rounded-md border border-border bg-[var(--muted)]/40">
-                <div className="border-b border-border bg-card/60 px-3 py-2 text-[11px] text-muted-foreground font-mono">generated_prompt.md</div>
-                <ScrollArea className="max-h-[360px]">
-                  <div className="whitespace-pre-wrap p-4 font-mono text-xs leading-relaxed text-foreground">{contexts.generated}</div>
-                </ScrollArea>
+
+              <div className="space-y-3 rounded-2xl border border-border/70 bg-background/80 p-4 shadow-sm">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <BarChart3 className="h-4 w-4" />
+                  Prompt trends
+                </div>
+                <ChartContainer config={chartConfig} className="h-[280px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={trendData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="label" tickLine={false} axisLine={false} />
+                      <YAxis tickLine={false} axisLine={false} />
+                      <ChartTooltip content={<ChartTooltipContent />} />
+                      <Bar dataKey="versions" fill="var(--color-versions)" radius={[8, 8, 0, 0]} />
+                      <Bar dataKey="observability" fill="var(--color-observability)" radius={[8, 8, 0, 0]} />
+                      <Bar dataKey="quality" fill="var(--color-quality)" radius={[8, 8, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartContainer>
+                <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                  <div className="rounded-lg border border-border bg-card p-3">Safety {Math.round((selectedEvaluation?.safety_score ?? 0) * 100)}%</div>
+                  <div className="rounded-lg border border-border bg-card p-3">Grounding {Math.round((selectedEvaluation?.grounding_score ?? 0) * 100)}%</div>
+                  <div className="rounded-lg border border-border bg-card p-3">Traces {promptObservability.data?.observability_logs?.length ?? 0}</div>
+                </div>
               </div>
             </section>
 
             <section className="grid gap-4 lg:grid-cols-2">
-              <Card id="prompt-versions">
-                <CardHeader>
+              <Card id="prompt-versions" className="border-border bg-background/70 shadow-sm">
+                <CardHeader className="border-b border-border/60 bg-gradient-to-r from-background to-muted/30">
                   <CardTitle className="flex items-center gap-2 text-sm"><History className="h-4 w-4" /> Versions</CardTitle>
                   <CardDescription>Persisted versions for the selected prompt package.</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-2">
-                  <div className="flex items-center gap-2">
+                <CardContent className="space-y-3 p-5">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline" className="text-[11px]">selected package {selectedPackage?.id ?? "none"}</Badge>
-                    <Button variant="outline" size="sm" className="gap-1.5" onClick={onGenerate}><Workflow className="h-3.5 w-3.5" /> Generate</Button>
+                    <Button variant="outline" size="sm" className="gap-1.5" onClick={onGenerate} disabled={!dbId || generate.isPending}>
+                      <Workflow className="h-3.5 w-3.5" /> Generate
+                    </Button>
                   </div>
-                  {(promptVersions?.versions ?? []).length ? (
-                    <div className="space-y-2">
-                      {promptVersions!.versions.map((version) => (
-                        <div key={version.id} className="rounded-md border border-border bg-card p-3">
-                          <div className="flex items-center justify-between gap-3">
+                  {(promptVersions.data?.versions ?? []).length ? (
+                    <div className="space-y-3">
+                      {promptVersions.data!.versions.map((version) => (
+                        <div key={version.id} className={cn("rounded-2xl border p-4 shadow-sm transition", version.id === latestVersion?.id ? "border-primary/30 bg-primary/5" : "border-border bg-card")}>
+                          <div className="flex items-start justify-between gap-3">
                             <div>
-                              <div className="text-sm font-medium text-foreground">Version {version.version}</div>
-                              <div className="text-xs text-muted-foreground">Template {version.template_id ?? "n/a"} · {version.model_name ?? "unknown"}</div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="text-sm font-semibold text-foreground">Version {version.version}</div>
+                                {version.id === latestVersion?.id ? <Badge className="border-primary/30 bg-primary/10 text-primary text-[10px]">latest</Badge> : null}
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">Template {version.template_id ?? "n/a"} | {version.model_name ?? "unknown"}</div>
                             </div>
-                            <Badge variant="outline" className="text-[10px]">trace {version.trace_id ?? "n/a"}</Badge>
+                            <TraceLink traceId={version.trace_id} label="Trace" className="rounded-md border border-border px-2 py-1 text-[10px]" />
                           </div>
-                          <div className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-muted-foreground">{version.generated_prompt}</div>
+                          <div className="mt-3 overflow-hidden rounded-xl border border-dashed border-border bg-background">
+                            <div className="border-b border-border/70 bg-card/70 px-3 py-2 text-[11px] font-mono text-muted-foreground">generated_prompt.md</div>
+                            <div className="max-h-40 overflow-auto whitespace-pre-wrap p-3 font-mono text-[11px] leading-6 text-foreground">{version.generated_prompt}</div>
+                          </div>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <div className="text-sm text-muted-foreground">No versions available yet.</div>
+                    <EmptyState icon={FileDiff} title="No versions yet" description="Generate or optimize a prompt to create version history." />
                   )}
                 </CardContent>
               </Card>
 
-              <Card id="prompt-preview">
-                <CardHeader>
+              <Card className="border-border bg-background/70 shadow-sm">
+                <CardHeader className="border-b border-border/60 bg-gradient-to-r from-background to-muted/30">
                   <CardTitle className="flex items-center gap-2 text-sm"><Gauge className="h-4 w-4" /> Evaluation</CardTitle>
                   <CardDescription>Prompt quality, safety, grounding, and reuse signals.</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <Button variant="outline" size="sm" className="gap-1.5" onClick={onEvaluate} disabled={!selectedPackage}>
-                    <Gauge className="h-3.5 w-3.5" /> Evaluate selected
+                <CardContent className="space-y-3 p-4">
+                  <Button variant="outline" size="sm" className="gap-1.5" onClick={onEvaluate} disabled={!selectedPackage || evaluate.isPending}>
+                    <Gauge className={cn("h-3.5 w-3.5", evaluate.isPending && "animate-spin")} /> Evaluate selected
                   </Button>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Prompt quality</CardTitle></CardHeader><CardContent><div className="text-2xl font-semibold">{selectedEvaluation ? formatPct(selectedEvaluation.prompt_quality_score) : formatPct(selectedPackage?.confidence_score)}</div></CardContent></Card>
-                    <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Safety</CardTitle></CardHeader><CardContent><div className="text-2xl font-semibold">{selectedEvaluation ? formatPct(selectedEvaluation.safety_score) : "N/A"}</div></CardContent></Card>
-                    <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Grounding</CardTitle></CardHeader><CardContent><div className="text-2xl font-semibold">{selectedEvaluation ? formatPct(selectedEvaluation.grounding_score) : "N/A"}</div></CardContent></Card>
+                    <Metric value={selectedEvaluation ? formatPct(selectedEvaluation.prompt_quality_score) : formatPct(selectedPackage?.confidence_score)} label="Prompt quality" />
+                    <Metric value={selectedEvaluation ? formatPct(selectedEvaluation.safety_score) : "N/A"} label="Safety" />
+                    <Metric value={selectedEvaluation ? formatPct(selectedEvaluation.grounding_score) : "N/A"} label="Grounding" />
                   </div>
                   {selectedEvaluation ? (
-                    <div className="rounded-md border border-border bg-card p-3 text-sm text-muted-foreground">
-                      <div className="font-medium text-foreground">Latest evaluation</div>
-                      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                        <div>Completeness {formatPct(selectedEvaluation.completeness_score)}</div>
-                        <div>SQL safety {formatPct(selectedEvaluation.sql_safety_score)}</div>
-                        <div>RAG quality {formatPct(selectedEvaluation.rag_quality_score)}</div>
-                        <div>Agent quality {formatPct(selectedEvaluation.agent_quality_score)}</div>
+                    <div className="rounded-2xl border border-border bg-gradient-to-br from-background to-muted/30 p-4 text-sm text-muted-foreground shadow-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-semibold text-foreground">Latest evaluation</div>
+                        <Badge variant="outline" className="text-[10px]">trace {selectedEvaluation.trace_id ?? "n/a"}</Badge>
                       </div>
-                      {selectedEvaluation.reasoning_summary ? <div className="mt-2 text-xs">{selectedEvaluation.reasoning_summary}</div> : null}
+                      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        <StatPill label="completeness" value={formatPct(selectedEvaluation.completeness_score)} />
+                        <StatPill label="sql safety" value={formatPct(selectedEvaluation.sql_safety_score)} />
+                        <StatPill label="rag quality" value={formatPct(selectedEvaluation.rag_quality_score)} />
+                        <StatPill label="agent quality" value={formatPct(selectedEvaluation.agent_quality_score)} />
+                      </div>
+                      {selectedEvaluation.reasoning_summary ? <div className="mt-3 rounded-xl border border-border bg-card p-3 text-xs leading-5 text-foreground">{selectedEvaluation.reasoning_summary}</div> : null}
                     </div>
                   ) : (
-                    <div className="text-sm text-muted-foreground">No evaluation has been run for the selected prompt package yet.</div>
+                    <EmptyState icon={ShieldAlert} title="No evaluation yet" description="Run evaluation to surface prompt safety and grounding signals." />
                   )}
                 </CardContent>
               </Card>
             </section>
 
-            <section className="grid gap-4 lg:grid-cols-2">
-              <Card>
-                <CardHeader>
+            <section className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+              <Card className="border-border/70 bg-background/80 shadow-sm">
+                <CardHeader className="border-b border-border/60 bg-gradient-to-r from-slate-950/5 via-background to-slate-900/5">
+                  <CardTitle className="flex items-center gap-2 text-sm"><FileDiff className="h-4 w-4" /> Diff view</CardTitle>
+                  <CardDescription>Side-by-side comparison between the latest and previous prompt versions.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 p-4">
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                    <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary text-[10px]">current {latestVersion?.version ?? "n/a"}</Badge>
+                    <Badge variant="outline" className="text-[10px]">previous {priorVersion?.version ?? "n/a"}</Badge>
+                  </div>
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    <div className="overflow-hidden rounded-2xl border border-border/70 bg-background">
+                      <div className="border-b border-border/70 bg-card/70 px-3 py-2 text-[11px] font-mono text-muted-foreground">Previous</div>
+                      <ScrollArea className="h-[320px]">
+                        <div className="space-y-0.5 p-3 font-mono text-[11px] leading-6">
+                          {promptDiff.map((line, index) => (
+                            <div key={`prev-${index}`} className={cn("whitespace-pre-wrap rounded px-2 py-0.5", line.type === "removed" ? "bg-rose-500/10 text-rose-700" : line.type === "added" ? "text-transparent" : "text-foreground")}>
+                              {line.oldLine ?? " "}
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    </div>
+                    <div className="overflow-hidden rounded-2xl border border-border/70 bg-background">
+                      <div className="border-b border-border/70 bg-card/70 px-3 py-2 text-[11px] font-mono text-muted-foreground">Current</div>
+                      <ScrollArea className="h-[320px]">
+                        <div className="space-y-0.5 p-3 font-mono text-[11px] leading-6">
+                          {promptDiff.map((line, index) => (
+                            <div key={`curr-${index}`} className={cn("whitespace-pre-wrap rounded px-2 py-0.5", line.type === "added" ? "bg-emerald-500/10 text-emerald-700" : line.type === "removed" ? "text-transparent" : "text-foreground")}>
+                              {line.newLine ?? " "}
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-border/70 bg-background/80 shadow-sm">
+                <CardHeader className="border-b border-border/60 bg-gradient-to-r from-background to-muted/30">
                   <CardTitle className="flex items-center gap-2 text-sm"><History className="h-4 w-4" /> Observability</CardTitle>
                   <CardDescription>Trace, token usage, finish reason, and latency for prompt generation.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {(promptObservability?.observability_logs ?? []).length ? (
-                    promptObservability!.observability_logs.map((entry) => (
-                      <Card key={entry.id}>
+                  {(promptObservability.data?.observability_logs ?? []).length ? (
+                    promptObservability.data!.observability_logs.map((entry) => (
+                      <Card key={entry.id} className="border-border/70 bg-card shadow-sm">
                         <CardContent className="space-y-2 pt-4">
                           <div className="flex items-center justify-between">
                             <div className="text-sm font-medium">Trace {entry.trace_id ?? "n/a"}</div>
@@ -334,81 +508,31 @@ export function PromptStudioPage() {
                       </Card>
                     ))
                   ) : (
-                    <div className="text-sm text-muted-foreground">No observability logs available yet.</div>
+                    <EmptyState icon={History} title="No observability logs yet" description="Generate a prompt to create traceable observability records." />
                   )}
                 </CardContent>
               </Card>
 
-            <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-sm"><Eye className="h-4 w-4" /> Generated prompt preview</CardTitle>
+              <Card className="border-border bg-background/70 shadow-sm">
+                <CardHeader className="border-b border-border/60 bg-gradient-to-r from-slate-950/5 via-background to-slate-900/5">
+                  <CardTitle className="flex items-center gap-2 text-sm"><Eye className="h-4 w-4" /> Prompt preview</CardTitle>
                   <CardDescription>Current persisted prompt package output.</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-medium text-foreground">Generated prompt</div>
-                    <Badge variant="outline" className="text-[11px]">AI generated</Badge>
+                <CardContent className="space-y-3 p-4">
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" className="gap-1.5" onClick={onOptimize} disabled={!selectedPackage || optimize.isPending}>
+                      <Wand2 className={cn("h-3.5 w-3.5", optimize.isPending && "animate-spin")} /> Optimize selected
+                    </Button>
+                    <Button variant="outline" size="sm" className="gap-1.5" onClick={() => document.getElementById("prompt-versions")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+                      <FileDiff className="h-3.5 w-3.5" /> Compare versions
+                    </Button>
                   </div>
-                  <Textarea value={selectedPackage?.generated_prompt || generatedPrompt || ""} readOnly className="min-h-[280px] font-mono text-xs" placeholder="Generate a prompt to preview the AI output." />
-                </CardContent>
-              </Card>
-            </section>
-
-            <section className="grid gap-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-sm"><Brain className="h-4 w-4" /> Optimization</CardTitle>
-                  <CardDescription>Prompt optimization for safety, grounding, token efficiency, and reuse.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <Button variant="outline" size="sm" className="gap-1.5" onClick={onOptimize} disabled={!selectedPackage}>
-                    <Wand2 className="h-3.5 w-3.5" /> Optimize selected
-                  </Button>
-                  <div className="text-sm text-muted-foreground">AI optimization refines the selected prompt for safety, grounding, token efficiency, and reuse.</div>
-                </CardContent>
-              </Card>
-
-              <Card className="xl:col-span-2">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-sm"><Workflow className="h-4 w-4" /> Template vs generated diff</CardTitle>
-                  <CardDescription>Full-width line-by-line comparison between the template seed and the latest generated prompt.</CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-4 xl:grid-cols-2">
-                  <div className="space-y-2 rounded-lg border border-border bg-card p-3">
-                    <div className="flex items-center gap-2 text-sm font-medium text-foreground"><ListOrdered className="h-4 w-4" /> Template / previous version</div>
-                    <ScrollArea className="h-[620px] rounded-md border border-border bg-background">
-                      <div className="space-y-1 p-3 font-mono text-[11px]">
-                        {promptDiff.length ? promptDiff.map((line, index) => (
-                          <div
-                            key={`prev-${index}`}
-                            className={cn(
-                              "whitespace-pre-wrap rounded px-2 py-1 leading-5",
-                              line.type === "removed" ? "bg-red-500/10 text-red-700 dark:text-red-300" : "text-muted-foreground",
-                            )}
-                          >
-                            {line.type === "removed" ? `- ${line.oldLine ?? ""}` : line.oldLine ?? line.newLine ?? ""}
-                          </div>
-                        )) : <div className="text-sm text-muted-foreground">No previous version available.</div>}
-                      </div>
-                    </ScrollArea>
-                  </div>
-                  <div className="space-y-2 rounded-lg border border-border bg-card p-3">
-                    <div className="flex items-center gap-2 text-sm font-medium text-foreground"><FileDiff className="h-4 w-4" /> Generated prompt</div>
-                    <ScrollArea className="h-[620px] rounded-md border border-border bg-background">
-                      <div className="space-y-1 p-3 font-mono text-[11px]">
-                        {promptDiff.length ? promptDiff.map((line, index) => (
-                          <div
-                            key={`curr-${index}`}
-                            className={cn(
-                              "whitespace-pre-wrap rounded px-2 py-1 leading-5",
-                              line.type === "added" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "text-muted-foreground",
-                            )}
-                          >
-                            {line.type === "added" ? `+ ${line.newLine ?? ""}` : line.newLine ?? line.oldLine ?? ""}
-                          </div>
-                        )) : <div className="text-sm text-muted-foreground">No generated prompt yet.</div>}
-                      </div>
-                    </ScrollArea>
+                  <div className="overflow-hidden rounded-2xl border border-border/70 bg-background shadow-sm">
+                    <div className="flex items-center justify-between border-b border-border/70 bg-card/70 px-3 py-2">
+                      <div className="text-[11px] font-mono text-muted-foreground">prompt-preview.md</div>
+                      <Badge variant="outline" className="text-[10px]">AI generated</Badge>
+                    </div>
+                    <Textarea value={generatedPreview} readOnly className="min-h-[300px] resize-none border-0 bg-transparent font-mono text-xs shadow-none focus-visible:ring-0" placeholder="Generate a prompt to preview the AI output." />
                   </div>
                 </CardContent>
               </Card>
@@ -417,7 +541,7 @@ export function PromptStudioPage() {
         </Card>
 
         <div className="space-y-4">
-          <Card>
+          <Card className="border-border bg-card shadow-sm">
             <CardHeader>
               <CardTitle className="text-base">Prompt packages</CardTitle>
               <CardDescription>Persisted canonical prompt artifacts.</CardDescription>
@@ -429,7 +553,7 @@ export function PromptStudioPage() {
                     key={pkg.id}
                     onClick={() => setSelectedPackageId(pkg.id)}
                     className={cn(
-                      "w-full rounded-md border p-3 text-left transition",
+                      "w-full rounded-xl border p-3 text-left transition",
                       selectedPackage?.id === pkg.id ? "border-primary/40 bg-primary/5" : "border-border bg-card hover:bg-muted/40",
                     )}
                   >
@@ -443,52 +567,29 @@ export function PromptStudioPage() {
                       </div>
                       <Badge variant="outline" className="shrink-0 tabular-nums text-[10px]">{Math.round((pkg.confidence_score ?? 0) * 100)}%</Badge>
                     </div>
+                    <div className="mt-2 text-[11px] text-muted-foreground truncate">{pkg.trace_id ?? "no trace"} · {pkg.execution_status ?? "unknown"}</div>
                   </button>
                 ))
               ) : (
-                <div className="text-sm text-muted-foreground">No prompt packages available yet.</div>
+                <EmptyState
+                  icon={Sparkles}
+                  title="No prompt packages yet"
+                  description="Generate your first prompt bundle to populate the studio."
+                />
               )}
             </CardContent>
           </Card>
-          <Card>
+
+          <Card className="border-border bg-card shadow-sm">
             <CardHeader>
               <CardTitle className="text-base">Template context</CardTitle>
               <CardDescription>Seed instructions and supporting packages used for generation.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-muted-foreground">
-              <div className="rounded-md border border-border bg-card p-3">
-                <div className="text-xs uppercase tracking-wider text-muted-foreground">System</div>
-                <div className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap text-[11px] leading-5">{contexts.system}</div>
-              </div>
-              <div className="rounded-md border border-border bg-card p-3">
-                <div className="text-xs uppercase tracking-wider text-muted-foreground">Database</div>
-                <div className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap text-[11px] leading-5">{contexts.database}</div>
-              </div>
-              <div className="rounded-md border border-border bg-card p-3">
-                <div className="text-xs uppercase tracking-wider text-muted-foreground">Agent</div>
-                <div className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap text-[11px] leading-5">{contexts.agent}</div>
-              </div>
-              <div className="rounded-md border border-border bg-card p-3">
-                <div className="text-xs uppercase tracking-wider text-muted-foreground">RAG / SQL</div>
-                <div className="mt-2 text-[11px] leading-5">{contexts.rag}</div>
-                <div className="mt-1 text-[11px] leading-5">{contexts.sql}</div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Preview</CardTitle>
-              <CardDescription>Dry-run the assembled prompt against the active source.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full gap-1.5"
-                onClick={() => document.getElementById("prompt-preview")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-              >
-                <Eye className="h-3.5 w-3.5" /> Open preview
-              </Button>
+              <ContextBlock title="System" value={bundle.data?.content?.slice(0, 1800) ?? "No template seed available yet."} />
+              <ContextBlock title="Database" value={inventory.data?.prompts?.map((p) => `${p.prompt}: ${p.consumer}`).join("\n") ?? "No inventory available yet."} />
+              <ContextBlock title="Agent" value={bundle.data?.artifacts?.map((a) => `${a.artifact_type}: ${a.filename ?? "artifact"}`).join("\n") ?? "No agent context available yet."} />
+              <ContextBlock title="RAG / SQL" value={`${bundle.data?.bundle_filename ?? "No RAG context available yet."}\n${bundle.data?.bundle_mime ?? "No SQL context available yet."}`} />
             </CardContent>
           </Card>
         </div>
@@ -496,3 +597,31 @@ export function PromptStudioPage() {
     </div>
   );
 }
+
+function Metric({ value, label }: { value: string; label: string }) {
+  return (
+    <div className="rounded-xl border border-border bg-card p-3">
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="mt-1 text-xl font-semibold text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function StatPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-full border border-border bg-card px-3 py-1.5 text-[11px] shadow-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="ml-2 font-semibold text-foreground">{value}</span>
+    </div>
+  );
+}
+
+function ContextBlock({ title, value }: { title: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-border bg-card p-3">
+      <div className="text-xs uppercase tracking-wider text-muted-foreground">{title}</div>
+      <div className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap text-[11px] leading-5 text-foreground">{value}</div>
+    </div>
+  );
+}
+

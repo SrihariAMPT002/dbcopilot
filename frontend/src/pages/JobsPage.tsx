@@ -20,6 +20,7 @@ import { usePipelineExecutions, useStageExecutions } from "@/hooks/usePipelineEx
 import { useBusinessInsights } from "@/hooks/useBusinessInsights";
 import { useBusinessIntelligence } from "@/hooks/useBusinessIntelligence";
 import { TraceLink } from "@/components/common/TraceLink";
+import { queryKeys } from "@/lib/query-keys";
 
 const normalizeJobStatus = (status?: string | null) => {
   const value = (status ?? "unknown").trim().toLowerCase();
@@ -42,7 +43,7 @@ export function JobsPage() {
   const [viewMode, setViewMode] = useState<"business" | "technical">("business");
 
   const { data: jobs = [] } = useQuery({
-    queryKey: ["jobs", statusFilter],
+    queryKey: queryKeys.jobs(statusFilter),
     queryFn: () => jobsApi.list(300),
     refetchInterval: 5000,
   });
@@ -72,7 +73,7 @@ export function JobsPage() {
       }
       return metadataApi.diagnose(selectedDb);
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs(statusFilter) }),
   });
 
   const selectedJob = dbJobs.find((j) => j.id === selectedJobId);
@@ -135,6 +136,7 @@ export function JobsPage() {
   const statusFilters = ["ALL", "QUEUED", "RUNNING", "FAILED", "COMPLETED", "CANCELLED"];
   const typeFilters = ["ALL", "SYNC", "SEMANTIC_ENRICHMENT", "EMBEDDINGS", "RELATIONSHIP_GRAPH", "PROMPT_GENERATION", "READINESS", "ARTIFACT_PACKAGING", "AI_CONTEXT"];
   const overallProgress = stageProgress?.overall_progress_percentage ?? 0;
+  const selectedExecutionTrace = selectedJob?.execution_trace;
 
   const stageIcon = (status?: string | null) => {
     const value = (status ?? "unknown").toLowerCase();
@@ -164,7 +166,7 @@ export function JobsPage() {
             >
               <Filter className="h-3.5 w-3.5" /> Filters
             </Button>
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => queryClient.invalidateQueries({ queryKey: ["jobs"] })}>
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => queryClient.invalidateQueries({ queryKey: queryKeys.jobs(statusFilter) })}>
               <RefreshCw className="h-3.5 w-3.5" /> Refresh
             </Button>
           </>
@@ -536,7 +538,7 @@ export function JobsPage() {
               <Button variant="outline" size="sm" onClick={() => selectedJobId && setExpanded(selectedJobId)} disabled={!selectedJobId}>
                 Inspect Job
               </Button>
-              <Button variant="outline" size="sm" onClick={() => queryClient.invalidateQueries({ queryKey: ["jobs"] })}>
+              <Button variant="outline" size="sm" onClick={() => queryClient.invalidateQueries({ queryKey: queryKeys.jobs(statusFilter) })}>
                 <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Auto refresh now
               </Button>
             </div>
@@ -548,7 +550,62 @@ export function JobsPage() {
             <CardTitle className="text-base">Selected job</CardTitle>
             <CardDescription>Business view by default; technical trace details are optional.</CardDescription>
           </CardHeader>
-          <CardContent>{selectedJob ? <JobDetail job={selectedJob} technical={viewMode === "technical"} /> : <EmptyState icon={Activity} title="No job selected" description="Choose a job to inspect trace and logs." />}</CardContent>
+          <CardContent className="space-y-4">
+            {selectedJob ? (
+              <>
+                <JobDetail job={selectedJob} technical={viewMode === "technical"} />
+                <div className="rounded-md border border-border bg-muted/20 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Execution lineage</div>
+                      <div className="text-sm font-medium text-foreground">Job to trace graph</div>
+                    </div>
+                    <Badge variant="outline" className="text-[10px] uppercase">
+                      {selectedJob.status}
+                    </Badge>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    <LineageNode
+                      step={1}
+                      label="Job"
+                      value={`#${selectedJob.id}`}
+                      href={selectedExecutionTrace?.trace_id ?? selectedJob.trace_id ? `/observability?trace_id=${encodeURIComponent(selectedExecutionTrace?.trace_id ?? selectedJob.trace_id ?? "")}` : undefined}
+                    />
+                    <LineageConnector />
+                    <LineageNode
+                      step={2}
+                      label="Pipeline execution"
+                      value={String(selectedExecutionTrace?.pipeline_execution_id ?? "n/a")}
+                      href={selectedExecutionTrace?.trace_id ? `/observability?trace_id=${encodeURIComponent(selectedExecutionTrace.trace_id)}` : undefined}
+                    />
+                    <LineageConnector />
+                    <LineageNode
+                      step={3}
+                      label="Stage execution"
+                      value={String(selectedExecutionTrace?.stage_execution_id ?? "n/a")}
+                      href={selectedExecutionTrace?.trace_id ? `/observability?trace_id=${encodeURIComponent(selectedExecutionTrace.trace_id)}` : undefined}
+                    />
+                    <LineageConnector />
+                    <LineageNode
+                      step={4}
+                      label="Trace"
+                      value={selectedExecutionTrace?.trace_id ?? selectedJob.trace_id ?? "n/a"}
+                      href={selectedExecutionTrace?.trace_id ?? selectedJob.trace_id ? `/observability?trace_id=${encodeURIComponent(selectedExecutionTrace?.trace_id ?? selectedJob.trace_id ?? "")}` : undefined}
+                    />
+                    <LineageConnector />
+                    <LineageNode
+                      step={5}
+                      label="Prompt version"
+                      value={selectedExecutionTrace?.prompt_version ?? "n/a"}
+                      href={selectedExecutionTrace?.trace_id ? `/prompt-studio?trace_id=${encodeURIComponent(selectedExecutionTrace.trace_id)}` : undefined}
+                    />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <EmptyState icon={Activity} title="No job selected" description="Choose a job to inspect trace and logs." />
+            )}
+          </CardContent>
         </Card>
       </section>
     </div>
@@ -590,6 +647,35 @@ function Meta({ icon: Icon, label, value, mono }: { icon: typeof Hash; label: st
         <Icon className="h-3 w-3" /> {label}
       </div>
       <div className={`mt-1 truncate text-sm text-foreground ${mono ? "font-mono text-[12px]" : ""}`}>{value}</div>
+    </div>
+  );
+}
+
+function LineageNode({ step, label, value, href }: { step: number; label: string; value: string; href?: string }) {
+  const content = (
+    <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-3 shadow-sm transition-all hover:border-primary/40 hover:bg-primary/5">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-muted/40 text-[11px] font-semibold text-foreground">
+        {step}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
+        <div className="truncate text-sm font-medium text-foreground">{value}</div>
+      </div>
+    </div>
+  );
+
+  if (!href) return content;
+  return (
+    <a href={href} className="block">
+      {content}
+    </a>
+  );
+}
+
+function LineageConnector() {
+  return (
+    <div className="flex justify-center">
+      <div className="h-4 w-px bg-gradient-to-b from-primary/50 to-border" />
     </div>
   );
 }

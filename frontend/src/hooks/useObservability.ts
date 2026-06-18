@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ObservabilityService } from "@/services/observabilityService";
+import { executionKeys } from "@/lib/execution-keys";
 
 export function useObservabilityTraces(
   databaseId?: number | null,
@@ -17,7 +18,7 @@ export function useObservabilityTraces(
 
 export function useObservabilityTraceDetail(databaseId?: number | null, traceId?: string | null) {
   return useQuery({
-    queryKey: ["observability-trace-detail", databaseId ?? "default", traceId ?? "none"],
+    queryKey: executionKeys.observabilityTraceDetail(databaseId ?? "default", traceId ?? "none"),
     queryFn: () => ObservabilityService.traceDetail(Number(databaseId ?? 0), traceId ?? ""),
     enabled: typeof databaseId === "number" && databaseId > 0 && !!traceId,
     staleTime: 60_000,

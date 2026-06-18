@@ -17,7 +17,7 @@ import { useDashboard } from "@/hooks/useDashboard";
 import { useJobs, useStageProgress } from "@/hooks/useJobs";
 import { useReadiness } from "@/hooks/useReadiness";
 import { useRemediation } from "@/hooks/useRemediation";
-import { useBusinessEvents } from "@/hooks/useBusinessEvents";
+import { useBusinessEvents, useBusinessEventsHealth } from "@/hooks/useBusinessEvents";
 import { useBusinessInsights } from "@/hooks/useBusinessInsights";
 import { useBusinessIntelligence } from "@/hooks/useBusinessIntelligence";
 import { useAgentMemoryHistory } from "@/hooks/useAgentMemory";
@@ -35,6 +35,7 @@ export function DashboardPage() {
   const { data: jobs = [] } = useJobs(20);
   const { data: stageProgress } = useStageProgress(databaseId);
   const { data: businessEvents } = useBusinessEvents(databaseId);
+  const { data: businessEventsHealth, isLoading: businessEventsHealthLoading, isError: businessEventsHealthError, error: businessEventsHealthErr } = useBusinessEventsHealth(databaseId);
   const { data: businessInsights } = useBusinessInsights(databaseId);
   const { data: agentMemory } = useAgentMemoryHistory(databaseId, 5);
   const { data: semanticCache } = useSemanticCache(databaseId);
@@ -47,6 +48,25 @@ export function DashboardPage() {
   const warehouseDesigns = warehouseDesignsQuery.data?.warehouse_designs ?? [];
   const recommendations = recommendationsQuery.data?.recommendations ?? [];
   const predictiveReadiness = predictiveReadinessQuery.data?.predictive_readiness;
+  const biLoading =
+    opportunitiesQuery.isLoading ||
+    dataProductsQuery.isLoading ||
+    warehouseDesignsQuery.isLoading ||
+    recommendationsQuery.isLoading ||
+    predictiveReadinessQuery.isLoading;
+  const biError =
+    opportunitiesQuery.isError ||
+    dataProductsQuery.isError ||
+    warehouseDesignsQuery.isError ||
+    recommendationsQuery.isError ||
+    predictiveReadinessQuery.isError;
+  const biErrorMessage =
+    (opportunitiesQuery.error instanceof Error && opportunitiesQuery.error.message) ||
+    (dataProductsQuery.error instanceof Error && dataProductsQuery.error.message) ||
+    (warehouseDesignsQuery.error instanceof Error && warehouseDesignsQuery.error.message) ||
+    (recommendationsQuery.error instanceof Error && recommendationsQuery.error.message) ||
+    (predictiveReadinessQuery.error instanceof Error && predictiveReadinessQuery.error.message) ||
+    "Failed to load business intelligence packages.";
   const readinessScores = readiness?.scores;
   const firstStage = stageProgress?.stages?.[0] as
     | {
@@ -165,6 +185,18 @@ export function DashboardPage() {
             <CardDescription>Source tables and traceability for detected lifecycle events.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            {businessEventsHealthLoading ? (
+              <div className="rounded-2xl border border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">Loading business event history...</div>
+            ) : businessEventsHealthError ? (
+              <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+                {(businessEventsHealthErr instanceof Error && businessEventsHealthErr.message) || "Failed to load business event health."}
+              </div>
+            ) : businessEventsHealth?.state === "empty" ? (
+              <div className="rounded-2xl border border-dashed border-slate-300/70 bg-slate-500/5 p-5">
+                <div className="text-sm font-semibold text-foreground">No event history yet</div>
+                <div className="mt-1 text-xs text-muted-foreground">Run sync to detect lifecycle events from metadata and relationship signals.</div>
+              </div>
+            ) : null}
             {businessEvents?.events?.length ? (
               businessEvents.events.slice(0, 3).map((event, index) => (
                 <div key={`${event.id ?? event.event_name}-${index}`} className="rounded-md border border-border bg-card p-3">
@@ -214,6 +246,23 @@ export function DashboardPage() {
             )}
           </CardContent>
         </Card>
+      </section>
+      <section className="grid grid-cols-1 gap-4">
+        {biLoading ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Business intelligence</CardTitle>
+              <CardDescription>Loading cross-package insights, opportunities, and predictive readiness...</CardDescription>
+            </CardHeader>
+          </Card>
+        ) : biError ? (
+          <Card className="border-destructive/30 bg-destructive/5">
+            <CardHeader>
+              <CardTitle className="text-base text-destructive">Business intelligence unavailable</CardTitle>
+              <CardDescription>{biErrorMessage}</CardDescription>
+            </CardHeader>
+          </Card>
+        ) : null}
       </section>
       <section className="grid grid-cols-1 gap-4">
         <Card>
@@ -279,7 +328,19 @@ export function DashboardPage() {
                       <div className="text-sm font-medium text-foreground">{item.recommendation_text}</div>
                       <div className="mt-1 text-xs text-muted-foreground">{item.recommendation_type ?? "opportunity"} · {Math.round((item.confidence_score ?? 0) * 100)}%</div>
                     </div>
-                  )) : <EmptyState icon={Sparkles} title="No opportunities yet" description="Run sync to generate AI opportunity recommendations." />}
+                  )) : (
+                    <div className="rounded-2xl border border-dashed border-amber-300/70 bg-amber-500/5 p-5 shadow-sm">
+                      <div className="flex items-start gap-3">
+                        <div className="grid h-10 w-10 place-items-center rounded-full bg-amber-500/10 text-amber-700">
+                          <Sparkles className="h-4 w-4" />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-sm font-semibold text-foreground">No opportunities yet</div>
+                          <div className="text-xs text-muted-foreground">Run sync to generate AI opportunity recommendations from governance, relationships, and readiness signals.</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </TabsContent>
               <TabsContent value="data-products" className="pt-4">
@@ -289,7 +350,19 @@ export function DashboardPage() {
                       <div className="text-sm font-medium text-foreground">{item.product_name}</div>
                       <div className="mt-1 text-xs text-muted-foreground">{item.product_type ?? "data product"} · {Math.round((item.confidence_score ?? 0) * 100)}%</div>
                     </div>
-                  )) : <EmptyState icon={Boxes} title="No data products yet" description="Run sync to infer curated data products." />}
+                  )) : (
+                    <div className="rounded-2xl border border-dashed border-sky-300/70 bg-sky-500/5 p-5 shadow-sm">
+                      <div className="flex items-start gap-3">
+                        <div className="grid h-10 w-10 place-items-center rounded-full bg-sky-500/10 text-sky-700">
+                          <Boxes className="h-4 w-4" />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-sm font-semibold text-foreground">No data products yet</div>
+                          <div className="text-xs text-muted-foreground">Run sync to infer curated data products from the intelligence graph.</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </TabsContent>
               <TabsContent value="warehouse" className="pt-4">
@@ -299,7 +372,19 @@ export function DashboardPage() {
                       <div className="text-sm font-medium text-foreground">{item.design_name}</div>
                       <div className="mt-1 text-xs text-muted-foreground">{item.design_type ?? "design"} · {Math.round((item.confidence_score ?? 0) * 100)}%</div>
                     </div>
-                  )) : <EmptyState icon={Network} title="No warehouse designs yet" description="Run sync to infer warehouse structures." />}
+                  )) : (
+                    <div className="rounded-2xl border border-dashed border-violet-300/70 bg-violet-500/5 p-5 shadow-sm">
+                      <div className="flex items-start gap-3">
+                        <div className="grid h-10 w-10 place-items-center rounded-full bg-violet-500/10 text-violet-700">
+                          <Network className="h-4 w-4" />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-sm font-semibold text-foreground">No warehouse designs yet</div>
+                          <div className="text-xs text-muted-foreground">Run sync to infer warehouse structures from relationships and clustering patterns.</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </TabsContent>
               <TabsContent value="recommendations" className="pt-4">
@@ -309,7 +394,19 @@ export function DashboardPage() {
                       <div className="text-sm font-medium text-foreground">{item.recommendation_text}</div>
                       <div className="mt-1 text-xs text-muted-foreground">{item.priority ?? "medium"} · {Math.round((item.confidence_score ?? 0) * 100)}%</div>
                     </div>
-                  )) : <EmptyState icon={Activity} title="No recommendations yet" description="Run sync to generate actionable recommendations." />}
+                  )) : (
+                    <div className="rounded-2xl border border-dashed border-emerald-300/70 bg-emerald-500/5 p-5 shadow-sm">
+                      <div className="flex items-start gap-3">
+                        <div className="grid h-10 w-10 place-items-center rounded-full bg-emerald-500/10 text-emerald-700">
+                          <Activity className="h-4 w-4" />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-sm font-semibold text-foreground">No recommendations yet</div>
+                          <div className="text-xs text-muted-foreground">Run sync to generate actionable recommendations from the canonical BI package.</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </TabsContent>
               <TabsContent value="predictive" className="pt-4">
@@ -320,7 +417,17 @@ export function DashboardPage() {
                     <MetricCard label="RAG" value={`${Math.round((predictiveReadiness.rag_score ?? 0) * 100)}%`} icon={Activity} tone="default" />
                   </div>
                 ) : (
-                  <EmptyState icon={Sparkles} title="No predictive readiness yet" description="Run sync to score the database for agents, analytics, and forecasting." />
+                  <div className="rounded-2xl border border-dashed border-slate-300/70 bg-slate-500/5 p-5 shadow-sm">
+                    <div className="flex items-start gap-3">
+                      <div className="grid h-10 w-10 place-items-center rounded-full bg-slate-500/10 text-slate-700">
+                        <Brain className="h-4 w-4" />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-sm font-semibold text-foreground">No predictive readiness yet</div>
+                        <div className="text-xs text-muted-foreground">Run sync to score the database for agents, analytics, and forecasting.</div>
+                      </div>
+                    </div>
+                  </div>
                 )}
               </TabsContent>
             </Tabs>

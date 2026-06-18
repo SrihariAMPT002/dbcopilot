@@ -104,6 +104,7 @@ class Settings(BaseSettings):
     sql_echo: bool = Field(default=False)
     sql_logging: bool = Field(default=False)
     api_log_only: bool = Field(default=True)
+    prompt_artifact_registry_root: str = Field(default="./data/artifacts_registry")
 
     # Intelligence Package Registry
     intelligence_packages_enabled: bool = Field(default=True)

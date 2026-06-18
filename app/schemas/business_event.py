@@ -21,3 +21,10 @@ class BusinessEventItemResponse(BaseModel):
 class BusinessEventListResponse(BaseModel):
     database_id: int
     events: List[BusinessEventItemResponse] = Field(default_factory=list)
+
+
+class BusinessEventHealthResponse(BaseModel):
+    database_id: int
+    event_rows: int
+    latest_trace_id: Optional[str] = None
+    state: str

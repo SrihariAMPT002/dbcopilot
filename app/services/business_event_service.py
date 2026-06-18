@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -61,6 +62,19 @@ class BusinessEventService:
                 }
                 for row in rows
             ],
+        }
+
+    async def get_health(self, database_id: int) -> dict[str, Any]:
+        result = await self.db.execute(
+            select(BusinessEvent).where(BusinessEvent.database_id == database_id).order_by(BusinessEvent.created_at.desc())
+        )
+        rows = result.scalars().all()
+        latest = rows[0] if rows else None
+        return {
+            "database_id": database_id,
+            "event_rows": len(rows),
+            "latest_trace_id": getattr(latest, "trace_id", None),
+            "state": "empty" if not rows else "healthy",
         }
 
     def _infer_event(self, table: DatabaseTable, relationships: list[DatabaseRelationship]) -> dict[str, Any] | None:
@@ -148,8 +162,26 @@ class BusinessEventService:
         return events
 
     async def _persist(self, database_id: int, events: list[dict[str, Any]]) -> None:
-        await self.db.execute(delete(BusinessEvent).where(BusinessEvent.database_id == database_id))
+        result = await self.db.execute(
+            select(BusinessEvent).where(BusinessEvent.database_id == database_id).order_by(BusinessEvent.created_at.desc())
+        )
+        existing_rows = result.scalars().all()
+        existing_signatures = {
+            self._event_signature(
+                row.event_name,
+                row.event_type,
+                json.loads(row.source_tables or "[]"),
+            )
+            for row in existing_rows
+        }
         for event in events:
+            signature = self._event_signature(
+                event["event_name"],
+                event.get("event_type"),
+                event.get("source_tables", []),
+            )
+            if signature in existing_signatures:
+                continue
             self.db.add(
                 BusinessEvent(
                     database_id=database_id,
@@ -189,7 +221,23 @@ class BusinessEventService:
         for rel in relationships:
             if rel.table_id == table.id:
                 source_tables.add(table.name)
+                if getattr(rel, "referenced_table_name", None):
+                    source_tables.add(rel.referenced_table_name)
+                if getattr(rel, "referenced_table_id", None):
+                    source_tables.add(str(rel.referenced_table_id))
         return sorted(name for name in source_tables if name)[:5]
+
+    @staticmethod
+    def _event_signature(event_name: str, event_type: str | None, source_tables: list[str]) -> str:
+        payload = json.dumps(
+            {
+                "event_name": event_name,
+                "event_type": event_type or "",
+                "source_tables": sorted(str(item) for item in source_tables if item),
+            },
+            sort_keys=True,
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _relationship_row(rel: DatabaseRelationship) -> dict[str, Any]:

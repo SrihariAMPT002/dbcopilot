@@ -20,6 +20,7 @@ import { DisconnectDatabaseModal } from "@/components/common/DisconnectDatabaseM
 import { ArchiveDatabaseModal } from "@/components/common/ArchiveDatabaseModal";
 import { DeleteDatabaseModal } from "@/components/common/DeleteDatabaseModal";
 import { TraceLink } from "@/components/common/TraceLink";
+import { queryKeys } from "@/lib/query-keys";
 
 export function SourcesPage() {
   const queryClient = useQueryClient();
@@ -67,7 +68,7 @@ export function SourcesPage() {
 
   const syncLogQueries = useQueries({
     queries: visibleSources.map((source) => ({
-      queryKey: ["sync-logs", source.id],
+      queryKey: queryKeys.syncLogs(source.id, 1),
       queryFn: () => metadataApi.syncLogs(source.id, 1),
       enabled: !!source.id,
     })),
@@ -103,10 +104,10 @@ export function SourcesPage() {
     onSuccess: async () => {
       setMessage("Sync queued successfully.");
       toast.success("Sync queued successfully.");
-      await queryClient.invalidateQueries({ queryKey: ["connections"] });
-      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      await queryClient.invalidateQueries({ queryKey: ["pipeline"] });
-      await queryClient.invalidateQueries({ queryKey: ["sync-logs"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.connections() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.dashboard("default") });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.pipeline() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.syncLogsAll() });
     },
     onError: (error) => {
       const text = error instanceof Error ? error.message : "Sync failed";
@@ -120,10 +121,10 @@ export function SourcesPage() {
     onSuccess: async () => {
       setMessage("Sync queued for all connected sources.");
       toast.success("Sync queued for all connected sources.");
-      await queryClient.invalidateQueries({ queryKey: ["connections"] });
-      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      await queryClient.invalidateQueries({ queryKey: ["pipeline"] });
-      await queryClient.invalidateQueries({ queryKey: ["sync-logs"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.connections() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.dashboard("default") });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.pipeline() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.syncLogsAll() });
     },
     onError: (error) => {
       const text = error instanceof Error ? error.message : "Sync all failed";
@@ -138,12 +139,12 @@ export function SourcesPage() {
     onSuccess: async () => {
       setMessage("Connection disconnected.");
       toast.success("Connection disconnected.");
-      await queryClient.invalidateQueries({ queryKey: ["connections"] });
-      await queryClient.invalidateQueries({ queryKey: ["databases"] });
-      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      await queryClient.invalidateQueries({ queryKey: ["pipeline"] });
-      await queryClient.invalidateQueries({ queryKey: ["observability"] });
-      await queryClient.invalidateQueries({ queryKey: ["sync-logs"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.connections() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.databases() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.dashboard("default") });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.pipeline() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.observability() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.syncLogsAll() });
     },
     onError: (error) => {
       const text = error instanceof Error ? error.message : "Disconnect failed";
@@ -158,10 +159,10 @@ export function SourcesPage() {
     onSuccess: async () => {
       setMessage("Connection archived.");
       toast.success("Connection archived.");
-      await queryClient.invalidateQueries({ queryKey: ["connections"] });
-      await queryClient.invalidateQueries({ queryKey: ["databases"] });
-      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      await queryClient.invalidateQueries({ queryKey: ["sync-logs"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.connections() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.databases() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.dashboard("default") });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.syncLogsAll() });
     },
     onError: (error) => {
       const text = error instanceof Error ? error.message : "Archive failed";
@@ -176,10 +177,10 @@ export function SourcesPage() {
     onSuccess: async () => {
       setMessage("Connection reconnected.");
       toast.success("Connection reconnected.");
-      await queryClient.invalidateQueries({ queryKey: ["connections"] });
-      await queryClient.invalidateQueries({ queryKey: ["databases"] });
-      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      await queryClient.invalidateQueries({ queryKey: ["pipeline"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.connections() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.databases() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.dashboard("default") });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.pipeline() });
     },
     onError: (error) => {
       const text = error instanceof Error ? error.message : "Reconnect failed";
@@ -199,12 +200,12 @@ export function SourcesPage() {
     onSuccess: async () => {
       setMessage("Connection deleted.");
       toast.success("Connection deleted.");
-      await queryClient.invalidateQueries({ queryKey: ["connections"] });
-      await queryClient.invalidateQueries({ queryKey: ["databases"] });
-      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      await queryClient.invalidateQueries({ queryKey: ["pipeline"] });
-      await queryClient.invalidateQueries({ queryKey: ["observability"] });
-      await queryClient.invalidateQueries({ queryKey: ["sync-logs"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.connections() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.databases() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.dashboard("default") });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.pipeline() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.observability() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.syncLogsAll() });
     },
     onError: (error) => {
       const text = error instanceof Error ? error.message : "Delete failed";

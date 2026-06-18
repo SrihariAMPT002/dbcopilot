@@ -27,20 +27,16 @@ ALL_COLLECTIONS = (
     COLLECTION_SCHEMA_TABLES,
     COLLECTION_SCHEMA_RELATIONSHIPS,
     COLLECTION_SCHEMA_PROMPTS,
+    "metadata_vectors",
+    "governance_vectors",
+    "semantic_vectors",
+    "relationship_vectors",
+    "kpi_vectors",
+    "prompt_vectors",
+    "memory_vectors",
 )
 
-REQUIRED_COLLECTIONS = (
-    COLLECTION_SCHEMA_TABLES,
-    COLLECTION_SCHEMA_RELATIONSHIPS,
-    COLLECTION_SCHEMA_PROMPTS,
-    COLLECTION_METADATA_VECTORS,
-    COLLECTION_GOVERNANCE_VECTORS,
-    COLLECTION_SEMANTIC_VECTORS,
-    COLLECTION_RELATIONSHIP_VECTORS,
-    COLLECTION_KPI_VECTORS,
-    COLLECTION_PROMPT_VECTORS,
-    COLLECTION_MEMORY_VECTORS,
-)
+REQUIRED_COLLECTIONS = ALL_COLLECTIONS
 
 _qdrant_svc: Optional["QdrantService"] = None
 
@@ -77,6 +73,31 @@ class QdrantService:
                     ),
                 )
                 logger.info("Created required Qdrant collection %s", name)
+
+    def collection_health(self) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        for name in REQUIRED_COLLECTIONS:
+            try:
+                info = self.client.get_collection(name)
+                rows.append(
+                    {
+                        "collection_name": name,
+                        "exists": True,
+                        "points_count": int(getattr(info, "points_count", 0) or 0),
+                        "status": "healthy",
+                    }
+                )
+            except Exception as exc:
+                rows.append(
+                    {
+                        "collection_name": name,
+                        "exists": False,
+                        "points_count": 0,
+                        "status": "missing",
+                        "error": str(exc),
+                    }
+                )
+        return rows
 
     # ── Health ────────────────────────────────────────────────────────────
 

@@ -26,7 +26,9 @@ export function RerankingPanel({ databaseId }: { databaseId: number }) {
             Rerank
           </Button>
         </div>
-        {results.length ? (
+        {!submittedQuery.trim() ? (
+          <EmptyState icon={Wand2} title="Ready to rerank" description="Enter a query to compare rerank scores." />
+        ) : results.length ? (
           <div className="space-y-2">
             {results.map((item, index) => (
               <div key={`${item.original.collection}-${index}`} className="rounded-md border border-border bg-card p-3">

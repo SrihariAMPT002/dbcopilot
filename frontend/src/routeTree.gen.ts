@@ -17,6 +17,8 @@ import { Route as ReadinessRouteImport } from './routes/readiness'
 import { Route as ReadinessHistoryRouteImport } from './routes/readiness-history'
 import { Route as PromptStudioRouteImport } from './routes/prompt-studio'
 import { Route as PromptBudgetsRouteImport } from './routes/prompt-budgets'
+import { Route as BusinessIntelligenceRouteImport } from './routes/business-intelligence'
+import { Route as BusinessEventsRouteImport } from './routes/business-events'
 import { Route as KpiRouteImport } from './routes/kpi'
 import { Route as JobsRouteImport } from './routes/jobs'
 import { Route as GovernanceRouteImport } from './routes/governance'
@@ -65,6 +67,16 @@ const PromptStudioRoute = PromptStudioRouteImport.update({
 const PromptBudgetsRoute = PromptBudgetsRouteImport.update({
   id: '/prompt-budgets',
   path: '/prompt-budgets',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BusinessIntelligenceRoute = BusinessIntelligenceRouteImport.update({
+  id: '/business-intelligence',
+  path: '/business-intelligence',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BusinessEventsRoute = BusinessEventsRouteImport.update({
+  id: '/business-events',
+  path: '/business-events',
   getParentRoute: () => rootRouteImport,
 } as any)
 const KpiRoute = KpiRouteImport.update({
@@ -118,6 +130,8 @@ export interface FileRoutesByFullPath {
   '/connect': typeof ConnectRoute
   '/embeddings': typeof EmbeddingsRoute
   '/agents': typeof AgentsRoute
+  '/business-intelligence': typeof BusinessIntelligenceRoute
+  '/business-events': typeof BusinessEventsRoute
   '/explorer': typeof ExplorerRoute
   '/governance': typeof GovernanceRoute
   '/jobs': typeof JobsRoute
@@ -137,6 +151,8 @@ export interface FileRoutesByTo {
   '/connect': typeof ConnectRoute
   '/embeddings': typeof EmbeddingsRoute
   '/agents': typeof AgentsRoute
+  '/business-intelligence': typeof BusinessIntelligenceRoute
+  '/business-events': typeof BusinessEventsRoute
   '/explorer': typeof ExplorerRoute
   '/governance': typeof GovernanceRoute
   '/jobs': typeof JobsRoute
@@ -157,6 +173,8 @@ export interface FileRoutesById {
   '/connect': typeof ConnectRoute
   '/embeddings': typeof EmbeddingsRoute
   '/agents': typeof AgentsRoute
+  '/business-intelligence': typeof BusinessIntelligenceRoute
+  '/business-events': typeof BusinessEventsRoute
   '/explorer': typeof ExplorerRoute
   '/governance': typeof GovernanceRoute
   '/jobs': typeof JobsRoute
@@ -178,6 +196,8 @@ export interface FileRouteTypes {
     | '/connect'
     | '/embeddings'
     | '/agents'
+    | '/business-intelligence'
+    | '/business-events'
     | '/explorer'
     | '/governance'
     | '/jobs'
@@ -197,6 +217,8 @@ export interface FileRouteTypes {
     | '/connect'
     | '/embeddings'
     | '/agents'
+    | '/business-intelligence'
+    | '/business-events'
     | '/explorer'
     | '/governance'
     | '/jobs'
@@ -218,6 +240,7 @@ export interface FileRouteTypes {
     | '/agents'
     | '/explorer'
     | '/governance'
+    | '/business-events'
     | '/jobs'
     | '/kpi'
     | '/prompt-studio'
@@ -233,6 +256,7 @@ export interface RootRouteChildren {
   ConnectRoute: typeof ConnectRoute
   EmbeddingsRoute: typeof EmbeddingsRoute
   AgentsRoute: typeof AgentsRoute
+  BusinessIntelligenceRoute: typeof BusinessIntelligenceRoute
   ExplorerRoute: typeof ExplorerRoute
   GovernanceRoute: typeof GovernanceRoute
   JobsRoute: typeof JobsRoute
@@ -304,6 +328,20 @@ declare module '@tanstack/react-router' {
       path: '/prompt-budgets'
       fullPath: '/prompt-budgets'
       preLoaderRoute: typeof PromptBudgetsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/business-intelligence': {
+      id: '/business-intelligence'
+      path: '/business-intelligence'
+      fullPath: '/business-intelligence'
+      preLoaderRoute: typeof BusinessIntelligenceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/business-events': {
+      id: '/business-events'
+      path: '/business-events'
+      fullPath: '/business-events'
+      preLoaderRoute: typeof BusinessEventsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/observability': {
@@ -380,6 +418,7 @@ const rootRouteChildren: RootRouteChildren = {
   GovernanceRoute: GovernanceRoute,
   JobsRoute: JobsRoute,
   KpiRoute: KpiRoute,
+  BusinessEventsRoute: BusinessEventsRoute,
   PromptStudioRoute: PromptStudioRoute,
   PromptBudgetsRoute: PromptBudgetsRoute,
   ObservabilityRoute: ObservabilityRoute,

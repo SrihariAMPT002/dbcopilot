@@ -5,10 +5,12 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
+import { LoadingShell, ErrorShell } from "@/components/state-shells";
 import { useDatabaseContext } from "@/context/database-context";
 import { useEmbeddings } from "@/hooks/useEmbeddings";
 import { useAgentMemoryHistory } from "@/hooks/useAgentMemory";
 import { useRetrievalMetrics } from "@/hooks/useRetrievalMetrics";
+import { useRetrievalRegistry } from "@/hooks/useRetrievalRegistry";
 import { useSemanticCache } from "@/hooks/useSemanticCache";
 import { useRetrievalEvaluation } from "@/hooks/useRetrievalEvaluation";
 import { TraceLink } from "@/components/common/TraceLink";
@@ -24,9 +26,11 @@ import { GraphExplorer } from "@/components/embeddings/GraphExplorer";
 export function EmbeddingsPage() {
   const { selectedDatabase } = useDatabaseContext();
   const dbId = selectedDatabase?.database_id ?? null;
-  const { data } = useEmbeddings(dbId);
+  const embeddingsQuery = useEmbeddings(dbId);
+  const { data, isLoading, isError, error, refetch } = embeddingsQuery;
   const { data: memory } = useAgentMemoryHistory(dbId, 5);
   const { data: metrics } = useRetrievalMetrics(dbId);
+  const { data: registry } = useRetrievalRegistry();
   const { data: evaluations } = useRetrievalEvaluation(dbId);
   const { data: cache } = useSemanticCache(dbId);
   const collections = data?.collections ?? [];
@@ -34,6 +38,33 @@ export function EmbeddingsPage() {
   const cacheItems = cache?.caches ?? [];
   const evalItems = evaluations?.evaluations ?? [];
   const memoryItems = memory?.results ?? [];
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <PageHeader eyebrow="AI Surface" title="Embeddings & retrieval" description="Package-driven retrieval assets for search, reranking, graph traversal, memory, cache, and evaluation." />
+        <LoadingShell title="Embeddings loading" description="Loading embedding collections and retrieval telemetry..." />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="space-y-6">
+        <PageHeader eyebrow="AI Surface" title="Embeddings & retrieval" description="Package-driven retrieval assets for search, reranking, graph traversal, memory, cache, and evaluation." />
+        <ErrorShell title="Embeddings unavailable" description={error instanceof Error ? error.message : "Failed to load embeddings status."} />
+      </div>
+    );
+  }
+
+  if (!collections.length && !data?.vectors_total) {
+    return (
+      <div className="space-y-6">
+        <PageHeader eyebrow="AI Surface" title="Embeddings & retrieval" description="Package-driven retrieval assets for search, reranking, graph traversal, memory, cache, and evaluation." />
+        <EmptyState icon={Database} title="No embeddings yet" description="Run sync to create vector collections and index documents." />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -58,7 +89,7 @@ export function EmbeddingsPage() {
       />
 
       <section className="grid gap-4 xl:grid-cols-2">
-        <Card>
+        <Card className="border-border/70 bg-card/90 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base">Knowledge layer overview</CardTitle>
             <CardDescription>Embedded knowledge documents and collections built from persisted intelligence packages.</CardDescription>
@@ -92,7 +123,7 @@ export function EmbeddingsPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-border/70 bg-card/90 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base">Semantic cache</CardTitle>
             <CardDescription>Cached retrieval responses and query reuse.</CardDescription>
@@ -114,7 +145,7 @@ export function EmbeddingsPage() {
       </section>
 
       <section className="grid gap-4 xl:grid-cols-2">
-        <Card>
+        <Card className="border-border/70 bg-card/90 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base">Vector collections</CardTitle>
             <CardDescription>All vector collections registered for retrieval.</CardDescription>
@@ -123,10 +154,10 @@ export function EmbeddingsPage() {
             <VectorCollections collections={collections} healthy={!!data?.qdrant_health} />
           </CardContent>
         </Card>
-        <Card>
+        <Card className="border-border/70 bg-card/90 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base">Retrieval metrics</CardTitle>
-            <CardDescription>Documents, logs, and evaluation summaries from the retrieval layer.</CardDescription>
+            <CardDescription>Database-scoped documents, logs, and evaluation summaries from the retrieval layer.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <RetrievalMetrics
@@ -152,6 +183,49 @@ export function EmbeddingsPage() {
         </Card>
       </section>
 
+      <section className="grid gap-4">
+        <Card className="border-border/70 bg-card/90 shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-base">Global vector registry</CardTitle>
+            <CardDescription>Collection health across the shared vector registry.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-md border border-border bg-card p-3">
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Scope</div>
+                <div className="mt-1 text-sm font-medium text-foreground">{registry?.collection_scope ?? "n/a"}</div>
+              </div>
+              <div className="rounded-md border border-border bg-card p-3">
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Collections</div>
+                <div className="mt-1 text-sm font-medium text-foreground">{registry?.collections?.length ?? 0}</div>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left text-muted-foreground">
+                    <th className="py-2 pr-3">Collection</th>
+                    <th className="py-2 pr-3">Vectors</th>
+                    <th className="py-2 pr-3">Status</th>
+                    <th className="py-2 pr-3">Last synced</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(registry?.collections ?? []).map((row) => (
+                    <tr key={row.collection_name} className="border-b border-border/60">
+                      <td className="py-2 pr-3 font-mono text-xs">{row.collection_name}</td>
+                      <td className="py-2 pr-3 tabular-nums">{row.vector_count.toLocaleString()}</td>
+                      <td className="py-2 pr-3">{row.status}</td>
+                      <td className="py-2 pr-3 text-xs text-muted-foreground">{row.last_synced ? new Date(row.last_synced).toLocaleString() : "n/a"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
       <section className="grid gap-4 xl:grid-cols-2">
         <RetrievalPlayground databaseId={dbId} />
         <RerankingPanel databaseId={dbId} />
@@ -163,7 +237,7 @@ export function EmbeddingsPage() {
       </section>
 
       <section className="grid gap-4 xl:grid-cols-2">
-        <Card>
+        <Card className="border-border/70 bg-card/90 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base">Retrieval evaluation</CardTitle>
             <CardDescription>Quality, coverage, and hallucination-risk signals.</CardDescription>
@@ -185,7 +259,7 @@ export function EmbeddingsPage() {
       </section>
 
       <section className="grid gap-4">
-        <Card>
+        <Card className="border-border/70 bg-card/90 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base">Knowledge layer actions</CardTitle>
             <CardDescription>Direct entry points into the most-used retrieval surfaces.</CardDescription>

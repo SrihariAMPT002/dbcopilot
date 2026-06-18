@@ -60,3 +60,11 @@ class AgentMemorySearchResponse(BaseModel):
     query: str
     total_hits: int
     results: List[AgentMemorySearchHit] = Field(default_factory=list)
+
+
+class AgentMemoryHealthResponse(BaseModel):
+    database_id: int
+    memory_rows: int
+    vector_count: int
+    search_health: bool
+    status: str

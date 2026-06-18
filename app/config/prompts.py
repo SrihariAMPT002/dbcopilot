@@ -92,6 +92,53 @@ class PromptRegistry:
         """Render a value as JSON for prompt templates."""
         return json.dumps(value, ensure_ascii=False, indent=indent, default=str)
 
+    @staticmethod
+    def _safe_prompt_value(value: Any, *, _seen: set[int] | None = None, _depth: int = 0, _max_depth: int = 8) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if _seen is None:
+            _seen = set()
+        if _depth >= _max_depth:
+            return "[MAX_DEPTH]"
+        obj_id = id(value)
+        if obj_id in _seen:
+            return "[CYCLE]"
+        _seen.add(obj_id)
+        try:
+            if isinstance(value, dict):
+                return {
+                    str(key): PromptRegistry._safe_prompt_value(item, _seen=_seen, _depth=_depth + 1, _max_depth=_max_depth)
+                    for key, item in value.items()
+                }
+            if isinstance(value, (list, tuple, set)):
+                return [PromptRegistry._safe_prompt_value(item, _seen=_seen, _depth=_depth + 1, _max_depth=_max_depth) for item in value]
+            model_dump = getattr(value, "model_dump", None)
+            if callable(model_dump):
+                return PromptRegistry._safe_prompt_value(model_dump(), _seen=_seen, _depth=_depth + 1, _max_depth=_max_depth)
+            if hasattr(value, "__dict__"):
+                return PromptRegistry._safe_prompt_value(
+                    {k: v for k, v in vars(value).items() if not k.startswith("_")},
+                    _seen=_seen,
+                    _depth=_depth + 1,
+                    _max_depth=_max_depth,
+                )
+            return str(value)
+        finally:
+            _seen.discard(obj_id)
+
+    @classmethod
+    def _prompt_context_diagnostics(cls, prompt_id: str, variables: Dict[str, Any]) -> None:
+        try:
+            context_types = {key: type(value).__name__ for key, value in variables.items()}
+            logger.info(
+                "Prompt render context | prompt_id=%s context_keys=%s context_types=%s",
+                prompt_id,
+                list(variables.keys()),
+                context_types,
+            )
+        except Exception:
+            logger.debug("Prompt render diagnostics failed for %s", prompt_id, exc_info=True)
+
     def load_prompt(self, prompt_id: str, category: str = None, force_reload: bool = False) -> Dict[str, Any]:
         """Load a prompt from YAML file.
         
@@ -179,17 +226,19 @@ class PromptRegistry:
         """
         # Load the prompt
         prompt_config = self.load_prompt(prompt_id, category)
-        
+
         try:
+            self._prompt_context_diagnostics(prompt_id, variables)
+            safe_variables = self._safe_prompt_value(variables)
             # Render user prompt
             user_template = Template(prompt_config["user_prompt"])
-            user_prompt = user_template.render(**variables)
+            user_prompt = user_template.render(**safe_variables)
             
             # Render system message if present
             system_message = ""
             if "system_message" in prompt_config:
                 system_template = Template(prompt_config["system_message"])
-                system_message = system_template.render(**variables)
+                system_message = system_template.render(**safe_variables)
             
             # Extract metadata
             metadata = PromptMetadata(
